@@ -3,3 +3,5 @@
 *.pt
 *.ckpt
 *.png
+.vscode
+__pycache__
