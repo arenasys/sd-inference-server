@@ -1,0 +1,201 @@
+import torch
+import numpy as np
+import PIL
+
+from transformers import CLIPTextModel, CLIPTextConfig, CLIPTokenizer
+from diffusers import AutoencoderKL, UNet2DConditionModel
+from diffusers.models.vae import DiagonalGaussianDistribution, AutoencoderKLOutput
+
+class UNET(UNet2DConditionModel):
+    def __init__(self, model_type, dtype):
+        self.model_type = model_type
+        self.parameterization = "eps" if self.model_type == "SDv1" else "v"
+        super().__init__(**UNET.get_config(model_type))
+        self.to(dtype)
+
+    def autocast(self):
+        return "cuda" if "cuda" in str(self.device) else "cpu"
+        
+    @staticmethod
+    def from_model(state_dict, dtype=None):
+        if dtype:
+            state_dict['metadata']['dtype'] = dtype
+
+        for k in state_dict:
+            if type(state_dict[k]) == torch.Tensor:
+                state_dict[k] = state_dict[k].to(state_dict['metadata']['dtype'])
+        
+        unet = UNET(**state_dict['metadata'])
+        missing, _ = unet.load_state_dict(state_dict, strict=False)
+        if missing:
+            raise ValueError("ERROR missing keys: " + ", ".join(missing))
+        return unet
+
+    @staticmethod
+    def get_config(model_type):
+        if model_type == "SDv1":
+            config = dict(
+                sample_size=32,
+                in_channels=4,
+                out_channels=4,
+                down_block_types=('CrossAttnDownBlock2D', 'CrossAttnDownBlock2D', 'CrossAttnDownBlock2D', 'DownBlock2D'),
+                up_block_types=('UpBlock2D', 'CrossAttnUpBlock2D', 'CrossAttnUpBlock2D', 'CrossAttnUpBlock2D'),
+                block_out_channels=(320, 640, 1280, 1280),
+                layers_per_block=2,
+                cross_attention_dim=768,
+                attention_head_dim=8,
+            )
+        elif model_type == "SDv2":
+            config = dict(
+                sample_size=32,
+                in_channels=4,
+                out_channels=4,
+                down_block_types=('CrossAttnDownBlock2D', 'CrossAttnDownBlock2D', 'CrossAttnDownBlock2D', 'DownBlock2D'),
+                up_block_types=('UpBlock2D', 'CrossAttnUpBlock2D', 'CrossAttnUpBlock2D', 'CrossAttnUpBlock2D'),
+                block_out_channels=(320, 640, 1280, 1280),
+                layers_per_block=2,
+                cross_attention_dim=1024,
+                attention_head_dim=[5, 10, 20, 20],
+            )
+        else:
+            raise ValueError(f"unknown type: {model_type}")
+        return config
+
+class VAE(AutoencoderKL):
+    def __init__(self, model_type, dtype):
+        self.model_type = model_type
+        super().__init__(**VAE.get_config(model_type))
+        self.enable_slicing()
+        self.to(dtype)
+    
+    def autocast(self):
+        return "cuda" if "cuda" in str(self.device) else "cpu"
+
+    class LatentDistribution(DiagonalGaussianDistribution):
+        def sample(self, noise):
+            x = self.mean + self.std * noise
+            return x
+
+    def encode(self, x):
+        h = self.encoder(x)
+        moments = self.quant_conv(h)
+        posterior = VAE.LatentDistribution(moments)
+        return AutoencoderKLOutput(posterior)
+        
+    @staticmethod
+    def from_model(state_dict, dtype=None):
+        if dtype:
+            state_dict['metadata']['dtype'] = dtype
+
+        for k in state_dict:
+            if type(state_dict[k]) == torch.Tensor:
+                state_dict[k] = state_dict[k].to(state_dict['metadata']['dtype'])
+
+        vae = VAE(**state_dict['metadata'])
+        missing, _ = vae.load_state_dict(state_dict, strict=False)
+        if missing:
+            raise ValueError("missing keys: " + missing)
+        return vae
+
+    @staticmethod
+    def get_config(model_type):
+        if model_type in ["SDv1", "SDv2"]:
+            config = dict(
+                sample_size=256,
+                in_channels=3,
+                out_channels=3,
+                down_block_types=('DownEncoderBlock2D', 'DownEncoderBlock2D', 'DownEncoderBlock2D', 'DownEncoderBlock2D'),
+                up_block_types=('UpDecoderBlock2D', 'UpDecoderBlock2D', 'UpDecoderBlock2D', 'UpDecoderBlock2D'),
+                block_out_channels=(128, 256, 512, 512),
+                latent_channels=4,
+                layers_per_block=2,
+            )
+        else:
+            raise ValueError(f"unknown type: {model_type}")
+        return config
+
+class CLIP(CLIPTextModel):
+    def __init__(self, model_type, dtype):
+        self.model_type = model_type
+        super().__init__(CLIP.get_config(model_type))
+        self.to(dtype)
+
+        self.tokenizer = Tokenizer(model_type)
+        
+    def autocast(self):
+        return "cuda" if "cuda" in str(self.device) else "cpu"
+        
+    @staticmethod
+    def from_model(state_dict, dtype=None):
+        if dtype:
+            state_dict['metadata']['dtype'] = dtype
+
+        for k in state_dict:
+            if type(state_dict[k]) == torch.Tensor:
+                state_dict[k] = state_dict[k].to(state_dict['metadata']['dtype'])
+
+        clip = CLIP(**state_dict['metadata'])
+        missing, _ = clip.load_state_dict(state_dict, strict=False)
+        if missing:
+            raise ValueError("missing keys: " + missing)
+        return clip
+
+    @staticmethod
+    def get_config(model_type):
+        if model_type == "SDv1":
+            config = CLIPTextConfig(
+                attention_dropout=0.0,
+                bos_token_id=0,
+                dropout=0.0,
+                eos_token_id=2,
+                hidden_act="quick_gelu",
+                hidden_size=768,
+                initializer_factor=1.0,
+                initializer_range=0.02,
+                intermediate_size=3072,
+                layer_norm_eps=1e-05,
+                max_position_embeddings=77,
+                model_type="clip_text_model",
+                num_attention_heads=12,
+                num_hidden_layers=12,
+                pad_token_id=1,
+                projection_dim=768,
+                transformers_version="4.25.1",
+                vocab_size=49408
+            )
+        elif model_type == "SDv2":
+            config = CLIPTextConfig(
+                vocab_size=49408,
+                hidden_size=1024,
+                intermediate_size=4096,
+                num_hidden_layers=23,
+                num_attention_heads=16,
+                max_position_embeddings=77,
+                hidden_act="gelu",
+                layer_norm_eps=1e-05,
+                dropout=0.0,
+                attention_dropout=0.0,
+                initializer_range=0.02,
+                initializer_factor=1.0,
+                pad_token_id=1,
+                bos_token_id=0,
+                eos_token_id=2,
+                model_type="clip_text_model",
+                projection_dim=512,
+                transformers_version="4.25.0.dev0",
+            )
+        else:
+            raise ValueError(f"unknown type: {model_type}")
+        return config
+
+class Tokenizer():
+    def __init__(self, model_type):
+        self.tokenizer = CLIPTokenizer.from_pretrained("tokenizer")
+        self.model_type = model_type
+        self.bos_token_id = 49406
+        self.eos_token_id = 49407
+        self.pad_token_id = self.eos_token_id if model_type == "SDv1" else 0
+        self.comma_token_id = 267
+
+    def __call__(self, texts):
+        return self.tokenizer(texts)
