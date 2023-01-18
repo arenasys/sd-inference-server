@@ -27,7 +27,7 @@ if True:
     images = params.txt2img()
     images[0].save("1_b.png")
 
-if False:
+if True:
     print("TEST 2 - img2img")
 
     params.reset()
@@ -46,27 +46,35 @@ if False:
     images = params.img2img()
     images[0].save("2_b.png")
 
-if False:
+if True:
     print("TEST 3 - Inpainting")
 
     params.reset()
     params.set(model="Anything-V3", sampler="Euler a", clip_skip=2)
-    params.set(prompt="masterpiece, 1girl, sitting next to pond, dark, forest")
-    params.set(negative_prompt="bad, animals, beach")
-    params.set(width=640, height=640, seed=3591566140, steps=20, scale=7)
+    params.set(prompt="masterpiece, siting cat, outdoors, close up, full body, long grass")
+    params.set(negative_prompt="bad")
+    params.set(width=512, height=512, seed=1238623037, steps=20, scale=7)
 
     images = params.txt2img()
     images[0].save("3_a.png")
 
-    mask = PIL.Image.open("mask.png").filter(PIL.ImageFilter.GaussianBlur(4)).convert("L")
+    mask = PIL.Image.open("mask.png").convert("L")
     params.set(image=PIL.Image.open("3_a.png"), mask=mask)
-    params.set(prompt="masterpiece, 1girl, sitting next to pond, dark, feet in water, overgrown, mossy brick wall")
-    params.set(negative_prompt="bad, beach, shoes", seed=3701325102)
+    params.set(prompt="masterpiece, siting cat, outdoors, close up, full body, long grass")
+    params.set(negative_prompt="bad", strength=0.9, seed=3701325301)
 
     images = params.img2img()
     images[0].save(f"3_b.png")
 
-if False:
+    mask = PIL.Image.open("mask2.png").convert("L")
+    params.set(image=PIL.Image.open("3_b.png"), mask=mask)
+    params.set(prompt="masterpiece, cat, outdoors, close up, big yellow cat eyes")
+    params.set(negative_prompt="bad", strength=0.7, seed=924719124, padding=50)
+
+    images = params.img2img()
+    images[0].save(f"3_c.png")
+
+if True:
     print("TEST 4 - Batching")
 
     params.reset()
@@ -80,7 +88,7 @@ if False:
     images[0].save("4_a.png")
     images[1].save("4_b.png")
 
-if False:
+if True:
     print("TEST 5 - SDv2")
 
     params.reset()

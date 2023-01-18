@@ -35,6 +35,119 @@ def preprocess_masks(masks):
         return torch.cat([mask]*4)[None, :]
     return torch.cat([process(m) for m in masks])
 
+def encode_images(vae, seeds, images):
+    with torch.autocast(vae.autocast(), vae.dtype):
+        images = preprocess_images(images).to(vae.device)
+        noise = singular_noise(seeds, images.shape[3] // 8, images.shape[2] // 8, vae.device)
+
+        dists = vae.encode(images).latent_dist
+        mean = torch.stack([dists.mean[i%len(images)] for i in range(len(seeds))])
+        std = torch.stack([dists.std[i%len(images)] for i in range(len(seeds))])
+
+        latents = mean + std * noise
+        
+        return latents
+
+def decode_images(vae, latents):
+    with torch.autocast(vae.autocast(), vae.dtype):
+        latents = latents.clone().detach().to(vae.device).to(vae.dtype)
+        images = vae.decode(latents).sample
+        return postprocess_images(images)
+
+def upscale_latents(latents, factor):
+    latents = torch.nn.functional.interpolate(latents.clone().detach(), scale_factor=(factor,factor), mode="bilinear", antialias=False)
+    return latents
+
+def get_latents(vae, seeds, images):
+    if type(images) == torch.Tensor:
+        return images.to(vae.device)
+    elif type(images) == list:
+        return encode_images(vae, seeds, images)
+
+def get_masks(device, masks):
+    if type(masks) == torch.Tensor:
+        return masks      
+    elif type(masks) == list:
+        return preprocess_masks(masks).to(device)
+
+def apply_inpainting(images, originals, masks, extents):
+    outputs = [None] * len(images)
+    for i in range(len(images)):
+        image = images[i]
+        original = originals[i%len(originals)]
+        mask = masks[i%len(masks)]
+        extent = extents[i%len(extents)]
+        
+        ew, eh = extent[2]-extent[0], extent[3]-extent[1]
+        if (ew, eh) != images[i].size:
+            image = image.resize((ew, eh))
+            mask = mask.resize((ew, eh))
+        
+        outputs[i] = original.copy()
+        outputs[i].paste(image, extent, mask)
+
+        #draw = PIL.ImageDraw.Draw(outputs[i])
+        #draw.rectangle(extent, width=2, outline=(255,0,0))
+
+    return outputs
+
+def prepare_inpainting(originals, masks, padding, mask_blur):
+    def pad_extent(extent, p, w, h):
+        x1, y1, x2, y2 = extent
+
+        # add padding
+        x1, y1 = max(x1-p, 0), max(y1-p, 0)
+        x2, y2 = min(x2+p, w), min(y2+p, h)
+
+        # scale to image aspect ratio
+        ew = (x2-x1)
+        eh = (y2-y1)
+
+        if ew > eh:
+            while y2-y1 != ew:
+                o = ew-(y2-y1)
+                y1 = max(y1-(o//2), 0)
+                y2 = min(y2+(o-o//2), h)
+        else:
+            while x2-x1 != eh:
+                o = (eh-(x2-x1))//2
+                x1 = max(x1-(o//2), 0)
+                x2 = min(x2+(o-o//2), w)
+
+        return x1, y1, x2, y2
+
+    w, h = originals[0].size[0], originals[0].size[1]
+    if padding != None:
+        extents = [pad_extent(mask.getbbox(), padding, w, h) for mask in masks]
+    else:
+        # dont resize for inpainting (extent is the entire image)
+        extents = [(0, 0, w, h) for _ in masks]
+
+    # crop + resize masks according to their extent
+    masks = [m for m in masks]
+    for i in range(len(masks)):
+        extent = extents[i]
+        if extent != (0,0,w,h):
+            masks[i] = masks[i].crop(extent)
+            mw, mh = masks[i].size
+            scale = min(w/mw, h/mh)
+            mw, mh = int(mw*scale), int(mh*scale)
+            masks[i] = masks[i].resize((mw, mh), )
+            masks[i] = masks[i].filter(PIL.ImageFilter.GaussianBlur(mask_blur))
+
+    # crop + resize images according to their extent
+    images = [i for i in originals]
+    for i in range(len(images)):
+        extent = extents[i%len(extents)]
+        if extent != (0,0,w,h):
+            images[i] = images[i].crop(extent)
+            iw, ih = images[i].size
+            scale = min(w/iw, h/ih)
+            iw, ih = int(iw*scale), int(ih*scale)
+            images[i] = images[i].resize((iw, ih))
+
+    return images, masks, extents
+
 class NoiseSchedule():
     def __init__(self, seeds, width, height, device):
         self.seeds = seeds
@@ -82,8 +195,8 @@ class NoiseSchedule():
             self.index += 1
         return noise
 
-def noise(seeds, width, height, device):
-    shape = (4, height, width)
+def singular_noise(seeds, width, height, device):
+    shape = (4, int(height), int(width))
     generator = torch.Generator(device)
     noises = []
     for i in range(len(seeds)):

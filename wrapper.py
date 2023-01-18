@@ -1,4 +1,5 @@
 import torch
+import PIL
 
 import prompts
 import samplers
@@ -7,7 +8,7 @@ import inference
 
 DEFAULTS = {
     "strength": 0.75, "sampler": "Euler_a", "clip_skip": 1, "eta": 1, "do_exact_steps": False,
-    "hr_upscale": "latent", "hr_strength": 0.7
+    "hr_upscale": "latent", "hr_strength": 0.7, "mask_blur": 4
 }
 
 SAMPLER_CLASSES = {
@@ -103,7 +104,7 @@ class GenerationParameters():
         latents = inference.txt2img(denoiser, sampler, noise, self.steps)
 
         if not self.hr_factor:
-            return inference.decode_images(self.vae, latents)
+            return utils.decode_images(self.vae, latents)
 
         width = self.width * self.hr_factor
         height = self.width * self.hr_factor
@@ -113,56 +114,61 @@ class GenerationParameters():
         denoiser.reset()
         sampler.reset()
 
-        latents = inference.upscale_latents(latents, self.hr_factor)
+        latents = utils.upscale_latents(latents, self.hr_factor)
         hr_steps = self.hr_steps or self.steps
 
         latents = inference.img2img(latents, denoiser, sampler, noise, hr_steps, True, self.hr_strength)
 
-        return inference.decode_images(self.vae, latents)
+        return utils.decode_images(self.vae, latents)
 
     @torch.inference_mode()
     def img2img(self):
         self.load_models()
 
         required = "unet, clip, vae, sampler, image, prompt, negative_prompt, seed, scale, steps, strength".split(", ")
-        optional = "mask, clip_skip, eta, do_exact_steps, batch_size".split(", ")
+        optional = "mask, mask_blur, clip_skip, eta, do_exact_steps, batch_size, inpaint_padding".split(", ")
 
         self.check_parameters(required, optional)
 
         (images, positive_prompts, negative_prompts, seeds), batch_size = self.listify(self.image, self.prompt, self.negative_prompt, self.seed)
 
+        originals = images
+
         if self.mask:
             (masks,), mx = self.listify(self.mask)
             batch_size = max(batch_size, mx)
+
+            images, masks, extents = utils.prepare_inpainting(images, masks, self.padding, self.mask_blur)
 
         if self.batch_size:
             batch_size = max(batch_size, self.batch_size)
 
         if len(seeds) < batch_size:
-            seeds += [i + seeds[-1] + 1 for i in range(batch_size-len(seeds))]
+            seeds += [seeds[-1] + i + 1 for i in range(batch_size-len(seeds))]
 
         device = self.unet.device
 
+        width, height = images[0].size
+
         conditioning = prompts.ConditioningSchedule(self.clip, positive_prompts, negative_prompts, self.steps, self.clip_skip, batch_size)
         denoiser = samplers.GuidedDenoiser(self.unet, conditioning, self.scale)
-        noise = utils.NoiseSchedule(seeds, self.width // 8, self.height // 8, device)
+        noise = utils.NoiseSchedule(seeds, width // 8, height // 8, device)
 
         sampler_class = SAMPLER_CLASSES[self.sampler]
         sampler = sampler_class(denoiser, self.eta)
-        originals = images
 
-        original_latents = inference.get_latents(self.vae, seeds, originals)
+        original_latents = utils.get_latents(self.vae, seeds, images)
 
         if self.mask:
-            mask_latents = inference.get_masks(device, masks)
+            mask_latents = utils.get_masks(device, masks)
             denoiser.set_mask(mask_latents, original_latents)
 
         latents = inference.img2img(original_latents, denoiser, sampler, noise, self.steps, self.do_exact_steps, self.strength)
 
-        images = inference.decode_images(self.vae, latents)
+        images = utils.decode_images(self.vae, latents)
 
         if self.mask:
-            images = inference.apply_masks(images, originals, masks)
+            images = utils.apply_inpainting(images, originals, masks, extents)
         
         return images
 
