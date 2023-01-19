@@ -23,11 +23,10 @@ if True:
     images[0].save("1_a.png")
 
     params.set(hr_factor=2.0, hr_strength=0.7, hr_steps=20)
-
     images = params.txt2img()
     images[0].save("1_b.png")
 
-if False:
+if True:
     print("TEST 2 - img2img")
 
     params.reset()
@@ -39,14 +38,15 @@ if False:
     images = params.txt2img()
     images[0].save("2_a.png")
 
-    params.set(image=images[0])
+    params.set(image=PIL.Image.open("2_a.png"))
     params.set(prompt="masterpiece, 1girl, standing in rain, coat, wet, storm, lightning")
     params.set(seed=2839558696)
+    params.set(width=512, height=768)
 
     images = params.img2img()
     images[0].save("2_b.png")
 
-if False:
+if True:
     print("TEST 3 - Inpainting")
 
     params.reset()
@@ -74,7 +74,7 @@ if False:
     images = params.img2img()
     images[0].save(f"3_c.png")
 
-if False:
+if True:
     print("TEST 4 - Batching")
 
     params.reset()
@@ -88,7 +88,7 @@ if False:
     images[0].save("4_a.png")
     images[1].save("4_b.png")
 
-if False:
+if True:
     print("TEST 5 - SDv2")
 
     params.reset()

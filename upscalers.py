@@ -1,35 +1,31 @@
 import torch
 import utils
-import PIL
 
+import torchvision.transforms as transforms
+ 
 from basicsr.archs.rrdbnet_arch import RRDBNet
 
-def upscale_latent(latents, mode, factor):
-    latents = torch.nn.functional.interpolate(latents.clone().detach(), scale_factor=(factor,factor), mode=mode)
-    return latents
+def upscale(inputs, mode, width, height):
+    resize = transforms.transforms.Resize(max(width, height), mode)
+    crop = transforms.CenterCrop((height, width))
 
-def upscale_pixel(images, mode, factor):
-    images = [i for i in images]
-    for i in range(len(images)):
-        w,h = images[i].size
-        w,h = int(w*factor), int(h*factor)
-        images[i] = images[i].resize((w,h), mode)
-    return images
+    if type(inputs) == list:
+        return [crop(resize(i)) for i in inputs]
+    else:
+        return crop(resize(inputs))
 
-def upscale_super_resolution(images, model, factor):
+def upscale_super_resolution(images, model, width, height):
     images = [i for i in images]
-    sizes = [(int(factor*i.size[0]),int(factor*i.size[1])) for i in images]
 
     with torch.inference_mode():
-        for i in range(len(images)):
-            while images[i].size[0] < sizes[i][0]:
+        for i, image in enumerate(images):
+            while image.size[0] < width or image.size[1] < height:
                 img = utils.TO_TENSOR(images[i]).unsqueeze(0)
                 img = img.to(model.device)
                 out = model(img)
                 out = out.cpu().clamp_(0, 1)
-                images[i] = utils.FROM_TENSOR(out.squeeze(0))
-            if images[i].size != sizes[i]:
-                images[i] = images[i].resize(sizes[i], resample=PIL.Image.LANCZOS)
+                image = utils.FROM_TENSOR(out.squeeze(0))
+            images[i] = upscale(image, transforms.InterpolationMode.LANCZOS, width, height)
     
     return images
 

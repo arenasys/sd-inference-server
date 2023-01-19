@@ -23,8 +23,9 @@ class UNET(UNet2DConditionModel):
 
         utils.cast_state_dict(state_dict, dtype)
         
-        unet = UNET(model_type, dtype)
-        missing, _ = unet.load_state_dict(state_dict, strict=False)
+        with utils.DisableInitialization():
+            unet = UNET(model_type, dtype)
+            missing, _ = unet.load_state_dict(state_dict, strict=False)
         if missing:
             raise ValueError("ERROR missing keys: " + ", ".join(missing))
         return unet
@@ -88,8 +89,9 @@ class VAE(AutoencoderKL):
 
         utils.cast_state_dict(state_dict, dtype)
         
-        vae = VAE(model_type, dtype)
-        missing, _ = vae.load_state_dict(state_dict, strict=False)
+        with utils.DisableInitialization():
+            vae = VAE(model_type, dtype)
+            missing, _ = vae.load_state_dict(state_dict, strict=False)
         if missing:
             raise ValueError("missing keys: " + missing)
         return vae
@@ -130,8 +132,9 @@ class CLIP(CLIPTextModel):
 
         utils.cast_state_dict(state_dict, dtype)
         
-        clip = CLIP(model_type, dtype)
-        missing, _ = clip.load_state_dict(state_dict, strict=False)
+        with utils.DisableInitialization():
+            clip = CLIP(model_type, dtype)
+            missing, _ = clip.load_state_dict(state_dict, strict=False)
         if missing:
             raise ValueError("missing keys: " + missing)
         return clip

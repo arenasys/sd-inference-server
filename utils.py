@@ -7,9 +7,6 @@ FROM_TENSOR = transforms.ToPILImage()
 
 def preprocess_images(images):
     def process(image):
-        w, h = image.size
-        w, h = w - w % 32, h - h % 32
-        image = image.resize((w, h), resample=PIL.Image.LANCZOS)
         image = TO_TENSOR(image).to(torch.float32)
         return 2.0 * image[None, :] - 1.0
     return torch.cat([process(i) for i in images])
@@ -24,7 +21,7 @@ def preprocess_masks(masks):
     def process(mask):
         mask = mask.convert("L")
         w, h = mask.size
-        w, h = w - w % 32, h - h % 32
+        w, h = w - w % 8, h - h % 8
         mask = mask.resize((w // 8, h // 8), resample=PIL.Image.LANCZOS)
         mask = 1 - TO_TENSOR(mask).to(torch.float32)
         return torch.cat([mask]*4)[None, :]
@@ -43,6 +40,12 @@ def encode_images(vae, seeds, images):
         
         return latents
 
+def encode_images_disjointed(vae, seeds, images):
+    latents = []
+    for i, seed in enumerate(seeds):
+        latents += [encode_images(vae, [seed], [images[i%len(images)]])]
+    return latents
+    
 def decode_images(vae, latents):
     with torch.autocast(vae.autocast(), vae.dtype):
         latents = latents.clone().detach().to(vae.device).to(vae.dtype)
@@ -53,7 +56,10 @@ def get_latents(vae, seeds, images):
     if type(images) == torch.Tensor:
         return images.to(vae.device)
     elif type(images) == list:
-        return encode_images(vae, seeds, images)
+        if all([images[0].size == i.size for i in images]):
+            return encode_images(vae, seeds, images)
+        else:
+            return encode_images_disjointed(vae, seeds, images)
 
 def get_masks(device, masks):
     if type(masks) == torch.Tensor:
@@ -82,7 +88,7 @@ def apply_inpainting(images, originals, masks, extents):
 
     return outputs
 
-def prepare_inpainting(originals, masks, padding, mask_blur):
+def prepare_inpainting(originals, masks, padding):
     def pad_extent(extent, p, w, h):
         x1, y1, x2, y2 = extent
 
@@ -114,28 +120,19 @@ def prepare_inpainting(originals, masks, padding, mask_blur):
         # dont resize for inpainting (extent is the entire image)
         extents = [(0, 0, w, h) for _ in masks]
 
-    # crop + resize masks according to their extent
+    # crop masks according to their extent
     masks = [m for m in masks]
     for i in range(len(masks)):
         extent = extents[i]
         if extent != (0,0,w,h):
             masks[i] = masks[i].crop(extent)
-            mw, mh = masks[i].size
-            scale = min(w/mw, h/mh)
-            mw, mh = int(mw*scale), int(mh*scale)
-            masks[i] = masks[i].resize((mw, mh), )
-            masks[i] = masks[i].filter(PIL.ImageFilter.GaussianBlur(mask_blur))
 
-    # crop + resize images according to their extent
+    # crop images according to their extent
     images = [i for i in originals]
     for i in range(len(images)):
         extent = extents[i%len(extents)]
         if extent != (0,0,w,h):
             images[i] = images[i].crop(extent)
-            iw, ih = images[i].size
-            scale = min(w/iw, h/ih)
-            iw, ih = int(iw*scale), int(ih*scale)
-            images[i] = images[i].resize((iw, ih))
 
     return images, masks, extents
 
@@ -144,10 +141,11 @@ def cast_state_dict(state_dict, dtype):
         if type(k) == torch.Tensor and k.dtype in {torch.float16, torch.float32}:
             state_dict[k] = state_dict[k].to(dtype)
     return state_dict
-    
+
 class NoiseSchedule():
-    def __init__(self, seeds, width, height, device):
+    def __init__(self, seeds, subseeds, width, height, device):
         self.seeds = seeds
+        self.subseeds = subseeds
         self.shape = (4, int(height), int(width))
         self.device = device
         self.steps = 0
@@ -170,15 +168,21 @@ class NoiseSchedule():
         generator = torch.Generator(self.device)
         noises = []
         for i in range(len(self.seeds)):
-            generator.manual_seed(self.seeds[i])
+            seed = self.seeds[i]
+            generator.manual_seed(seed)
             noises += [[]]
 
             for _ in range(self.steps+1):
                 noise = torch.randn(self.shape, generator=generator, device=self.device)
                 noises[i] += [noise]
 
-        combined = [torch.stack(n) for n in zip(*noises)]
-        self.noise = combined
+        for i in range(len(self.subseeds)):
+            seed, strength = self.subseeds[i]
+            generator.manual_seed(seed)
+            subnoise = torch.randn(self.shape, generator=generator, device=self.device)
+            noises[i][0] = slerp_noise(strength, noises[i][0], subnoise)
+
+        self.noise = [torch.stack(n) for n in zip(*noises)]
     
     def __getitem__(self, i):
         if i >= len(self.noise):
@@ -203,6 +207,19 @@ def singular_noise(seeds, width, height, device):
         
     combined = torch.stack(noises)
     return combined
+
+def slerp_noise(val, low, high):
+    low_norm = low/torch.norm(low, dim=1, keepdim=True)
+    high_norm = high/torch.norm(high, dim=1, keepdim=True)
+    dot = (low_norm*high_norm).sum(1)
+
+    if dot.mean() > 0.9995:
+        return low * val + high * (1 - val)
+
+    omega = torch.acos(dot)
+    so = torch.sin(omega)
+    res = (torch.sin((1.0-val)*omega)/so).unsqueeze(1)*low + (torch.sin(val*omega)/so).unsqueeze(1)*high
+    return res
 
 class DisableInitialization:
     def __enter__(self):
