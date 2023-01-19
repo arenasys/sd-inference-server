@@ -4,11 +4,13 @@ import PIL
 import prompts
 import samplers
 import utils
+import storage
+import upscalers
 import inference
 
 DEFAULTS = {
     "strength": 0.75, "sampler": "Euler_a", "clip_skip": 1, "eta": 1, "do_exact_steps": False,
-    "hr_upscale": "latent", "hr_strength": 0.7, "mask_blur": 4
+    "hr_upscale": "Latent", "hr_strength": 0.7, "mask_blur": 4
 }
 
 SAMPLER_CLASSES = {
@@ -19,8 +21,21 @@ SAMPLER_CLASSES = {
     "DPM++ SDE": samplers.DPM_SDE
 }
 
+UPSCALERS_LATENT = {
+    "Latent": "bilinear",
+    "Latent (bicubic)": "bicubic",
+    "Latent (nearest)": "nearest",
+}
+
+UPSCALERS_PIXEL = {
+    "Bilinear": PIL.Image.Resampling.BILINEAR,
+    "Bicubic": PIL.Image.Resampling.BICUBIC,
+    "Nearest": PIL.Image.Resampling.NEAREST,
+    "Lanczos": PIL.Image.Resampling.LANCZOS
+}
+
 class GenerationParameters():
-    def __init__(self, storage: utils.ModelStorage, device):
+    def __init__(self, storage: storage.ModelStorage, device):
         self.storage = storage
         self.device = device
 
@@ -48,6 +63,10 @@ class GenerationParameters():
 
         self.storage.clear_cache()
 
+        if self.hr_upscale:
+            if not self.hr_upscale in UPSCALERS_LATENT and not self.hr_upscale in UPSCALERS_PIXEL:
+                self.upscale_model = self.storage.get_upscaler(self.hr_upscale, self.device)
+
     def check_parameters(self, required, optional):
         missing, unused = list(required), []
         other = "storage, device, model".split(", ")
@@ -74,6 +93,20 @@ class GenerationParameters():
         args = [[a] if type(a) != list else a for a in args]
         mx = max([len(a) for a in args])
         return args, mx
+
+    @torch.inference_mode()
+    def upscale(self, latents, mode, factor, seeds):
+        if mode in UPSCALERS_LATENT:
+            return upscalers.upscale_latent(latents, UPSCALERS_LATENT[mode], factor)
+
+        images = utils.decode_images(self.vae, latents)
+        
+        if mode in UPSCALERS_PIXEL:
+            images = upscalers.upscale_pixel(images, UPSCALERS_PIXEL[mode], factor) 
+        else:
+            images = upscalers.upscale_super_resolution(images, self.upscale_model, factor)
+        
+        return utils.encode_images(self.vae, seeds, images)
 
     @torch.inference_mode()
     def txt2img(self):
@@ -114,7 +147,8 @@ class GenerationParameters():
         denoiser.reset()
         sampler.reset()
 
-        latents = utils.upscale_latents(latents, self.hr_factor)
+        latents = self.upscale(latents, self.hr_upscale, self.hr_factor, seeds)
+
         hr_steps = self.hr_steps or self.steps
 
         latents = inference.img2img(latents, denoiser, sampler, noise, hr_steps, True, self.hr_strength)
@@ -126,7 +160,7 @@ class GenerationParameters():
         self.load_models()
 
         required = "unet, clip, vae, sampler, image, prompt, negative_prompt, seed, scale, steps, strength".split(", ")
-        optional = "mask, mask_blur, clip_skip, eta, do_exact_steps, batch_size, inpaint_padding".split(", ")
+        optional = "mask, mask_blur, clip_skip, eta, do_exact_steps, batch_size, padding".split(", ")
 
         self.check_parameters(required, optional)
 

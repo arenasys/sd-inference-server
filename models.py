@@ -1,6 +1,5 @@
 import torch
-import numpy as np
-import PIL
+import utils
 
 from transformers import CLIPTextModel, CLIPTextConfig, CLIPTokenizer
 from diffusers import AutoencoderKL, UNet2DConditionModel
@@ -18,14 +17,13 @@ class UNET(UNet2DConditionModel):
         
     @staticmethod
     def from_model(state_dict, dtype=None):
-        if dtype:
-            state_dict['metadata']['dtype'] = dtype
+        if not dtype:
+            dtype = state_dict['metadata']['dtype']
+        model_type = state_dict['metadata']['model_type']
 
-        for k in state_dict:
-            if type(state_dict[k]) == torch.Tensor:
-                state_dict[k] = state_dict[k].to(state_dict['metadata']['dtype'])
+        utils.cast_state_dict(state_dict, dtype)
         
-        unet = UNET(**state_dict['metadata'])
+        unet = UNET(model_type, dtype)
         missing, _ = unet.load_state_dict(state_dict, strict=False)
         if missing:
             raise ValueError("ERROR missing keys: " + ", ".join(missing))
@@ -84,14 +82,13 @@ class VAE(AutoencoderKL):
         
     @staticmethod
     def from_model(state_dict, dtype=None):
-        if dtype:
-            state_dict['metadata']['dtype'] = dtype
+        if not dtype:
+            dtype = state_dict['metadata']['dtype']
+        model_type = state_dict['metadata']['model_type']
 
-        for k in state_dict:
-            if type(state_dict[k]) == torch.Tensor:
-                state_dict[k] = state_dict[k].to(state_dict['metadata']['dtype'])
-
-        vae = VAE(**state_dict['metadata'])
+        utils.cast_state_dict(state_dict, dtype)
+        
+        vae = VAE(model_type, dtype)
         missing, _ = vae.load_state_dict(state_dict, strict=False)
         if missing:
             raise ValueError("missing keys: " + missing)
@@ -127,14 +124,13 @@ class CLIP(CLIPTextModel):
         
     @staticmethod
     def from_model(state_dict, dtype=None):
-        if dtype:
-            state_dict['metadata']['dtype'] = dtype
+        if not dtype:
+            dtype = state_dict['metadata']['dtype']
+        model_type = state_dict['metadata']['model_type']
 
-        for k in state_dict:
-            if type(state_dict[k]) == torch.Tensor:
-                state_dict[k] = state_dict[k].to(state_dict['metadata']['dtype'])
-
-        clip = CLIP(**state_dict['metadata'])
+        utils.cast_state_dict(state_dict, dtype)
+        
+        clip = CLIP(model_type, dtype)
         missing, _ = clip.load_state_dict(state_dict, strict=False)
         if missing:
             raise ValueError("missing keys: " + missing)

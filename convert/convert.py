@@ -94,23 +94,30 @@ def SDv2_convert(state_dict):
 
     return state_dict
 
-def convert(file):
-    if file.endswith(".ckpt"):
-        name = file.removesuffix(".ckpt")
-        state_dict = torch.load(file, map_location="cpu")["state_dict"]
-    elif file.endswith(".safetensors"):
-        name = file.removesuffix(".safetensors")
-        state_dict = safetensors.torch.load_file(file, "cpu")
+def convert(in_file, out_folder):
+    print(f"LOADING {in_file}")
+    name = in_file.split(".")[0].split(os.path.sep)[-1]
+    if in_file.endswith(".ckpt"):
+        state_dict = torch.load(in_file, map_location="cpu")["state_dict"]
+    elif in_file.endswith(".safetensors"):
+        state_dict = safetensors.torch.load_file(in_file, "cpu")
 
     # only in the SDv2 CLIP
     v2 = "cond_stage_model.model.text_projection" in state_dict
 
     if v2:
+        print("CONVERTING FROM SDv2")
         SDv2_convert(state_dict)
     else:
+        print("CONVERTING FROM SDv1")
         SDv1_convert(state_dict)
+
+    model_type = "SDv2" if v2 else "SDv1"
+    state_dict["metadata.model_type"] = torch.as_tensor([ord(c) for c in model_type])
     
-    safetensors.torch.save_file(state_dict, f"{name}.st")
+    out_file = os.path.join(out_folder, f"{name}.st")
+    print(f"SAVING {out_file}")
+    safetensors.torch.save_file(state_dict, out_file)
     
 def compare(a, b):
     a = safetensors.torch.load_file(a, "cpu")
@@ -131,9 +138,11 @@ def compare(a, b):
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description='Model conversion')
-    parser.add_argument('--input', type=str, default=None, required=True, help='path to model')
+    parser.add_argument('model', type=str, help='path to model')
+    parser.add_argument('folder', type=str, help='folder to save model')
     
     args = parser.parse_args()
-    file = args.input
+    in_file = args.model
+    out_folder = args.folder
 
-    convert(file)
+    convert(in_file, out_folder)

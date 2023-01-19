@@ -1,11 +1,6 @@
 import PIL
 import torch
 import torchvision.transforms as transforms
-import os
-import glob
-from safetensors.torch import load_file
-
-import models
 
 TO_TENSOR = transforms.ToTensor()
 FROM_TENSOR = transforms.ToPILImage()
@@ -53,10 +48,6 @@ def decode_images(vae, latents):
         latents = latents.clone().detach().to(vae.device).to(vae.dtype)
         images = vae.decode(latents).sample
         return postprocess_images(images)
-
-def upscale_latents(latents, factor):
-    latents = torch.nn.functional.interpolate(latents.clone().detach(), scale_factor=(factor,factor), mode="bilinear", antialias=False)
-    return latents
 
 def get_latents(vae, seeds, images):
     if type(images) == torch.Tensor:
@@ -148,6 +139,12 @@ def prepare_inpainting(originals, masks, padding, mask_blur):
 
     return images, masks, extents
 
+def cast_state_dict(state_dict, dtype):
+    for k in state_dict:
+        if type(k) == torch.Tensor and k.dtype in {torch.float16, torch.float32}:
+            state_dict[k] = state_dict[k].to(dtype)
+    return state_dict
+    
 class NoiseSchedule():
     def __init__(self, seeds, width, height, device):
         self.seeds = seeds
@@ -206,109 +203,6 @@ def singular_noise(seeds, width, height, device):
         
     combined = torch.stack(noises)
     return combined
-
-
-class ModelStorage():
-    def __init__(self, path, dtype, vae_dtype=None):
-        self.path = path
-        self.dtype = dtype
-        self.vae_dtype = vae_dtype or dtype
-
-        self.files = {"UNET": {}, "CLIP": {}, "VAE": {}}
-        self.loaded = {"UNET": {}, "CLIP": {}, "VAE": {}}
-        self.classes = {"UNET": models.UNET, "CLIP": models.CLIP, "VAE": models.VAE}
-        self.file_cache = {}
-
-        self.find_all()
-
-    def clear_cache(self):
-        self.file_cache = {}
-
-    def move(self, model, name, comp, device):
-        if model.device == device:
-            return model
-
-        # TODO: expand on this to allow cacheing
-        
-        self.loaded[comp] = {name: model}
-        torch.cuda.empty_cache()
-
-        return model.to(device)
-
-    def find_all(self):
-        for model in glob.glob(os.path.join(self.path, "*.st")):
-            model = os.path.relpath(model, self.path)
-
-            if ".unet." in model:
-                name = model.split(".unet.")[0]
-                self.files["UNET"][name] = model
-            elif ".clip." in model:
-                name = model.split(".clip.")[0]
-                self.files["CLIP"][name] = model
-            elif ".vae." in model:
-                name = model.split(".vae.")[0]
-                self.files["VAE"][name] = model
-            else:
-                name = model.removesuffix(".st")
-                self.files["UNET"][name] = model
-                self.files["CLIP"][name] = model
-                self.files["VAE"][name] = model
-
-    def get_component(self, name, comp, device):
-        if name in self.loaded[comp]:
-            return self.move(self.loaded[comp][name], name, comp, device)
-        
-        if not name in self.files[comp]:
-            raise ValueError(f"ERROR unknown {comp}: {name}")
-        
-        file = self.files[comp][name]
-        
-        if not file in self.file_cache:
-            self.file_cache[file] = self.load_model(file)
-
-        if comp in self.file_cache[file]:
-            dtype = self.vae_dtype if comp == "VAE" else self.dtype
-            model = self.classes[comp].from_model(self.file_cache[file][comp], dtype)
-        else:
-            raise ValueError(f"ERROR model doesnt contain a {comp}: {model}")
-        
-        return self.move(model, name, comp, device)
-
-    def get_unet(self, name, device):
-        return self.get_component(name, "UNET", device)
-    
-    def get_clip(self, name, device):
-        return self.get_component(name, "CLIP", device)
-
-    def get_vae(self, name, device):
-        return self.get_component(name, "VAE", device)
-
-    def load_model(self, model):
-        print(f"LOADING {model}...")
-
-        state_dict = load_file(os.path.join(self.path, model))
-
-        model_type = list(state_dict.keys())[0].split(".")[0]
-
-        sub_state_dicts = {}
-        for k in list(state_dict.keys()):
-            comp = k.split(".")[1]
-            key = k[len(model_type)+len(comp)+2:]
-            if not comp in sub_state_dicts:
-                sub_state_dicts[comp] = {}
-            sub_state_dicts[comp][key] = state_dict[k]
-            del state_dict[k]
-
-        for m in sub_state_dicts:
-            dtype = None
-            for k in sub_state_dicts[m]:
-                t = sub_state_dicts[m][k]
-                if type(t) == torch.Tensor and t.dtype in [torch.float16, torch.float32]:
-                    dtype = t.dtype
-                    break
-            sub_state_dicts[m]['metadata'] = dict(model_type=model_type, dtype=dtype)
-        
-        return sub_state_dicts
 
 class DisableInitialization:
     def __enter__(self):

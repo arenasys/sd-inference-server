@@ -2,6 +2,7 @@
 *.safetensors
 *.pt
 *.ckpt
+*.pth
 *.png
 .vscode
 __pycache__
