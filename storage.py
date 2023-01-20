@@ -18,6 +18,8 @@ class ModelStorage():
         self.loaded = {k:{} for k in self.classes}
         self.file_cache = {}
 
+        self.embeddings = {}
+
         self.find_all()
 
     def clear_cache(self):
@@ -40,8 +42,7 @@ class ModelStorage():
         return file
 
     def find_all(self):
-        sd_path = os.path.join(self.path, "SD")
-        for model in glob.glob(os.path.join(sd_path, "*.st")):
+        for model in glob.glob(os.path.join(self.path, "SD", "*.st")):
             file = os.path.relpath(model, self.path)
 
             if ".unet." in file:
@@ -59,11 +60,18 @@ class ModelStorage():
                 self.files["CLIP"][name] = file
                 self.files["VAE"][name] = file
         
-        sr_path = os.path.join(self.path, "SR")
-        for model in glob.glob(os.path.join(sr_path, "*.pth")):
+        for model in glob.glob(os.path.join(self.path, "SR", "*.pth")):
             file = os.path.relpath(model, self.path)
             name = self.get_name(file)
             self.files["SR"][name] = file
+
+        self.embeddings = {}
+        for model in glob.glob(os.path.join(self.path, "TI", "*.pt")):
+            file = os.path.relpath(model, self.path)
+            name = self.get_name(file)
+            vectors = torch.load(model)["string_to_param"]["*"]
+            vectors.requires_grad = False
+            self.embeddings[name] = vectors
 
     def get_component(self, name, comp, device):
         if name in self.loaded[comp]:
@@ -96,6 +104,11 @@ class ModelStorage():
 
     def get_upscaler(self, name, device):
         return self.get_component(name, "SR", device)
+
+    def get_embeddings(self, device):
+        for k in self.embeddings:
+            self.embeddings[k] = self.embeddings[k].to(device)
+        return self.embeddings
 
     def load_file(self, file, comp):
         print(f"LOADING {file}...")

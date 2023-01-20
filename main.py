@@ -10,7 +10,7 @@ attention.use_split_attention()
 storage = storage.ModelStorage("./models", torch.float16, torch.float32)
 params = wrapper.GenerationParameters(storage, torch.device("cuda"))
 
-if True:
+if False:
     print("TEST 1 - txt2img")
 
     params.reset()
@@ -46,7 +46,7 @@ if True:
     images = params.img2img()
     images[0].save("2_b.png")
 
-if True:
+if False:
     print("TEST 3 - Inpainting")
 
     params.reset()
@@ -74,7 +74,7 @@ if True:
     images = params.img2img()
     images[0].save(f"3_c.png")
 
-if True:
+if False:
     print("TEST 4 - Batching")
 
     params.reset()
@@ -89,7 +89,20 @@ if True:
     images[1].save("4_b.png")
 
 if True:
-    print("TEST 5 - SDv2")
+    print("TEST 5 - Embedding")
+    
+    params.reset()
+    params.set(model="Anything-V3", sampler="Euler a", clip_skip=2)
+    params.set(prompt="masterpiece, highly detailed, 1girl, smile, sitting on train, heterochroma, pink eyes, NeoRWBY, small")
+    params.set(negative_prompt="bad, cartoon")
+    params.set(width=384, height=448, seed=728158606, steps=20, scale=7)
+
+    params.set(hr_factor=1.5, hr_strength=0.7, hr_steps=20)
+    images = params.txt2img()
+    images[0].save("5_b.png")
+
+if False:
+    print("TEST 6 - SDv2")
 
     params.reset()
     params.set(model="sd-v2", sampler="Euler a")
@@ -98,4 +111,4 @@ if True:
     params.set(width=768, height=768, seed=665746805, steps=20, scale=7)
 
     images = params.txt2img()
-    images[0].save("5_a.png")
+    images[0].save("6_a.png")

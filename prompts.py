@@ -72,28 +72,47 @@ def tokenize_prompt(clip, parsed):
     tokenized = tokenizer([text for text, _ in parsed])["input_ids"]
     tokenized = [tokens[1:-1] for tokens in tokenized] # strip special tokens
 
+    # weight the individual tokens
     weighted = []
     for tokens, (_, weight) in zip(tokenized, parsed):
         weighted += [(t, weight) for t in tokens]
-    
+    tokenized = weighted
+
+    # add TI embeddings inline with the tokens (our CLIP handles these separately)
+    i = 0
+    while i < len(tokenized):
+        for name, vector in clip.textual_inversions:
+            match = tuple([t for t,_ in tokenized[i:i+len(name)]])
+            if match == name:
+                weight = tokenized[i][1]
+                tokenized = tokenized[:i] + [(v, weight) for v in vector] + tokenized[i+len(name):]
+                i += vector.shape[0]
+                break
+        else:
+            i += 1
+
     # split tokens into chunks
     chunks = []
-    while weighted:
-        if len(weighted) <= chunk_size:
-            chunk = weighted
+    while tokenized:
+        if len(tokenized) <= chunk_size:
+            chunk = tokenized
         else:
-            chunk = weighted[:chunk_size]
+            chunk = tokenized[:chunk_size]
 
             # split on a comma if its close to the end of the chunk
             commas = [i for i, (c, _) in enumerate(chunk) if c == comma_token and i > chunk_size - leeway]
             if commas:
-                chunk = weighted[:commas[-1]+1]
+                chunk = tokenized[:commas[-1]+1]
 
-        weighted = weighted[len(chunk):]
+        tokenized = tokenized[len(chunk):]
         chunks += [chunk]
     
     if not chunks:
         chunks = [[]]
+    
+    # truncate chunks, only 3 allowed!
+    #if len(chunks) > 3:
+    #    chunks = chunks[:3]
     
     return chunks
 
@@ -107,8 +126,7 @@ def encode_tokens(clip, chunks, clip_skip=1):
     chunk_encodings = []
 
     for chunk in chunks:
-        # format chunk properly for the encoder
-        # different CLIP models use different special tokens for this
+        # add special tokens and padding
         start = [(start_token, 1.0)]
         end = [(end_token, 1.0)]
         padding = [(padding_token, 1.0)] * (75-len(chunk))
@@ -117,13 +135,12 @@ def encode_tokens(clip, chunks, clip_skip=1):
         tokens, weights = list(zip(*chunk))
 
         # encode chunk tokens
-        tokens = torch.tensor([tokens], dtype=torch.long, device=clip.device)
-        encoding = clip.text_model(tokens, output_hidden_states=True, return_dict=True)
+        encoding = clip(tokens)
 
         # do clip skip
         encoding = encoding['hidden_states'][-clip_skip]
-        encoding = clip.text_model.final_layer_norm(encoding)
-
+        encoding = clip.final_layer_norm(encoding)
+        
         # each token has been encoded into its own tensor
         # we weight this tensor with the tokens weight
         weights = torch.tensor([weights], device=clip.device)

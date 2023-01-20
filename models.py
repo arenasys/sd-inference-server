@@ -1,7 +1,9 @@
 import torch
 import utils
 
-from transformers import CLIPTextModel, CLIPTextConfig, CLIPTokenizer
+
+from transformers import CLIPTextConfig, CLIPTokenizer
+from clip import CustomCLIPTextTransformer
 from diffusers import AutoencoderKL, UNet2DConditionModel
 from diffusers.models.vae import DiagonalGaussianDistribution, AutoencoderKLOutput
 
@@ -113,7 +115,7 @@ class VAE(AutoencoderKL):
             raise ValueError(f"unknown type: {model_type}")
         return config
 
-class CLIP(CLIPTextModel):
+class CLIP(CustomCLIPTextTransformer):
     def __init__(self, model_type, dtype):
         self.model_type = model_type
         super().__init__(CLIP.get_config(model_type))
@@ -136,7 +138,7 @@ class CLIP(CLIPTextModel):
             clip = CLIP(model_type, dtype)
             missing, _ = clip.load_state_dict(state_dict, strict=False)
         if missing:
-            raise ValueError("missing keys: " + missing)
+            raise ValueError("missing keys: " + ', '.join(missing))
         return clip
 
     @staticmethod
@@ -186,6 +188,13 @@ class CLIP(CLIPTextModel):
         else:
             raise ValueError(f"unknown type: {model_type}")
         return config
+
+    def set_textual_inversions(self, embeddings):
+        tokenized = []
+        for name, vec in embeddings.items():
+            name = tuple(self.tokenizer(name)["input_ids"][1:-1])
+            tokenized += [(name, vec)]
+        self.textual_inversions = tokenized
 
 class Tokenizer():
     def __init__(self, model_type):

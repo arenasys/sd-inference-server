@@ -6,13 +6,24 @@ import torchvision.transforms as transforms
 from basicsr.archs.rrdbnet_arch import RRDBNet
 
 def upscale(inputs, mode, width, height):
-    resize = transforms.transforms.Resize(max(width, height), mode)
-    crop = transforms.CenterCrop((height, width))
+    def _upscale(input):
+        if type(input) == torch.Tensor:
+            ar = input.shape[-1] / input.shape[-2]
+        else:
+            ar = input.size[0] / input.size[1]
+        
+        z = min(width, height)
+        if ar != width/height:
+            z = max(width, height)
+        
+        resize = transforms.transforms.Resize(z, mode)
+        crop = transforms.CenterCrop((height, width))
+        return crop(resize(input))
 
     if type(inputs) == list:
-        return [crop(resize(i)) for i in inputs]
+        return [_upscale(i) for i in inputs]
     else:
-        return crop(resize(inputs))
+        return _upscale(inputs)
 
 def upscale_super_resolution(images, model, width, height):
     images = [i for i in images]

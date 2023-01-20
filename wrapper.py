@@ -60,6 +60,7 @@ class GenerationParameters():
         
         if not self.clip or type(self.clip) == str:
             self.clip = self.storage.get_clip(self.clip or self.model, self.device)
+            self.clip.set_textual_inversions(self.storage.get_embeddings(self.device))
         
         if not self.vae or type(self.vae) == str:
             self.vae = self.storage.get_vae(self.vae or self.model, self.device)
