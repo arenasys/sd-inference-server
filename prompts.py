@@ -135,11 +135,11 @@ def encode_tokens(clip, chunks, clip_skip=1):
         tokens, weights = list(zip(*chunk))
 
         # encode chunk tokens
-        encoding = clip(tokens)
+        encoding = clip.text_model(tokens)
 
         # do clip skip
         encoding = encoding['hidden_states'][-clip_skip]
-        encoding = clip.final_layer_norm(encoding)
+        encoding = clip.text_model.final_layer_norm(encoding)
         
         # each token has been encoded into its own tensor
         # we weight this tensor with the tokens weight

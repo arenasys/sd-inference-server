@@ -26,7 +26,7 @@ if False:
     images = params.txt2img()
     images[0].save("1_b.png")
 
-if True:
+if False:
     print("TEST 2 - img2img")
 
     params.reset()
@@ -88,7 +88,7 @@ if False:
     images[0].save("4_a.png")
     images[1].save("4_b.png")
 
-if True:
+if False:
     print("TEST 5 - Embedding")
     
     params.reset()
@@ -101,8 +101,30 @@ if True:
     images = params.txt2img()
     images[0].save("5_b.png")
 
+if True:
+    print("TEST 6 - LoRA & HN")
+    params.set(model="Anything-V3", sampler="Euler a", clip_skip=2)
+    params.set(prompt="masterpeice, 1girl, pink hair, bunny ears, pink eyes, jacket")
+    params.set(negative_prompt="")
+    params.set(width=512, height=512, seed=2234117738, steps=20, scale=7)
+
+    params.set(lora="pippa")
+
+    images = params.txt2img()
+    images[0].save(f"6_a.png")
+
+    params.set(lora=None)
+    images = params.txt2img()
+    images[0].save(f"6_b.png")
+
+    params.set(lora="pippa", hn="aamuk-36500")
+    params.set(hn_strength=1.5)
+
+    images = params.txt2img()
+    images[0].save(f"6_c.png")
+
 if False:
-    print("TEST 6 - SDv2")
+    print("TEST 7 - SDv2")
 
     params.reset()
     params.set(model="sd-v2", sampler="Euler a")
@@ -111,4 +133,4 @@ if False:
     params.set(width=768, height=768, seed=665746805, steps=20, scale=7)
 
     images = params.txt2img()
-    images[0].save("6_a.png")
+    images[0].save("7_a.png")

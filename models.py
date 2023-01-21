@@ -3,9 +3,11 @@ import utils
 
 
 from transformers import CLIPTextConfig, CLIPTokenizer
-from clip import CustomCLIPTextTransformer
+from clip import CustomCLIP
 from diffusers import AutoencoderKL, UNet2DConditionModel
 from diffusers.models.vae import DiagonalGaussianDistribution, AutoencoderKLOutput
+from lora import LoRANetwork
+from hypernetwork import Hypernetwork
 
 class UNET(UNet2DConditionModel):
     def __init__(self, model_type, dtype):
@@ -115,7 +117,7 @@ class VAE(AutoencoderKL):
             raise ValueError(f"unknown type: {model_type}")
         return config
 
-class CLIP(CustomCLIPTextTransformer):
+class CLIP(CustomCLIP):
     def __init__(self, model_type, dtype):
         self.model_type = model_type
         super().__init__(CLIP.get_config(model_type))
@@ -207,3 +209,86 @@ class Tokenizer():
 
     def __call__(self, texts):
         return self.tokenizer(texts)
+
+class LoRA(LoRANetwork):
+    @staticmethod
+    def from_model(state_dict, dtype=None):
+        if not dtype:
+            dtype = state_dict['metadata']['dtype']
+
+        utils.cast_state_dict(state_dict, dtype)
+
+        model = LoRA(state_dict)
+        model.to(dtype)
+
+        return model
+
+class HN(Hypernetwork):
+    @staticmethod
+    def from_model(state_dict, dtype=None):
+        if not dtype:
+            dtype = state_dict['metadata']['dtype']
+
+        utils.cast_state_dict(state_dict, dtype)
+
+        model = HN(state_dict)
+        model.to(dtype)
+
+        return model
+
+class AdditionalNetworks():
+    class AdditionalModule(torch.nn.Module):
+        def __init__(self, name, module: torch.nn.Module):
+            super().__init__()
+            self.name = name
+            self.original = module.forward
+            self.dim = module.in_features if hasattr(module, "in_features") else None
+
+            self.multiplier = 1.0
+            self.hns = []
+            self.loras = []
+
+        def forward(self, x):
+            for hn in self.hns:
+                x = x + hn(x)
+            out = self.original(x)
+            for lora in self.loras:
+                out = out + lora(x)
+            return out
+
+        def attach_lora(self, module):
+            self.loras.append(module)
+        
+        def attach_hn(self, module):
+            self.hns.append(module)
+
+        def clear(self):
+            self.loras = []
+            self.hns = []
+
+    def __init__(self, model):
+        self.modules = {}
+
+        model_type = str(type(model))
+        if "CLIP" in model_type:
+            self.modules = self.hijack_model(model, 'te', ["CLIPAttention", "CLIPMLP"])
+        elif "UNET" in model_type:
+            self.modules = self.hijack_model(model, 'unet', ["Transformer2DModel", "Attention"])
+        else:
+            raise ValueError(f"INVALID TARGET {model_type}")
+
+    def clear(self):
+        for name in self.modules:
+            self.modules[name].clear()
+
+    def hijack_model(self, model, prefix, targets):
+        modules = {}
+        for module_name, module in model.named_modules():
+            if module.__class__.__name__ in targets:
+                for child_name, child_module in module.named_modules():
+                    child_class = child_module.__class__.__name__
+                    if child_class == "Linear" or (child_class == "Conv2d" and child_module.kernel_size == (1, 1)):
+                        name = (prefix + '.' + module_name + '.' + child_name).replace('.', '_')
+                        modules[name] = AdditionalNetworks.AdditionalModule(name, child_module)
+                        child_module.forward = modules[name].forward
+        return modules

@@ -12,7 +12,8 @@ import inference
 
 DEFAULTS = {
     "strength": 0.75, "sampler": "Euler_a", "clip_skip": 1, "eta": 1, "do_exact_steps": False,
-    "hr_upscale": "Latent (nearest)", "hr_strength": 0.7, "img2img_upscale": "Lanczos", "mask_blur": 4
+    "hr_upscale": "Latent (nearest)", "hr_strength": 0.7, "img2img_upscale": "Lanczos", "mask_blur": 4,
+    "lora_strength": 1.0, "hn_strength": 1.0
 }
 
 SAMPLER_CLASSES = {
@@ -160,22 +161,55 @@ class GenerationParameters():
         batch_size = max(batch_size or 0, len(prompts), len(negative_prompts))
         return prompts, negative_prompts, batch_size
 
+    def attach_networks(self):
+        self.detach_networks()
+
+        device = self.unet.device
+
+        if self.lora:
+            (lora_names, lora_strengths) = self.listify(self.lora, self.lora_strength)
+            loras = [self.storage.get_lora(name, device) for name in lora_names]
+
+            if len(lora_strengths) < len(loras):
+                lora_strengths += [1 for _ in range(len(loras)-len(lora_strengths))]
+
+            for i, lora in enumerate(loras):
+                lora.set_strength(lora_strengths[i])
+                lora.attach(self.unet.additional, self.clip.additional)
+
+        if self.hn:
+            (hn_names, hn_strengths) = self.listify(self.hn, self.hn_strength)
+            hns = [self.storage.get_hypernetwork(name, device) for name in hn_names]
+
+            if len(hn_strengths) < len(hns):
+                hn_strengths += [1 for _ in range(len(hns)-len(hn_strengths))]
+
+            for i, hn in enumerate(hns):
+                hn.set_strength(hn_strengths[i])
+                hn.attach(self.unet.additional)
+
+    def detach_networks(self):
+        self.unet.additional.clear()
+        self.clip.additional.clear()
+
     @torch.inference_mode()
     def txt2img(self):
         self.load_models()
         required = "unet, clip, vae, sampler, prompt, negative_prompt, width, height, seed, scale, steps".split(", ")
-        optional = "clip_skip, eta, batch_size, hr_steps, hr_factor, hr_upscale, hr_strength".split(", ")
+        optional = "clip_skip, eta, batch_size, hr_steps, hr_factor, hr_upscale, hr_strength, lora, hn".split(", ")
         self.check_parameters(required, optional)
 
         device = self.unet.device
         positive_prompts, negative_prompts, batch_size = self.get_prompts(self.batch_size)
         seeds, subseeds, batch_size = self.get_seeds(batch_size)
+        
+        self.attach_networks()
 
         conditioning = prompts.ConditioningSchedule(self.clip, positive_prompts, negative_prompts, self.steps, self.clip_skip, batch_size)
         denoiser = samplers.GuidedDenoiser(self.unet, conditioning, self.scale)
         noise = utils.NoiseSchedule(seeds, subseeds, self.width // 8, self.height // 8, device)
         sampler = SAMPLER_CLASSES[self.sampler](denoiser, self.eta)
-
+        
         latents = inference.txt2img(denoiser, sampler, noise, self.steps)
 
         if not self.hr_factor:
@@ -201,7 +235,7 @@ class GenerationParameters():
     def img2img(self):
         self.load_models()
         required = "unet, clip, vae, sampler, image, prompt, negative_prompt, seed, scale, steps, strength".split(", ")
-        optional = "mask, mask_blur, clip_skip, eta, do_exact_steps, batch_size, padding, width, height".split(", ")
+        optional = "mask, mask_blur, clip_skip, eta, do_exact_steps, batch_size, padding, width, height, lora".split(", ")
         self.check_parameters(required, optional)
 
         device = self.unet.device
@@ -219,6 +253,8 @@ class GenerationParameters():
         width, height = images[0].size
         if self.width and self.height:
             width, height = self.width, self.height
+
+        self.attach_networks()
             
         conditioning = prompts.ConditioningSchedule(self.clip, positive_prompts, negative_prompts, self.steps, self.clip_skip, batch_size)
         denoiser = samplers.GuidedDenoiser(self.unet, conditioning, self.scale)

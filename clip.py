@@ -1,6 +1,20 @@
 
 import torch
+from transformers import CLIPTextModel
 from transformers.models.clip.modeling_clip import CLIPTextTransformer, _expand_mask, BaseModelOutputWithPooling
+
+class CustomCLIP(torch.nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.text_model = CustomCLIPTextTransformer(config)
+
+    def __getattr__(self, name):
+        if name == "device":
+            return next(self.parameters()).device
+        return super().__getattr__(name)
+
+    def forward(self, input_ids = None):
+        return self.text_model(input_ids)
 
 class CustomCLIPTextTransformer(CLIPTextTransformer):
     # needed to nicely handle mixed tokens and embeddings

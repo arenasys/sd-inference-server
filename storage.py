@@ -5,6 +5,7 @@ import safetensors.torch
 
 import models
 import upscalers
+import lora
 
 class ModelStorage():
     def __init__(self, path, dtype, vae_dtype=None):
@@ -12,7 +13,7 @@ class ModelStorage():
         self.dtype = dtype
         self.vae_dtype = vae_dtype or dtype
 
-        self.classes = {"UNET": models.UNET, "CLIP": models.CLIP, "VAE": models.VAE, "SR": upscalers.SR}
+        self.classes = {"UNET": models.UNET, "CLIP": models.CLIP, "VAE": models.VAE, "SR": upscalers.SR, "LoRA": models.LoRA, "HN": models.HN}
         
         self.files = {k:{} for k in self.classes}
         self.loaded = {k:{} for k in self.classes}
@@ -73,6 +74,16 @@ class ModelStorage():
             vectors.requires_grad = False
             self.embeddings[name] = vectors
 
+        for model in glob.glob(os.path.join(self.path, "LoRA", "*.safetensors")):
+            file = os.path.relpath(model, self.path)
+            name = self.get_name(file)
+            self.files["LoRA"][name] = file
+
+        for model in glob.glob(os.path.join(self.path, "HN", "*.pt")):
+            file = os.path.relpath(model, self.path)
+            name = self.get_name(file)
+            self.files["HN"][name] = file
+
     def get_component(self, name, comp, device):
         if name in self.loaded[comp]:
             return self.move(self.loaded[comp][name], name, comp, device)
@@ -94,10 +105,15 @@ class ModelStorage():
         return self.move(model, name, comp, device)
 
     def get_unet(self, name, device):
-        return self.get_component(name, "UNET", device)
-    
+        unet = self.get_component(name, "UNET", device)
+        unet.additional = models.AdditionalNetworks(unet)
+        return unet
+
     def get_clip(self, name, device):
-        return self.get_component(name, "CLIP", device)
+        clip = self.get_component(name, "CLIP", device)
+        clip.textual_inversions = {}
+        clip.additional = models.AdditionalNetworks(clip)
+        return clip
 
     def get_vae(self, name, device):
         return self.get_component(name, "VAE", device)
@@ -109,6 +125,12 @@ class ModelStorage():
         for k in self.embeddings:
             self.embeddings[k] = self.embeddings[k].to(device)
         return self.embeddings
+
+    def get_lora(self, name, device):
+        return self.get_component(name, "LoRA", device)
+
+    def get_hypernetwork(self, name, device):
+        return self.get_component(name, "HN", device)
 
     def load_file(self, file, comp):
         print(f"LOADING {file}...")
