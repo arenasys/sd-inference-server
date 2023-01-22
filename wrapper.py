@@ -173,7 +173,7 @@ class GenerationParameters():
             if len(lora_strengths) < len(self.loras):
                 lora_strengths += [1 for _ in range(len(self.loras)-len(lora_strengths))]
 
-            for i, lora in enumerate(self.oras):
+            for i, lora in enumerate(self.loras):
                 lora.set_strength(lora_strengths[i])
                 lora.attach(self.unet.additional, self.clip.additional)
 
