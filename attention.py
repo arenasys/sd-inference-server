@@ -19,17 +19,10 @@ def use_split_attention():
         context = context if context is not None else x
         context = context.to(x.dtype)
 
-        if hasattr(self, 'hypernetwork') and self.hypernetwork is not None:
-            context_k, context_v = self.hypernetwork.forward(x, context)
-            context_k = context_k.to(x.dtype)
-            context_v = context_v.to(x.dtype)
-        else:
-            context_k = context
-            context_v = context
-        k_in = self.to_k(context_k)
-        v_in = self.to_v(context_v)
-        del context, x, context_k, context_v 
-
+        k_in = self.to_k(context)
+        v_in = self.to_v(context)
+        del context, x
+        
         q, k, v = map(lambda t: einops.rearrange(t, 'b n (h d) -> (b h) n d', h=h), (q_in, k_in, v_in))
         del q_in, k_in, v_in
 
@@ -138,75 +131,6 @@ class FlashAttentionFunction(torch.autograd.Function):
 
     return o
 
-  @ staticmethod
-  @ torch.no_grad()
-  def backward(ctx, do):
-    """ Algorithm 4 in the paper """
-
-    causal, scale, mask, q_bucket_size, k_bucket_size = ctx.args
-    q, k, v, o, l, m = ctx.saved_tensors
-
-    device = q.device
-
-    max_neg_value = -torch.finfo(q.dtype).max
-    qk_len_diff = max(k.shape[-2] - q.shape[-2], 0)
-
-    dq = torch.zeros_like(q)
-    dk = torch.zeros_like(k)
-    dv = torch.zeros_like(v)
-
-    row_splits = zip(
-        q.split(q_bucket_size, dim=-2),
-        o.split(q_bucket_size, dim=-2),
-        do.split(q_bucket_size, dim=-2),
-        mask,
-        l.split(q_bucket_size, dim=-2),
-        m.split(q_bucket_size, dim=-2),
-        dq.split(q_bucket_size, dim=-2)
-    )
-
-    for ind, (qc, oc, doc, row_mask, lc, mc, dqc) in enumerate(row_splits):
-      q_start_index = ind * q_bucket_size - qk_len_diff
-
-      col_splits = zip(
-          k.split(k_bucket_size, dim=-2),
-          v.split(k_bucket_size, dim=-2),
-          dk.split(k_bucket_size, dim=-2),
-          dv.split(k_bucket_size, dim=-2),
-      )
-
-      for k_ind, (kc, vc, dkc, dvc) in enumerate(col_splits):
-        k_start_index = k_ind * k_bucket_size
-
-        attn_weights = torch.einsum('... i d, ... j d -> ... i j', qc, kc) * scale
-
-        if causal and q_start_index < (k_start_index + k_bucket_size - 1):
-          causal_mask = torch.ones((qc.shape[-2], kc.shape[-2]), dtype=torch.bool,
-                                   device=device).triu(q_start_index - k_start_index + 1)
-          attn_weights.masked_fill_(causal_mask, max_neg_value)
-
-        exp_attn_weights = torch.exp(attn_weights - mc)
-
-        if exists(row_mask):
-          exp_attn_weights.masked_fill_(~row_mask, 0.)
-
-        p = exp_attn_weights / lc
-
-        dv_chunk = torch.einsum('... i j, ... i d -> ... j d', p, doc)
-        dp = torch.einsum('... i d, ... j d -> ... i j', doc, vc)
-
-        D = (doc * oc).sum(dim=-1, keepdims=True)
-        ds = p * scale * (dp - D)
-
-        dq_chunk = torch.einsum('... i j, ... j d -> ... i d', ds, kc)
-        dk_chunk = torch.einsum('... i j, ... i d -> ... j d', ds, qc)
-
-        dqc.add_(dq_chunk)
-        dkc.add_(dk_chunk)
-        dvc.add_(dv_chunk)
-
-    return dq, dk, dv, None, None, None, None
-
 def use_flash_attention():
   flash_func = FlashAttentionFunction
 
@@ -220,16 +144,8 @@ def use_flash_attention():
     context = context if context is not None else x
     context = context.to(x.dtype)
 
-    if hasattr(self, 'hypernetwork') and self.hypernetwork is not None:
-      context_k, context_v = self.hypernetwork.forward(x, context)
-      context_k = context_k.to(x.dtype)
-      context_v = context_v.to(x.dtype)
-    else:
-      context_k = context
-      context_v = context
-
-    k = self.to_k(context_k)
-    v = self.to_v(context_v)
+    k = self.to_k(context)
+    v = self.to_v(context)
     del context, x
 
     q, k, v = map(lambda t: einops.rearrange(t, 'b n (h d) -> b h n d', h=h), (q, k, v))

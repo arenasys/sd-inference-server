@@ -168,23 +168,23 @@ class GenerationParameters():
 
         if self.lora:
             (lora_names, lora_strengths) = self.listify(self.lora, self.lora_strength)
-            loras = [self.storage.get_lora(name, device) for name in lora_names]
+            self.loras = [self.storage.get_lora(name, device) for name in lora_names]
 
-            if len(lora_strengths) < len(loras):
-                lora_strengths += [1 for _ in range(len(loras)-len(lora_strengths))]
+            if len(lora_strengths) < len(self.loras):
+                lora_strengths += [1 for _ in range(len(self.loras)-len(lora_strengths))]
 
-            for i, lora in enumerate(loras):
+            for i, lora in enumerate(self.oras):
                 lora.set_strength(lora_strengths[i])
                 lora.attach(self.unet.additional, self.clip.additional)
 
         if self.hn:
             (hn_names, hn_strengths) = self.listify(self.hn, self.hn_strength)
-            hns = [self.storage.get_hypernetwork(name, device) for name in hn_names]
+            self.hns = [self.storage.get_hypernetwork(name, device) for name in hn_names]
 
-            if len(hn_strengths) < len(hns):
-                hn_strengths += [1 for _ in range(len(hns)-len(hn_strengths))]
+            if len(hn_strengths) < len(self.hns):
+                hn_strengths += [1 for _ in range(len(self.hns)-len(hn_strengths))]
 
-            for i, hn in enumerate(hns):
+            for i, hn in enumerate(self.hns):
                 hn.set_strength(hn_strengths[i])
                 hn.attach(self.unet.additional)
 

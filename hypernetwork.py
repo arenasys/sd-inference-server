@@ -1,7 +1,7 @@
-# NAI compatible
-
 import torch
 import inspect
+
+# adapted from AUTOs HN code https://github.com/AUTOMATIC1111/stable-diffusion-webui/blob/master/modules/hypernetworks/hypernetwork.py
 
 class HypernetworkModule(torch.nn.Module):
     def __init__(self, dim, layer_structure, activation_func, add_layer_norm, activate_output, dropout_structure):

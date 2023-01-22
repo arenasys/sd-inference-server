@@ -244,7 +244,6 @@ class AdditionalNetworks():
             self.original = module.forward
             self.dim = module.in_features if hasattr(module, "in_features") else None
 
-            self.multiplier = 1.0
             self.hns = []
             self.loras = []
 
