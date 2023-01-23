@@ -35,7 +35,7 @@ class HypernetworkModule(torch.nn.Module):
                 linears.append(torch.nn.Dropout(p=0.0))
 
         self.linear = torch.nn.Sequential(*linears)
-        self.multiplier = 1.0
+        self.register_buffer("multiplier", torch.tensor(1.0), False)
 
     def forward(self, x):
         return self.linear(x) * self.multiplier
@@ -123,7 +123,7 @@ class Hypernetwork(torch.nn.Module):
     def set_strength(self, strength):
         for _, module in self.named_modules():
             if hasattr(module, "multiplier"):
-                module.multiplier = strength
+                module.multiplier = torch.tensor(strength).to(self.device)
 
     def __getattr__(self, name):
         if name == "device":

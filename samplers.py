@@ -254,7 +254,7 @@ class Euler(Sampler):
         s_churn, s_tmin, s_tmax = 0.0, 0.0, float('inf')
         gamma = min(s_churn / (len(sigmas) - 1), 2 ** 0.5 - 1) if s_tmin <= sigmas[i] <= s_tmax else 0.
 
-        eps = torch.randn_like(x)
+        eps = noise()
         sigma_hat = sigmas[i] * (gamma + 1)
         if gamma > 0:
             x = x + eps * (sigma_hat ** 2 - sigmas[i] ** 2) ** 0.5
