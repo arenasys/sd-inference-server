@@ -1,16 +1,19 @@
 import torch
 import tqdm
 
-def txt2img(denoiser, sampler, noise, steps):
+def txt2img(denoiser, sampler, noise, steps, callback):
     with torch.autocast(denoiser.unet.autocast(), denoiser.unet.dtype):
         sigmas = sampler.scheduler.get_sigmas(steps)
         latents = noise() * sigmas[0]
+
         for i in tqdm.trange(steps):
+            callback(i, latents)
             latents = sampler.step(latents, sigmas, i, noise)
             denoiser.advance(i)
+        callback(steps, latents)
         return latents / 0.18215
 
-def img2img(latents, denoiser, sampler, noise, steps, do_exact_steps, strength):
+def img2img(latents, denoiser, sampler, noise, steps, do_exact_steps, strength, callback):
     with torch.autocast(denoiser.unet.autocast(), denoiser.unet.dtype):
         strength = min(strength, 0.999)
         if do_exact_steps:
@@ -27,6 +30,8 @@ def img2img(latents, denoiser, sampler, noise, steps, do_exact_steps, strength):
         latents = latents + noise() * sigmas[0]
 
         for i in tqdm.trange(steps):
+            callback(i, latents)
             latents = sampler.step(latents, sigmas, i, noise)
             denoiser.advance(i)
+        callback(steps, latents)
         return latents / 0.18215

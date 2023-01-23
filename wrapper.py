@@ -2,6 +2,7 @@ import torch
 import torchvision.transforms as transforms
 import PIL
 import random
+import io
 
 import prompts
 import samplers
@@ -11,7 +12,7 @@ import upscalers
 import inference
 
 DEFAULTS = {
-    "strength": 0.75, "sampler": "Euler_a", "clip_skip": 1, "eta": 1, "do_exact_steps": False,
+    "strength": 0.75, "sampler": "Euler_a", "clip_skip": 1, "eta": 1,
     "hr_upscale": "Latent (nearest)", "hr_strength": 0.7, "img2img_upscale": "Lanczos", "mask_blur": 4,
     "lora_strength": 1.0, "hn_strength": 1.0
 }
@@ -43,9 +44,35 @@ class GenerationParameters():
         self.storage = storage
         self.device = device
 
+        self.callback = None
+
+    def set_status(self, status):
+        if self.callback:
+            if not self.callback({"type": "status", "data": {"message": status}}):
+                raise RuntimeError("Aborted")
+
+    def set_progress(self, current, total):
+        if self.callback:
+            if not self.callback({"type": "progress", "data": {"current": current, "total": total}}):
+                raise RuntimeError("Aborted")
+
+    def on_step(self, step, latents):
+        if step:
+            self.current_step += 1
+        self.set_progress(self.current_step, self.total_steps)
+    
+    def on_complete(self, images):
+        if self.callback:
+            images_data = []
+            for i in images:
+                bytesio = io.BytesIO()
+                i.save(bytesio, format='PNG')
+                images_data += [bytesio.getvalue()]
+            self.callback({"type": "result", "data": {"images": images_data}})
+
     def reset(self):
         for attr in list(self.__dict__.keys()):
-            if not attr in ["storage", "device"]:
+            if not attr in ["storage", "device", "callback"]:
                 delattr(self, attr)
 
     def __getattr__(self, item):
@@ -53,23 +80,29 @@ class GenerationParameters():
 
     def set(self, **kwargs):
         for key, value in kwargs.items():
+            if type(value) == bytes:
+                value = PIL.Image.open(io.BytesIO(value))
             setattr(self, key, value)
     
     def load_models(self):
         if not self.unet or type(self.unet) == str:
+            self.set_status("Loading UNET")
             self.unet = self.storage.get_unet(self.unet or self.model, self.device)
         
         if not self.clip or type(self.clip) == str:
+            self.set_status("Loading CLIP")
             self.clip = self.storage.get_clip(self.clip or self.model, self.device)
             self.clip.set_textual_inversions(self.storage.get_embeddings(self.device))
         
         if not self.vae or type(self.vae) == str:
+            self.set_status("Loading VAE")
             self.vae = self.storage.get_vae(self.vae or self.model, self.device)
 
         self.storage.clear_cache()
 
         if self.hr_upscale:
             if not self.hr_upscale in UPSCALERS_LATENT and not self.hr_upscale in UPSCALERS_PIXEL:
+                self.set_status("status", "Loading Upscaler")
                 self.upscale_model = self.storage.get_upscaler(self.hr_upscale, self.device)
 
     def check_parameters(self, required, optional):
@@ -93,6 +126,9 @@ class GenerationParameters():
 
         if not self.sampler in SAMPLER_CLASSES:
             raise ValueError(f"ERROR unknown sampler: {self.sampler}")
+
+        if (self.width or self.height) and not (self.width and self.height):
+            raise ValueError("ERROR width and height must both be set")
 
     def listify(self, *args):
         if args == None:
@@ -150,9 +186,6 @@ class GenerationParameters():
         if len(subseeds) < batch_size:
             last_seed, last_strength = subseeds[-1]
             subseeds += [(last_seed + i + 1, last_strength) for i in range(batch_size-len(subseeds))]
-        
-        if (self.width or self.height) and not (self.width and self.height):
-            raise ValueError("ERROR width and height must both be set")
 
         return seeds, subseeds, batch_size
 
@@ -167,6 +200,7 @@ class GenerationParameters():
         device = self.unet.device
 
         if self.lora:
+            self.set_status("Loading LoRAs")
             (lora_names, lora_strengths) = self.listify(self.lora, self.lora_strength)
             self.loras = [self.storage.get_lora(name, device) for name in lora_names]
 
@@ -178,6 +212,7 @@ class GenerationParameters():
                 lora.attach(self.unet.additional, self.clip.additional)
 
         if self.hn:
+            self.set_status("Loading Hypernetworks")
             (hn_names, hn_strengths) = self.listify(self.hn, self.hn_strength)
             self.hns = [self.storage.get_hypernetwork(name, device) for name in hn_names]
 
@@ -194,7 +229,10 @@ class GenerationParameters():
 
     @torch.inference_mode()
     def txt2img(self):
+        self.set_status("Loading")
         self.load_models()
+
+        self.set_status("Configuring")
         required = "unet, clip, vae, sampler, prompt, negative_prompt, width, height, seed, scale, steps".split(", ")
         optional = "clip_skip, eta, batch_size, hr_steps, hr_factor, hr_upscale, hr_strength, lora, hn".split(", ")
         self.check_parameters(required, optional)
@@ -205,15 +243,24 @@ class GenerationParameters():
         
         self.attach_networks()
 
+        self.current_step = 0
+        self.total_steps = self.steps
+        if self.hr_factor:
+            hr_steps = self.hr_steps or self.steps
+            self.total_steps += hr_steps
+
         conditioning = prompts.ConditioningSchedule(self.clip, positive_prompts, negative_prompts, self.steps, self.clip_skip, batch_size)
         denoiser = samplers.GuidedDenoiser(self.unet, conditioning, self.scale)
         noise = utils.NoiseSchedule(seeds, subseeds, self.width // 8, self.height // 8, device)
         sampler = SAMPLER_CLASSES[self.sampler](denoiser, self.eta)
         
-        latents = inference.txt2img(denoiser, sampler, noise, self.steps)
+        self.set_status("Generating")
+        latents = inference.txt2img(denoiser, sampler, noise, self.steps, self.on_step)
 
         if not self.hr_factor:
-            return utils.decode_images(self.vae, latents)
+            images = utils.decode_images(self.vae, latents)
+            self.on_complete(images)
+            return images
 
         width = int(self.width * self.hr_factor)
         height = int(self.height * self.hr_factor)
@@ -223,19 +270,24 @@ class GenerationParameters():
         denoiser.reset()
         sampler.reset()
 
+        self.set_status("Upscaling")
         latents = self.upscale_latents(latents, self.hr_upscale, width, height, seeds)
 
-        hr_steps = self.hr_steps or self.steps
+        self.set_status("Generating")
+        latents = inference.img2img(latents, denoiser, sampler, noise, hr_steps, True, self.hr_strength, self.on_step)
 
-        latents = inference.img2img(latents, denoiser, sampler, noise, hr_steps, True, self.hr_strength)
-
-        return utils.decode_images(self.vae, latents)
+        images = utils.decode_images(self.vae, latents)
+        self.on_complete(images)
+        return images
 
     @torch.inference_mode()
     def img2img(self):
+        self.set_status("Loading")
         self.load_models()
+
+        self.set_status("Configuring")
         required = "unet, clip, vae, sampler, image, prompt, negative_prompt, seed, scale, steps, strength".split(", ")
-        optional = "mask, mask_blur, clip_skip, eta, do_exact_steps, batch_size, padding, width, height, lora".split(", ")
+        optional = "mask, mask_blur, clip_skip, eta, batch_size, padding, width, height, lora".split(", ")
         self.check_parameters(required, optional)
 
         device = self.unet.device
@@ -255,6 +307,9 @@ class GenerationParameters():
             width, height = self.width, self.height
 
         self.attach_networks()
+
+        self.current_step = 0
+        self.total_steps = int(self.steps * self.strength) + 1
             
         conditioning = prompts.ConditioningSchedule(self.clip, positive_prompts, negative_prompts, self.steps, self.clip_skip, batch_size)
         denoiser = samplers.GuidedDenoiser(self.unet, conditioning, self.scale)
@@ -264,6 +319,7 @@ class GenerationParameters():
         if self.mask:
             images, masks, extents = utils.prepare_inpainting(images, masks, self.padding)
 
+        self.set_status("Upscaling")
         latents = self.upscale_images(self.vae, images, self.img2img_upscale, width, height, seeds)
         original_latents = latents
 
@@ -273,14 +329,15 @@ class GenerationParameters():
             mask_latents = utils.get_masks(device, masks)
             denoiser.set_mask(mask_latents, original_latents)
 
-        latents = inference.img2img(latents, denoiser, sampler, noise, self.steps, self.do_exact_steps, self.strength)
+        self.set_status("Generating")
+        latents = inference.img2img(latents, denoiser, sampler, noise, self.steps, False, self.strength, self.on_step)
 
         images = utils.decode_images(self.vae, latents)
 
         if self.mask:
             images = utils.apply_inpainting(images, original_images, masks, extents)
-        
-        return images
 
+        self.on_complete(images)
+        return images
 
 
