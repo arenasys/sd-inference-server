@@ -1,6 +1,6 @@
+import os
 import torch
 import utils
-
 
 from transformers import CLIPTextConfig, CLIPTokenizer
 from clip import CustomCLIP
@@ -200,7 +200,8 @@ class CLIP(CustomCLIP):
 
 class Tokenizer():
     def __init__(self, model_type):
-        self.tokenizer = CLIPTokenizer.from_pretrained("tokenizer")
+        tokenizer = os.path.join(os.path.dirname(os.path.realpath(__file__)), "tokenizer")
+        self.tokenizer = CLIPTokenizer.from_pretrained(tokenizer)
         self.model_type = model_type
         self.bos_token_id = 49406
         self.eos_token_id = 49407
