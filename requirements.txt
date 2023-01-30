@@ -1,0 +1,11 @@
+basicsr==1.4.2
+diffusers==0.10.2
+einops==0.4.1
+k_diffusion==0.0.12
+lark==1.1.5
+numpy==1.23.5
+Pillow==9.4.0
+safetensors==0.2.7
+torch==1.13.1
+tqdm==4.64.1
+transformers==4.25.1
