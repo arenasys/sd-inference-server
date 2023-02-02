@@ -10,7 +10,7 @@ attention.use_split_attention()
 storage = storage.ModelStorage("./models", torch.float16, torch.float32)
 params = wrapper.GenerationParameters(storage, torch.device("cuda"))
 
-if False:
+if True:
     print("TEST 1 - txt2img")
 
     params.reset()
@@ -136,6 +136,7 @@ if False:
 
 if True:
     print("TEST 8 - DDIM")
+    params.reset()
     params.set(model="Anything-V3", sampler="DDIM", clip_skip=2)
     params.set(prompt="masterpiece, highly detailed, white hair, smug, 1girl, sunny, beach, clouds, hat, small")
     params.set(negative_prompt="bad")

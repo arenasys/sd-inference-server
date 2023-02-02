@@ -17,26 +17,28 @@ class GuidedDenoiser():
         self.mask = mask
         self.original = original * 0.18215
 
-    def predict_noise_eps(self, latents, timestep, conditioning):
+    def predict_noise_eps(self, latents, timestep, conditioning, alpha):
         noise_pred = self.unet(latents, timestep, encoder_hidden_states=conditioning).sample
         return noise_pred
 
-    def predict_noise_v(self, latents, timestep, conditioning):
-        noise_pred = self.unet(latents, timestep, encoder_hidden_states=conditioning).sample
-        return noise_pred
+    def predict_noise_v(self, latents, timestep, conditioning, alpha):
+        v_pred = self.unet(latents, timestep, encoder_hidden_states=conditioning).sample
+        return alpha.sqrt() * v_pred + (1-alpha).sqrt() * latents
 
     def mask_noise(self, latents, alpha, noise):
         if self.mask != None:
-            noised_original = alpha.sqrt() * self.original + (1-alpha).sqrt() * noise
+            noised_original = alpha.sqrt() * self.original + (1-alpha).sqrt() * noise()
             latents = (noised_original * self.mask) + (latents * (1 - self.mask))
         return latents
 
-    def predict_noise(self, latents, timestep):
+    def predict_noise(self, latents, timestep, alpha):
         model_input = torch.cat([latents] * 2)
         conditioning = self.conditioning
 
         if self.unet.parameterization == "eps":
-            noise_pred = self.predict_noise_eps(model_input, timestep, conditioning)
+            noise_pred = self.predict_noise_eps(model_input, timestep, conditioning, alpha)
+        elif self.unet.parameterization == "v":
+            noise_pred = self.predict_noise_v(model_input, timestep, conditioning, alpha)
 
         neg_pred, pos_pred = noise_pred.chunk(2)
         noise_pred = neg_pred + self.scale * (pos_pred - neg_pred)
@@ -58,6 +60,11 @@ class GuidedDenoiser():
         original_pred = v_pred * c_out + latents * c_skip
         return original_pred
 
+    def mask_original(self, original_pred):
+        if self.mask != None:
+            original_pred = (self.original * self.mask) + (original_pred * (1 - self.mask))
+        return original_pred
+
     def predict_original(self, latents, timestep, sigma):
         model_input = torch.cat([latents] * 2)
         conditioning = self.conditioning
@@ -70,8 +77,7 @@ class GuidedDenoiser():
         neg_pred, pos_pred = original_pred.chunk(2)
         original_pred = neg_pred + self.scale * (pos_pred - neg_pred)
 
-        if self.mask != None:
-            original_pred = (self.original * self.mask) + (original_pred * (1 - self.mask))
+        original_pred = self.mask_original(original_pred)
         
         return original_pred
 

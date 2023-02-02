@@ -21,9 +21,8 @@ class KScheduler():
 
     def get_sigmas(self):
         betas = torch.linspace(0.00085 ** 0.5, 0.0120 ** 0.5, 1000) ** 2
-        alphas = 1.0 - betas
-        alphas_cumprod = torch.cumprod(alphas, 0)
-        sigmas = ((1 - alphas_cumprod) / alphas_cumprod) ** 0.5
+        alphas = torch.cumprod(1.0 - betas, 0)
+        sigmas = ((1 - alphas) / alphas) ** 0.5
         log_sigmas = sigmas.log()
 
         return sigmas, log_sigmas

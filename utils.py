@@ -235,3 +235,16 @@ class DisableInitialization:
     def __exit__(self, exc_type, exc_val, exc_tb):
         torch.nn.init.kaiming_uniform_ = self.init_kaiming_uniform
         torch.nn.init._no_grad_normal_ = self.init_no_grad_normal
+
+class CUDATimer:
+    def __enter__(self):
+        self.start = torch.cuda.Event(enable_timing=True)
+        self.end = torch.cuda.Event(enable_timing=True)
+
+        self.start.record()
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.end.record()
+
+        torch.cuda.synchronize()
+        print(self.start.elapsed_time(self.end))
