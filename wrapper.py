@@ -5,7 +5,9 @@ import random
 import io
 
 import prompts
-import samplers
+import samplers_k
+import samplers_ddpm
+import guidance
 import utils
 import storage
 import upscalers
@@ -18,11 +20,12 @@ DEFAULTS = {
 }
 
 SAMPLER_CLASSES = {
-    "Euler": samplers.Euler,
-    "Euler a": samplers.Euler_a,
-    "DPM++ 2M": samplers.DPM_2M,
-    "DPM++ 2S a": samplers.DPM_2S_a,
-    "DPM++ SDE": samplers.DPM_SDE
+    "Euler": samplers_k.Euler,
+    "Euler a": samplers_k.Euler_a,
+    "DPM++ 2M": samplers_k.DPM_2M,
+    "DPM++ 2S a": samplers_k.DPM_2S_a,
+    "DPM++ SDE": samplers_k.DPM_SDE,
+    "DDIM": samplers_ddpm.DDIM
 }
 
 UPSCALERS_LATENT = {
@@ -250,7 +253,7 @@ class GenerationParameters():
             self.total_steps += hr_steps
 
         conditioning = prompts.ConditioningSchedule(self.clip, positive_prompts, negative_prompts, self.steps, self.clip_skip, batch_size)
-        denoiser = samplers.GuidedDenoiser(self.unet, conditioning, self.scale)
+        denoiser = guidance.GuidedDenoiser(self.unet, conditioning, self.scale)
         noise = utils.NoiseSchedule(seeds, subseeds, self.width // 8, self.height // 8, device)
         sampler = SAMPLER_CLASSES[self.sampler](denoiser, self.eta)
         
@@ -312,7 +315,7 @@ class GenerationParameters():
         self.total_steps = int(self.steps * self.strength) + 1
             
         conditioning = prompts.ConditioningSchedule(self.clip, positive_prompts, negative_prompts, self.steps, self.clip_skip, batch_size)
-        denoiser = samplers.GuidedDenoiser(self.unet, conditioning, self.scale)
+        denoiser = guidance.GuidedDenoiser(self.unet, conditioning, self.scale)
         noise = utils.NoiseSchedule(seeds, subseeds, width // 8, height // 8, device)
         sampler = SAMPLER_CLASSES[self.sampler](denoiser, self.eta)
 

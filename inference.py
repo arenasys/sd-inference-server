@@ -1,15 +1,17 @@
 import torch
 import tqdm
+import numpy as np
 
 def txt2img(denoiser, sampler, noise, steps, callback):
     with torch.autocast(denoiser.unet.autocast(), denoiser.unet.dtype):
-        sigmas = sampler.scheduler.get_sigmas(steps)
-        latents = noise() * sigmas[0]
+        schedule = sampler.scheduler.get_schedule(steps)
+        latents = sampler.prepare_noise(noise(), schedule)
 
         for i in tqdm.trange(steps):
             callback(i, latents)
-            latents = sampler.step(latents, sigmas, i, noise)
-            denoiser.advance(i)
+            denoiser.set_step(i)
+            latents = sampler.step(latents, schedule, i, noise)
+            
         callback(steps, latents)
         return latents / 0.18215
 
@@ -17,21 +19,20 @@ def img2img(latents, denoiser, sampler, noise, steps, do_exact_steps, strength, 
     with torch.autocast(denoiser.unet.autocast(), denoiser.unet.dtype):
         strength = min(strength, 0.999)
         if do_exact_steps:
-            requested_steps = steps
-            steps = int(requested_steps / strength) if strength > 0 else 0
-            skipped_steps = steps - requested_steps
+            scheduled_steps = int(steps / strength) if strength > 0 else 0
         else:
-            skipped_steps = steps - int(steps*strength) - 1
-
-        sigmas = sampler.scheduler.get_sigmas(steps)[skipped_steps:]
-        steps = len(sigmas)-1
+            scheduled_steps = steps
+            steps = int(steps*strength)
+        
+        schedule = sampler.scheduler.get_truncated_schedule(steps, scheduled_steps)
 
         latents = latents * 0.18215
-        latents = latents + noise() * sigmas[0]
+        latents = sampler.prepare_latents(latents, noise(), schedule)
 
         for i in tqdm.trange(steps):
             callback(i, latents)
-            latents = sampler.step(latents, sigmas, i, noise)
-            denoiser.advance(i)
+            denoiser.set_step(i)
+            latents = sampler.step(latents, schedule, i, noise)
+            
         callback(steps, latents)
         return latents / 0.18215

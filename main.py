@@ -41,7 +41,7 @@ if False:
     params.set(image=PIL.Image.open("2_a.png"))
     params.set(prompt="masterpiece, 1girl, standing in rain, coat, wet, storm, lightning")
     params.set(seed=2839558696)
-    params.set(width=512, height=768)
+    params.set(width=512, height=768, steps=30)
 
     images = params.img2img()
     images[0].save("2_b.png")
@@ -96,13 +96,13 @@ if False:
     params.set(prompt="masterpiece, highly detailed, 1girl, smile, sitting on train, heterochroma, pink eyes, NeoRWBY, small")
     params.set(negative_prompt="bad, cartoon")
     params.set(width=384, height=448, seed=728158606, steps=20, scale=7)
-
     params.set(hr_factor=1.5, hr_strength=0.7, hr_steps=20)
     images = params.txt2img()
-    images[0].save("5_b.png")
+    images[0].save("5_a.png")
 
-if True:
+if False:
     print("TEST 6 - LoRA & HN")
+    params.reset()
     params.set(model="Anything-V3", sampler="Euler a", clip_skip=2)
     params.set(prompt="masterpeice, 1girl, pink hair, bunny ears, pink eyes, jacket")
     params.set(negative_prompt="")
@@ -118,7 +118,6 @@ if True:
     images[0].save(f"6_b.png")
 
     params.set(lora="pippa", hn="aamuk-36500")
-    params.set(hn_strength=1.5)
 
     images = params.txt2img()
     images[0].save(f"6_c.png")
@@ -134,3 +133,23 @@ if False:
 
     images = params.txt2img()
     images[0].save("7_a.png")
+
+if True:
+    print("TEST 8 - DDIM")
+    params.set(model="Anything-V3", sampler="DDIM", clip_skip=2)
+    params.set(prompt="masterpiece, highly detailed, white hair, smug, 1girl, sunny, beach, clouds, hat, small")
+    params.set(negative_prompt="bad")
+    params.set(width=512, height=512, seed=1708444674, steps=25, scale=7)
+    images = params.txt2img()
+    images[0].save("8_a.png")
+
+    mask = PIL.Image.open("mask_ddim.png").convert("L")
+    params.set(image=PIL.Image.open("8_a.png"), mask=mask)
+    params.set(sampler="DDIM")
+    params.set(prompt="sun flower, straw hat, masterpiece, highly detailed, white hair, smug, 1girl, sunny, beach, clouds, hat, small")
+    params.set(strength=0.75, seed=41398214)
+
+    images = params.img2img()
+    images[0].save(f"8_b.png")    
+    
+

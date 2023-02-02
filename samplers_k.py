@@ -3,87 +3,35 @@ import numpy as np
 
 from k_diffusion.sampling import get_ancestral_step, to_d, BrownianTreeNoiseSampler
 
-class GuidedDenoiser():
-    def __init__(self, unet, conditioning_schedule, scale):
-        self.unet = unet
-        self.conditioning_schedule = conditioning_schedule
-        self.conditioning = self.conditioning_schedule[0]
-        self.scale = scale
-
-        self.mask = None
-        self.original = None
-
-        self.device = unet.device
-        self.dtype = unet.dtype
-
-    def set_mask(self, mask, original):
-        self.mask = mask
-        self.original = original * 0.18215
-
-    def predict_original_eps(self, latents, timestep, sigma, conditioning):
-        c_in = 1 / (sigma ** 2 + 1) ** 0.5
-        noise_pred = self.unet(latents * c_in, timestep, encoder_hidden_states=conditioning).sample
-        original_pred = latents - sigma * noise_pred
-        return original_pred
-
-    def predict_original_v(self, latents, timestep, sigma, conditioning):
-        c_in = 1 / (sigma ** 2 + 1) ** 0.5
-        c_skip = 1 / (sigma ** 2 + 1)
-        c_out = -sigma * 1 / (sigma ** 2 + 1) ** 0.5
-
-        v_pred = self.unet(latents * c_in, timestep, encoder_hidden_states=conditioning).sample
-        original_pred = v_pred * c_out + latents * c_skip
-        return original_pred
-
-    def predict_original(self, latents, timestep, sigma):
-        model_input = torch.cat([latents] * 2)
-        conditioning = self.conditioning
-
-        if self.unet.parameterization == "eps":
-            original_pred = self.predict_original_eps(model_input, timestep, sigma, conditioning)
-        elif self.unet.parameterization == "v":
-            original_pred = self.predict_original_v(model_input, timestep, sigma, conditioning)
-
-        neg_pred, pos_pred = original_pred.chunk(2)
-        original_pred = neg_pred + self.scale * (pos_pred - neg_pred)
-
-        if self.mask != None:
-            original_pred = (self.original * self.mask) + (original_pred * (1 - self.mask))
-
-        return original_pred
-
-    def advance(self, step):
-        self.conditioning = self.conditioning_schedule[step+1]
-
-    def reset(self):
-        self.mask = None
-        self.original = None
-        self.conditioning = self.conditioning_schedule[0]
-
-class Scheduler():
+class KScheduler():
     def __init__(self):
-        self.sigmas = self.all_sigmas()
-        self.log_sigmas = self.sigmas.log()
+        self.sigmas, self.log_sigmas = self.get_sigmas()
 
-    def all_sigmas(self):
-        betas = torch.linspace(0.00085 ** 0.5, 0.0120 ** 0.5, 1000) ** 2
-        alphas = 1.0 - betas
-        alphas_cumprod = torch.cumprod(alphas, 0)
-        sigmas = ((1 - alphas_cumprod) / alphas_cumprod) ** 0.5
-        return sigmas
-
-    def to(self, dtype, device):
-        self.sigmas = self.all_sigmas().to(dtype).to(device)
-        self.log_sigmas = self.sigmas.log()
-        return self
-
-    def get_sigmas(self, steps):
+    def get_schedule(self, steps):
         timesteps = np.linspace(0, 999, steps, dtype=float)[::-1].copy()
         sigmas = self.sigmas.cpu().numpy()
         sigmas = np.interp(timesteps, np.arange(0, len(sigmas)), sigmas)
         sigmas = torch.from_numpy(sigmas).to(self.sigmas.device).to(self.sigmas.dtype)
         sigmas = torch.cat([sigmas, sigmas.new_zeros([1])])
         return sigmas
+
+    def get_truncated_schedule(self, steps, scheduled_steps):
+        timesteps = self.get_schedule(scheduled_steps+1)
+        return timesteps[-(steps + 1):]
+
+    def get_sigmas(self):
+        betas = torch.linspace(0.00085 ** 0.5, 0.0120 ** 0.5, 1000) ** 2
+        alphas = 1.0 - betas
+        alphas_cumprod = torch.cumprod(alphas, 0)
+        sigmas = ((1 - alphas_cumprod) / alphas_cumprod) ** 0.5
+        log_sigmas = sigmas.log()
+
+        return sigmas, log_sigmas
+
+    def to(self, dtype, device):
+        self.sigmas = self.sigmas.to(dtype).to(device)
+        self.log_sigmas = self.log_sigmas.to(dtype).to(device)
+        return self
 
     def sigma_to_timestep(self, sigma):
         log_sigma = sigma.log()
@@ -96,26 +44,26 @@ class Scheduler():
         t = (1 - w) * low_idx + w * high_idx
         return t.view(sigma.shape)
 
-    def timestep_to_sigma(self, t):
-        t = t.float()
-        low_idx, high_idx, w = t.floor().long(), t.ceil().long(), t.frac()
-        log_sigma = (1 - w) * self.log_sigmas[low_idx] + w * self.log_sigmas[high_idx]
-        return log_sigma.exp()
-
-class Sampler():
+class KSampler():
     def __init__(self, model, scheduler, eta):
         self.model = model
-        self.scheduler = scheduler or Scheduler().to(model.dtype, model.device)
+        self.scheduler = scheduler or KScheduler().to(model.dtype, model.device)
         self.eta = eta
 
     def predict(self, latents, sigma):
         timestep = self.scheduler.sigma_to_timestep(sigma)
         return self.model.predict_original(latents, timestep, sigma)
 
+    def prepare_noise(self, noise, sigmas):
+        return noise * sigmas[0]
+    
+    def prepare_latents(self, latents, noise, sigmas):
+        return latents + noise * sigmas[0]
+
     def reset(self):
         pass
 
-class DPM_SDE(Sampler):
+class DPM_SDE(KSampler):
     def __init__(self, model, eta=1.0, scheduler=None):
         super().__init__(model, scheduler, eta)
         self.reset()
@@ -185,7 +133,7 @@ class DPM_SDE(Sampler):
             
         return x
 
-class DPM_2M(Sampler):
+class DPM_2M(KSampler):
     def __init__(self, model, eta=1.0, scheduler=None):
         super().__init__(model, scheduler, eta)
         self.reset()
@@ -213,7 +161,7 @@ class DPM_2M(Sampler):
 
         return x
 
-class DPM_2S_a(Sampler):
+class DPM_2S_a(KSampler):
     def __init__(self, model, eta=1.0, scheduler=None):
         super().__init__(model, scheduler, eta)
     
@@ -244,7 +192,7 @@ class DPM_2S_a(Sampler):
             x = x + noise() * sigma_up
         return x
 
-class Euler(Sampler):
+class Euler(KSampler):
     def __init__(self, model, eta=1.0, scheduler=None):
         super().__init__(model, scheduler, eta)
 
@@ -266,7 +214,7 @@ class Euler(Sampler):
         x = x + d * dt
         return x
 
-class Euler_a(Sampler):
+class Euler_a(KSampler):
     def __init__(self, model, eta=1.0, scheduler=None):
         super().__init__(model, scheduler, eta)
         self.eta = 1.0
