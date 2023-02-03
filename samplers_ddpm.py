@@ -67,3 +67,53 @@ class DDIM(DDPMSampler):
         dir_xt = (1.0 - a_prev - sigma_t**2).sqrt() * e_t
         x_prev = a_prev.sqrt() * pred_x0 + dir_xt + sigma_t * noise()
         return x_prev
+
+class PLMS(DDPMSampler):
+    def __init__(self, model, eta=1.0, scheduler=None):
+        super().__init__(model, scheduler, eta)
+        self.eta = 0.0
+        self.old_eps = []
+
+    def reset(self):
+        self.old_eps = []
+
+    def step(self, x, timesteps, i, noise):        
+        t = timesteps[i]
+        a_t = self.scheduler.alphas[t]
+
+        if i+1 >= len(timesteps):
+            t_prev = timesteps[-1]
+            a_prev = torch.tensor(0.9990)
+        else:
+            t_prev = timesteps[i+1]
+            a_prev = self.scheduler.alphas[t_prev]
+
+        sigma_t = 0.0
+
+        x = self.model.mask_noise(x, a_prev, noise)
+        e_t = self.predict(x, t, a_t)        
+
+        def get_x_prev_and_pred_x0(in_e_t):
+            pred_x0 = (x - (1-a_t).sqrt() * in_e_t) / a_t.sqrt()
+            dir_xt = (1. - a_prev - sigma_t**2).sqrt() * in_e_t
+            x_prev = a_prev.sqrt() * pred_x0 + dir_xt + sigma_t * noise()
+            return x_prev, pred_x0
+
+        if len(self.old_eps) == 0:
+            x_prev, _ = get_x_prev_and_pred_x0(e_t)
+            e_t_next = self.predict(x_prev, t_prev, a_prev)
+            e_t_prime = (e_t + e_t_next) / 2
+        elif len(self.old_eps) == 1:
+            e_t_prime = (3 * e_t - self.old_eps[-1]) / 2
+        elif len(self.old_eps) == 2:
+            e_t_prime = (23 * e_t - 16 * self.old_eps[-1] + 5 * self.old_eps[-2]) / 12
+        elif len(self.old_eps) >= 3:
+            e_t_prime = (55 * e_t - 59 * self.old_eps[-1] + 37 * self.old_eps[-2] - 9 * self.old_eps[-3]) / 24
+
+        x_prev, _ = get_x_prev_and_pred_x0(e_t_prime)
+
+        self.old_eps.append(e_t)
+        if len(self.old_eps) >= 4:
+            self.old_eps.pop(0)
+
+        return x_prev

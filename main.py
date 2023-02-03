@@ -10,7 +10,7 @@ attention.use_split_attention()
 storage = storage.ModelStorage("./models", torch.float16, torch.float32)
 params = wrapper.GenerationParameters(storage, torch.device("cuda"))
 
-if True:
+if False:
     print("TEST 1 - txt2img")
 
     params.reset()
@@ -135,7 +135,7 @@ if False:
     images[0].save("7_a.png")
 
 if True:
-    print("TEST 8 - DDIM")
+    print("TEST 8 - DDIM/PLMS")
     params.reset()
     params.set(model="Anything-V3", sampler="DDIM", clip_skip=2)
     params.set(prompt="masterpiece, highly detailed, white hair, smug, 1girl, sunny, beach, clouds, hat, small")
@@ -144,6 +144,10 @@ if True:
     images = params.txt2img()
     images[0].save("8_a.png")
 
+    params.set(sampler="PLMS")
+    images = params.txt2img()
+    images[0].save("8_b.png")
+
     mask = PIL.Image.open("mask_ddim.png").convert("L")
     params.set(image=PIL.Image.open("8_a.png"), mask=mask)
     params.set(sampler="DDIM")
@@ -151,6 +155,6 @@ if True:
     params.set(strength=0.75, seed=41398214)
 
     images = params.img2img()
-    images[0].save(f"8_b.png")    
+    images[0].save(f"8_c.png")    
     
 

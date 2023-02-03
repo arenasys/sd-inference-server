@@ -25,7 +25,8 @@ SAMPLER_CLASSES = {
     "DPM++ 2M": samplers_k.DPM_2M,
     "DPM++ 2S a": samplers_k.DPM_2S_a,
     "DPM++ SDE": samplers_k.DPM_SDE,
-    "DDIM": samplers_ddpm.DDIM
+    "DDIM": samplers_ddpm.DDIM,
+    "PLMS": samplers_ddpm.PLMS
 }
 
 UPSCALERS_LATENT = {
