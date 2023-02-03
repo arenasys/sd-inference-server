@@ -84,6 +84,46 @@ def use_split_attention():
 
     diffusers.models.attention.CrossAttention.forward = split_cross_attention_forward
 
+def use_split_attention_v1():
+    def split_cross_attention_forward_v1(self, x, context=None, mask=None):
+        h = self.heads
+
+        q_in = self.to_q(x)
+        context = default(context, x)
+
+        context = context if context is not None else x
+        context = context.to(x.dtype)
+
+        k_in = self.to_k(context)
+        v_in = self.to_v(context)
+        del context, x
+        
+        q, k, v = map(lambda t: einops.rearrange(t, 'b n (h d) -> (b h) n d', h=h), (q_in, k_in, v_in))
+        del q_in, k_in, v_in
+
+        r1 = torch.zeros(q.shape[0], q.shape[1], v.shape[2], device=q.device)
+        for i in range(0, q.shape[0], 2):
+            end = i + 2
+            s1 = torch.einsum('b i d, b j d -> b i j', q[i:end], k[i:end])
+            s1 *= self.scale
+
+            s2 = s1.softmax(dim=-1)
+            del s1
+
+            r1[i:end] = torch.einsum('b i j, b j d -> b i d', s2, v[i:end])
+            del s2
+        del q, k, v
+
+        r2 = einops.rearrange(r1, '(b h) n d -> b n (h d)', h=h)
+        del r1
+
+        out = self.to_out[0](r2)
+        out = self.to_out[1](out)
+
+        return out
+
+    diffusers.models.attention.CrossAttention.forward = split_cross_attention_forward_v1
+
 EPSILON = 1e-6
 
 class FlashAttentionFunction(torch.autograd.Function):
