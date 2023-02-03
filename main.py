@@ -5,7 +5,7 @@ import attention
 import storage
 import wrapper
 
-attention.use_split_attention()
+attention.use_split_attention_v1()
 
 storage = storage.ModelStorage("./models", torch.float16, torch.float32)
 params = wrapper.GenerationParameters(storage, torch.device("cuda"))
@@ -134,7 +134,7 @@ if False:
     images = params.txt2img()
     images[0].save("7_a.png")
 
-if True:
+if False:
     print("TEST 8 - DDIM/PLMS")
     params.reset()
     params.set(model="Anything-V3", sampler="DDIM", clip_skip=2)
@@ -156,5 +156,21 @@ if True:
 
     images = params.img2img()
     images[0].save(f"8_c.png")    
-    
 
+if True:
+    print("TEST 9 - HR Sampler")
+    params.reset()
+    params.set(model="Anything-V3", sampler="Euler a", clip_skip=2)
+    params.set(prompt="masterpiece, highly detailed, white hair, smug, 1girl, sunny, beach, clouds, small")
+    params.set(negative_prompt="bad")
+    params.set(width=512, height=512, seed=1400860402, steps=25, scale=7)
+    images = params.txt2img()
+    images[0].save("9_a.png")
+
+    params.set(hr_factor=1.5, hr_strength=0.35, hr_steps=25, hr_upscale="Lanczos")
+    images = params.txt2img()
+    images[0].save("9_b.png")
+
+    params.set(hr_factor=1.5, hr_strength=0.35, hr_steps=25, hr_sampler="DDIM", hr_upscale="Lanczos")
+    images = params.txt2img()
+    images[0].save("9_c.png")

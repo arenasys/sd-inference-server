@@ -238,7 +238,7 @@ class GenerationParameters():
 
         self.set_status("Configuring")
         required = "unet, clip, vae, sampler, prompt, negative_prompt, width, height, seed, scale, steps".split(", ")
-        optional = "clip_skip, eta, batch_size, hr_steps, hr_factor, hr_upscale, hr_strength, lora, hn".split(", ")
+        optional = "clip_skip, eta, batch_size, hr_steps, hr_factor, hr_upscale, hr_strength, hr_sampler, hr_eta, lora, hn".split(", ")
         self.check_parameters(required, optional)
 
         device = self.unet.device
@@ -249,9 +249,14 @@ class GenerationParameters():
 
         self.current_step = 0
         self.total_steps = self.steps
+        
         if self.hr_factor:
             hr_steps = self.hr_steps or self.steps
             self.total_steps += hr_steps
+        if not self.hr_sampler:
+            self.hr_sampler = self.sampler
+        if not self.hr_eta:
+            self.hr_eta = self.eta
 
         conditioning = prompts.ConditioningSchedule(self.clip, positive_prompts, negative_prompts, self.steps, self.clip_skip, batch_size)
         denoiser = guidance.GuidedDenoiser(self.unet, conditioning, self.scale)
@@ -272,7 +277,7 @@ class GenerationParameters():
         noise = utils.NoiseSchedule(seeds, subseeds, width // 8, height // 8, device)
         conditioning.reset()
         denoiser.reset()
-        sampler.reset()
+        sampler = SAMPLER_CLASSES[self.hr_sampler](denoiser, self.hr_eta)
 
         self.set_status("Upscaling")
         latents = self.upscale_latents(latents, self.hr_upscale, width, height, seeds)
