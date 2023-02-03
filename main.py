@@ -157,7 +157,7 @@ if False:
     images = params.img2img()
     images[0].save(f"8_c.png")    
 
-if True:
+if False:
     print("TEST 9 - HR Sampler")
     params.reset()
     params.set(model="Anything-V3", sampler="Euler a", clip_skip=2)
@@ -174,3 +174,14 @@ if True:
     params.set(hr_factor=1.5, hr_strength=0.35, hr_steps=25, hr_sampler="DDIM", hr_upscale="Lanczos")
     images = params.txt2img()
     images[0].save("9_c.png")
+
+if True:
+    print("TEST 9 - HR Scheduling")
+    params.reset()
+    params.set(model="Anything-V3", sampler="Euler a", clip_skip=2)
+    params.set(prompt="masterpiece, highly detailed, [white hair:red hair:HR], smug, 1girl, sunny, beach, clouds, small")
+    params.set(negative_prompt="bad")
+    params.set(width=512, height=512, seed=1400860402, steps=25, scale=7)
+    params.set(hr_factor=1.5, hr_strength=0.7, hr_steps=20)
+    images = params.txt2img()
+    images[0].save("10_a.png")

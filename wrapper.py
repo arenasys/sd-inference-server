@@ -249,7 +249,7 @@ class GenerationParameters():
 
         self.current_step = 0
         self.total_steps = self.steps
-        
+
         if self.hr_factor:
             hr_steps = self.hr_steps or self.steps
             self.total_steps += hr_steps
@@ -275,7 +275,7 @@ class GenerationParameters():
         height = int(self.height * self.hr_factor)
 
         noise = utils.NoiseSchedule(seeds, subseeds, width // 8, height // 8, device)
-        conditioning.reset()
+        conditioning.switch_to_HR()
         denoiser.reset()
         sampler = SAMPLER_CLASSES[self.hr_sampler](denoiser, self.hr_eta)
 

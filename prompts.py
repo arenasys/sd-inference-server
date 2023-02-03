@@ -10,20 +10,22 @@ prompt: (emphasis | deemphasis | numeric | scheduled | alternate | plain | WHITE
 emphasis: "(" prompt ")"
 deemphasis: "[" prompt "]"
 numeric: "(" prompt ":" [_WHITESPACE] NUMBER [_WHITESPACE]")"
-scheduled: "[" [prompt ":"] prompt ":" [_WHITESPACE] NUMBER [_WHITESPACE]"]"
+scheduled: "[" [prompt ":"] prompt ":" [_WHITESPACE] specifier [_WHITESPACE]"]"
 alternate: "[" prompt ("|" prompt)+ "]"
+specifier: NUMBER | HR
+HR: "HR"
 WHITESPACE: /\s+/
 _WHITESPACE: /\s+/
 plain: /([^\\\[\]():|]|\\.)+/
 %import common.SIGNED_NUMBER -> NUMBER
 """, tree_class=WeightedTree)
 
-def parse_prompt(prompt, steps):
+def parse_prompt(prompt, steps, HR=False):
     if not prompt:
         return [(steps, [["", 1.0]])]
 
-    def extract(tree, step):
-        def propagate(node, output, step, weight):
+    def extract(tree, step, HR=False):
+        def propagate(node, output, step, HR, weight):
             if type(node) == WeightedTree:
                 node.weight = weight
                 children = node.children
@@ -33,28 +35,35 @@ def parse_prompt(prompt, steps):
                     node.weight *= float(node.children[1])
                     children = [node.children[0]]
                 if node.data == "scheduled":
-                    if step <= float(node.children[2]):
-                        children = [node.children[0]]
+                    specifier = node.children[2].children[0]
+                    if specifier == "HR":
+                        if not HR:
+                            children = [node.children[0]]
+                        else:
+                            children = [node.children[1]]
                     else:
-                        children = [node.children[1]]
+                        if step <= float(specifier):
+                            children = [node.children[0]]
+                        else:
+                            children = [node.children[1]]
                 if node.data == "alternate":
                     children = [children[step%len(children)]]
                 for child in children:
-                    propagate(child, output, step, node.weight)
+                    propagate(child, output, step, HR, node.weight)
             elif node:
                 if output and output[-1][1] == weight:
                     output[-1][0] += str(node)
                 else:
                     output.append([str(node), weight])
         output = []
-        propagate(tree, output, step, 1.0)
+        propagate(tree, output, step, HR, 1.0)
         return output
 
     tree = prompt_grammar.parse(prompt)
 
     schedules = []
     for step in range(steps, 0, -1):
-        scheduled = extract(tree, step)
+        scheduled = extract(tree, step, HR)
         if not schedules or tuple(schedules[-1][1]) != tuple(scheduled):
             schedules += [(step, scheduled)]
     schedules = schedules[::-1]
@@ -111,9 +120,9 @@ def tokenize_prompt(clip, parsed):
         chunks = [[]]
     
     # truncate chunks, only 3 allowed!
-    #if len(chunks) > 3:
-    #    chunks = chunks[:3]
-    
+    if len(chunks) > 3:
+        chunks = chunks[:3]
+
     return chunks
 
 def encode_tokens(clip, chunks, clip_skip=1):
@@ -158,41 +167,50 @@ def encode_tokens(clip, chunks, clip_skip=1):
     encoding = torch.hstack(chunk_encodings)
     return encoding
 
-def get_encoding_at_step(schedule, step):
-    for start, encoding in schedule:
-        if start >= step:
-            return encoding
-    return schedule[-1][1]
-
-class ConditioningSchedule():   
-    def __init__(self, clip, prompt, negative_prompt, steps, clip_skip, batch_size):
-        self.positives = []
-        self.negatives = []
-
-        tokenized_pos = []
-        tokenized_neg = []
-
-        for i in range(len(prompt)):
-            schedule_pos = parse_prompt(prompt[i], steps)
-            tokenized_pos += [[(steps, tokenize_prompt(clip, prompt)) for steps, prompt in schedule_pos]]
-
-        for i in range(len(negative_prompt)):
-            schedule_neg = parse_prompt(negative_prompt[i], steps)
-            tokenized_neg += [[(steps, tokenize_prompt(clip, prompt)) for steps, prompt in schedule_neg]]
-
-        max_chunks = max([max([len(chunk) for _, chunk in prompt]) for prompt in tokenized_pos + tokenized_neg])
-
-        for i in range(len(tokenized_pos)):
-            padded_tokenized_pos = [(steps, chunks + [chunks[-1]] * (max_chunks-len(chunks))) for steps, chunks in tokenized_pos[i]]
-            encoded_pos = [(steps, encode_tokens(clip, chunks, clip_skip)) for steps, chunks in padded_tokenized_pos]
-            self.positives += [encoded_pos]
+class PromptSchedule():
+    def __init__(self, prompt, steps, clip, HR):
+        self.schedule = parse_prompt(prompt, steps, HR)
+        self.tokenized = [(steps, tokenize_prompt(clip, prompt)) for steps, prompt in self.schedule]
+        self.chunks = max(len(p) for _, p in self.tokenized)
+        self.encoded = None
+    
+    def pad_to_length(self, max_chunks):
+        self.tokenized = [(steps, chunks + [chunks[-1]] * (max_chunks-len(chunks))) for steps, chunks in self.tokenized]
         
-        for i in range(len(tokenized_neg)):
-            padded_tokenized_neg = [(steps, chunks + [chunks[-1]] * (max_chunks-len(chunks))) for steps, chunks in tokenized_neg[i]]
-            encoded_neg = [(steps, encode_tokens(clip, chunks, clip_skip)) for steps, chunks in padded_tokenized_neg]
-            self.negatives += [encoded_neg]
+    def encode(self, clip, clip_skip):
+        self.encoded = [(steps, encode_tokens(clip, chunks, clip_skip)) for steps, chunks in self.tokenized]
 
+    def get_encoding_at_step(self, step):
+        for start, encoding in self.encoded:
+            if start >= step:
+                return encoding
+        return encoding[-1][1]
+    
+class ConditioningSchedule():
+    def __init__(self, clip, prompt, negative_prompt, steps, clip_skip, batch_size):
+        self.clip = clip
+        self.prompt = prompt
+        self.negative_prompt = negative_prompt
+        self.steps = steps
+        self.clip_skip = clip_skip
         self.batch_size = batch_size
+        self.HR = False
+        self.prepare()
+
+    def switch_to_HR(self):
+        self.HR = True
+        self.prepare()
+
+    def prepare(self):
+        self.positives = [PromptSchedule(p, self.steps, self.clip, self.HR) for p in self.prompt]
+        self.negatives = [PromptSchedule(p, self.steps, self.clip, self.HR) for p in self.negative_prompt]
+
+        max_chunks = max([p.chunks for p in self.positives + self.negatives])
+
+        for p in self.positives + self.negatives:
+            p.pad_to_length(max_chunks)
+            p.encode(self.clip, self.clip_skip)
+
         self.reset()
 
     def reset(self):
@@ -207,7 +225,7 @@ class ConditioningSchedule():
         for i in range(self.batch_size):
             p = i % len(self.positives)
             n = i % len(self.negatives)
-            conditioning_pos += [get_encoding_at_step(self.positives[p], step)]
-            conditioning_neg += [get_encoding_at_step(self.negatives[n], step)]
+            conditioning_pos += [self.positives[p].get_encoding_at_step(step)]
+            conditioning_neg += [self.negatives[n].get_encoding_at_step(step)]
 
         return torch.cat(conditioning_neg + conditioning_pos)
