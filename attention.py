@@ -3,6 +3,12 @@ import einops
 import math
 import diffusers
 
+def use_optimized_attention():
+    try:
+        use_xformers_attention()
+    except Exception:
+        use_split_attention()
+
 def exists(val):
     return val is not None
 

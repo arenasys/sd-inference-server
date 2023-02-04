@@ -5,8 +5,7 @@ import attention
 import storage
 import wrapper
 
-#attention.use_xformers_attention()
-attention.use_split_attention_v1()
+attention.use_optimized_attention()
 
 storage = storage.ModelStorage("./models", torch.float16, torch.float32)
 params = wrapper.GenerationParameters(storage, torch.device("cuda"))

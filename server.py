@@ -138,7 +138,7 @@ class Server(ws_server.WebSocketServer):
         return id in self.clients
 
 if __name__ == "__main__":
-    attention.use_split_attention()
+    attention.use_optimized_attention()
 
     model_storage = storage.ModelStorage("./models", torch.float16, torch.float32)
     params = wrapper.GenerationParameters(model_storage, torch.device("cuda"))
