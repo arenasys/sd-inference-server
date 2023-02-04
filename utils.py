@@ -32,7 +32,7 @@ def encode_images(vae, seeds, images):
         images = preprocess_images(images).to(vae.device)
         noise = singular_noise(seeds, images.shape[3] // 8, images.shape[2] // 8, vae.device)
 
-        dists = vae.encode(images).latent_dist
+        dists = vae.encode(images)
         mean = torch.stack([dists.mean[i%len(images)] for i in range(len(seeds))])
         std = torch.stack([dists.std[i%len(images)] for i in range(len(seeds))])
 

@@ -5,7 +5,6 @@ import safetensors.torch
 
 import models
 import upscalers
-import lora
 
 class ModelStorage():
     def __init__(self, path, dtype, vae_dtype=None):
@@ -106,13 +105,11 @@ class ModelStorage():
 
     def get_unet(self, name, device):
         unet = self.get_component(name, "UNET", device)
-        unet.additional = models.AdditionalNetworks(unet)
         return unet
 
     def get_clip(self, name, device):
         clip = self.get_component(name, "CLIP", device)
         clip.textual_inversions = {}
-        clip.additional = models.AdditionalNetworks(clip)
         return clip
 
     def get_vae(self, name, device):

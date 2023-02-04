@@ -5,7 +5,7 @@ import utils
 from transformers import CLIPTextConfig, CLIPTokenizer
 from clip import CustomCLIP
 from diffusers import AutoencoderKL, UNet2DConditionModel
-from diffusers.models.vae import DiagonalGaussianDistribution, AutoencoderKLOutput
+from diffusers.models.vae import DiagonalGaussianDistribution
 from lora import LoRANetwork
 from hypernetwork import Hypernetwork
 
@@ -15,6 +15,7 @@ class UNET(UNet2DConditionModel):
         self.parameterization = "eps" if self.model_type == "SDv1" else "v"
         super().__init__(**UNET.get_config(model_type))
         self.to(dtype)
+        self.additional = None
 
     def autocast(self):
         return "cuda" if "cuda" in str(self.device) else "cpu"
@@ -32,6 +33,8 @@ class UNET(UNet2DConditionModel):
             missing, _ = unet.load_state_dict(state_dict, strict=False)
         if missing:
             raise ValueError("ERROR missing keys: " + ", ".join(missing))
+        
+        unet.additional = AdditionalNetworks(unet)
         return unet
 
     @staticmethod
@@ -83,7 +86,7 @@ class VAE(AutoencoderKL):
         h = self.encoder(x)
         moments = self.quant_conv(h)
         posterior = VAE.LatentDistribution(moments)
-        return AutoencoderKLOutput(posterior)
+        return posterior
         
     @staticmethod
     def from_model(state_dict, dtype=None):
@@ -124,6 +127,7 @@ class CLIP(CustomCLIP):
         self.to(dtype)
 
         self.tokenizer = Tokenizer(model_type)
+        self.additional = None
         
     def autocast(self):
         return "cuda" if "cuda" in str(self.device) else "cpu"
@@ -141,6 +145,8 @@ class CLIP(CustomCLIP):
             missing, _ = clip.load_state_dict(state_dict, strict=False)
         if missing:
             raise ValueError("missing keys: " + ', '.join(missing))
+
+        clip.additional = AdditionalNetworks(clip)
         return clip
 
     @staticmethod
@@ -263,8 +269,8 @@ class AdditionalNetworks():
             self.hns.append(module)
 
         def clear(self):
-            self.loras = []
-            self.hns = []
+            self.loras.clear()
+            self.hns.clear()
 
     def __init__(self, model):
         self.modules = {}

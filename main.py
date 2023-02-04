@@ -6,11 +6,12 @@ import storage
 import wrapper
 
 attention.use_optimized_attention()
+attention.use_split_attention_v1()
 
 storage = storage.ModelStorage("./models", torch.float16, torch.float32)
 params = wrapper.GenerationParameters(storage, torch.device("cuda"))
 
-if True:
+if False:
     print("TEST 1 - txt2img")
 
     params.reset()

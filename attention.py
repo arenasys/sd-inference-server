@@ -25,11 +25,11 @@ def use_split_attention():
         mem_free_total = mem_free_cuda + mem_free_torch
         return mem_free_total
 
-    def split_cross_attention_forward(self, x, context=None, mask=None):
+    def split_cross_attention_forward(self, x, encoder_hidden_states=None, attention_mask=None):
         h = self.heads
 
         q_in = self.to_q(x)
-        context = default(context, x)
+        context = default(encoder_hidden_states, x)
 
         context = context if context is not None else x
         context = context.to(x.dtype)
@@ -91,13 +91,11 @@ def use_split_attention():
     diffusers.models.attention.CrossAttention.forward = split_cross_attention_forward
 
 def use_split_attention_v1():
-    def split_cross_attention_forward_v1(self, x, context=None, mask=None):
+    def split_cross_attention_forward_v1(self, x, encoder_hidden_states=None, attention_mask=None):
         h = self.heads
 
         q_in = self.to_q(x)
-        context = default(context, x)
-
-        context = context if context is not None else x
+        context = default(encoder_hidden_states, x)
         context = context.to(x.dtype)
 
         k_in = self.to_k(context)
@@ -215,14 +213,14 @@ class FlashAttentionFunction(torch.autograd.Function):
 def use_flash_attention():
   flash_func = FlashAttentionFunction
 
-  def forward_flash_attn(self, x, context=None, mask=None):
+  def forward_flash_attn(self, x, encoder_hidden_states=None, attention_mask=None):
     q_bucket_size = 512
     k_bucket_size = 1024
 
     h = self.heads
     q = self.to_q(x)
 
-    context = context if context is not None else x
+    context = default(encoder_hidden_states, x)
     context = context.to(x.dtype)
 
     k = self.to_k(context)
@@ -244,10 +242,10 @@ def use_flash_attention():
 def use_xformers_attention():
     import xformers
 
-    def xformers_attention_forward(self, x, context=None, mask=None):
+    def xformers_attention_forward(self, x, encoder_hidden_states=None, attention_mask=None):
         h = self.heads
         q_in = self.to_q(x)
-        context = default(context, x)
+        context = default(encoder_hidden_states, x)
 
         k_in = self.to_k(context)
         v_in = self.to_v(context)
