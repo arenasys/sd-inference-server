@@ -5,12 +5,13 @@ import attention
 import storage
 import wrapper
 
+#attention.use_xformers_attention()
 attention.use_split_attention_v1()
 
 storage = storage.ModelStorage("./models", torch.float16, torch.float32)
 params = wrapper.GenerationParameters(storage, torch.device("cuda"))
 
-if False:
+if True:
     print("TEST 1 - txt2img")
 
     params.reset()
@@ -175,8 +176,8 @@ if False:
     images = params.txt2img()
     images[0].save("9_c.png")
 
-if True:
-    print("TEST 9 - HR Scheduling")
+if False:
+    print("TEST 10 - HR Scheduling")
     params.reset()
     params.set(model="Anything-V3", sampler="Euler a", clip_skip=2)
     params.set(prompt="masterpiece, highly detailed, [white hair:red hair:HR], smug, 1girl, sunny, beach, clouds, small")

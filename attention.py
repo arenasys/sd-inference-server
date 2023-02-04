@@ -234,3 +234,31 @@ def use_flash_attention():
     return out
 
   diffusers.models.attention.CrossAttention.forward = forward_flash_attn
+
+def use_xformers_attention():
+    import xformers
+
+    def xformers_attention_forward(self, x, context=None, mask=None):
+        h = self.heads
+        q_in = self.to_q(x)
+        context = default(context, x)
+
+        k_in = self.to_k(context)
+        v_in = self.to_v(context)
+
+        q, k, v = map(lambda t: einops.rearrange(t, 'b n (h d) -> b n h d', h=h), (q_in, k_in, v_in))
+        del q_in, k_in, v_in
+
+        dtype = q.dtype
+
+        out = xformers.ops.memory_efficient_attention(q, k, v, attn_bias=None)
+
+        out = out.to(dtype)
+
+        out = einops.rearrange(out, 'b n h d -> b n (h d)', h=h)
+
+        out = self.to_out[0](out)
+        out = self.to_out[1](out)
+        return out
+    
+    diffusers.models.attention.CrossAttention.forward = xformers_attention_forward
