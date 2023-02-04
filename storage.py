@@ -153,7 +153,7 @@ class ModelStorage():
             if k.startswith("metadata."):
                 continue
             comp = k.split(".")[1]
-            key = k.removeprefix(f"{model_type}.{comp}.")
+            key = k[len(f"{model_type}.{comp}."):]
             if not comp in sub_state_dicts:
                 sub_state_dicts[comp] = {}
             sub_state_dicts[comp][key] = state_dict[k]
