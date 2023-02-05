@@ -10,9 +10,9 @@ from lora import LoRANetwork
 from hypernetwork import Hypernetwork
 
 class UNET(UNet2DConditionModel):
-    def __init__(self, model_type, dtype):
+    def __init__(self, model_type, prediction_type, dtype):
         self.model_type = model_type
-        self.parameterization = "eps" if self.model_type == "SDv1" else "v"
+        self.prediction_type = prediction_type
         super().__init__(**UNET.get_config(model_type))
         self.to(dtype)
         self.additional = None
@@ -25,11 +25,12 @@ class UNET(UNet2DConditionModel):
         if not dtype:
             dtype = state_dict['metadata']['dtype']
         model_type = state_dict['metadata']['model_type']
+        prediction_type = state_dict['metadata']['prediction_type']
 
         utils.cast_state_dict(state_dict, dtype)
         
         with utils.DisableInitialization():
-            unet = UNET(model_type, dtype)
+            unet = UNET(model_type, prediction_type, dtype)
             missing, _ = unet.load_state_dict(state_dict, strict=False)
         if missing:
             raise ValueError("ERROR missing keys: " + ", ".join(missing))
@@ -62,6 +63,7 @@ class UNET(UNet2DConditionModel):
                 layers_per_block=2,
                 cross_attention_dim=1024,
                 attention_head_dim=[5, 10, 20, 20],
+                use_linear_projection=True
             )
         else:
             raise ValueError(f"unknown type: {model_type}")

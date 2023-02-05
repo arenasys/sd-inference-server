@@ -4,6 +4,9 @@ import PIL
 import attention
 import storage
 import wrapper
+import convert
+
+convert.autoconvert("./models/SD", "./models/TRASH")
 
 attention.use_optimized_attention()
 
@@ -25,6 +28,7 @@ if True:
     params.set(hr_factor=2.0, hr_strength=0.7, hr_steps=20)
     images = params.txt2img()
     images[0].save("1_b.png")
+
 
 if False:
     print("TEST 2 - img2img")
@@ -100,7 +104,7 @@ if False:
     images = params.txt2img()
     images[0].save("5_a.png")
 
-if True:
+if False:
     print("TEST 6 - LoRA & HN")
     params.reset()
     params.set(model="Anything-V3", sampler="Euler a", clip_skip=2)
@@ -122,11 +126,11 @@ if True:
     images = params.txt2img()
     images[0].save(f"6_c.png")
 
-if True:
+if False:
     print("TEST 7 - SDv2")
 
     params.reset()
-    params.set(model="SDv2", sampler="Euler a")
+    params.set(model="waifu-diffusion", sampler="Euler a")
     params.set(prompt="confused cat looking up")
     params.set(negative_prompt="bad")
     params.set(width=768, height=768, seed=665746805, steps=20, scale=7)

@@ -138,7 +138,7 @@ class ModelStorage():
             dtype = self.vae_dtype if comp == "VAE" else self.dtype
             model = self.classes[comp].from_model(self.file_cache[file][comp], dtype)
         else:
-            raise ValueError(f"ERROR model doesnt contain a {comp}: {model}")
+            raise ValueError(f"ERROR model doesnt contain a {comp}: {name}")
 
         self.loaded[comp][name] = model
         return self.move(model, name, comp, device)
@@ -183,7 +183,13 @@ class ModelStorage():
             return {comp: torch.load(file)}
 
     def parse_model(self, state_dict):
-        model_type = ''.join([chr(c) for c in state_dict["metadata.model_type"]])
+        metadata = {}
+        for k in state_dict:
+            if k.startswith("metadata."):
+                kk = k.split(".", 1)[1]
+                metadata[kk] = ''.join([chr(c) for c in state_dict[k]])
+
+        model_type = metadata["model_type"]
 
         sub_state_dicts = {}
         for k in list(state_dict.keys()):
@@ -203,6 +209,7 @@ class ModelStorage():
                 if type(t) == torch.Tensor and t.dtype in [torch.float16, torch.float32]:
                     dtype = t.dtype
                     break
-            sub_state_dicts[m]['metadata'] = dict(model_type=model_type, dtype=dtype)
+            metadata["dtype"] = dtype
+            sub_state_dicts[m]['metadata'] = metadata.copy()
         
         return sub_state_dicts

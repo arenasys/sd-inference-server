@@ -17,7 +17,7 @@ class GuidedDenoiser():
         self.mask = mask
         self.original = original * 0.18215
 
-    def predict_noise_eps(self, latents, timestep, conditioning, alpha):
+    def predict_noise_epsilon(self, latents, timestep, conditioning, alpha):
         noise_pred = self.unet(latents, timestep, encoder_hidden_states=conditioning).sample
         return noise_pred
 
@@ -35,9 +35,9 @@ class GuidedDenoiser():
         model_input = torch.cat([latents] * 2)
         conditioning = self.conditioning
 
-        if self.unet.parameterization == "eps":
-            noise_pred = self.predict_noise_eps(model_input, timestep, conditioning, alpha)
-        elif self.unet.parameterization == "v":
+        if self.unet.prediction_type == "epsilon":
+            noise_pred = self.predict_noise_epsilon(model_input, timestep, conditioning, alpha)
+        elif self.unet.prediction_type == "v":
             noise_pred = self.predict_noise_v(model_input, timestep, conditioning, alpha)
 
         neg_pred, pos_pred = noise_pred.chunk(2)
@@ -45,7 +45,7 @@ class GuidedDenoiser():
 
         return noise_pred
 
-    def predict_original_eps(self, latents, timestep, sigma, conditioning):
+    def predict_original_epsilon(self, latents, timestep, sigma, conditioning):
         c_in = 1 / (sigma ** 2 + 1) ** 0.5
         noise_pred = self.unet(latents * c_in, timestep, encoder_hidden_states=conditioning).sample
         original_pred = latents - sigma * noise_pred
@@ -69,9 +69,9 @@ class GuidedDenoiser():
         model_input = torch.cat([latents] * 2)
         conditioning = self.conditioning
 
-        if self.unet.parameterization == "eps":
-            original_pred = self.predict_original_eps(model_input, timestep, sigma, conditioning)
-        elif self.unet.parameterization == "v":
+        if self.unet.prediction_type == "epsilon":
+            original_pred = self.predict_original_epsilon(model_input, timestep, sigma, conditioning)
+        elif self.unet.prediction_type == "v":
             original_pred = self.predict_original_v(model_input, timestep, sigma, conditioning)
 
         neg_pred, pos_pred = original_pred.chunk(2)

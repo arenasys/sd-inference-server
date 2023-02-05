@@ -3,7 +3,7 @@ import tqdm
 import numpy as np
 
 def txt2img(denoiser, sampler, noise, steps, callback):
-    with torch.autocast(denoiser.unet.autocast(), denoiser.unet.dtype):
+    with torch.autocast("cuda", denoiser.unet.dtype):
         schedule = sampler.scheduler.get_schedule(steps)
         latents = sampler.prepare_noise(noise(), schedule)
 
