@@ -13,7 +13,9 @@ class ModelStorage():
         self.vae_dtype = vae_dtype or dtype
 
         self.classes = {"UNET": models.UNET, "CLIP": models.CLIP, "VAE": models.VAE, "SR": upscalers.SR, "LoRA": models.LoRA, "HN": models.HN}
-        
+        self.vram_limits = {"UNET": 1, "CLIP": 1, "VAE": 1, "SR": 1}
+        self.total_limits = {"UNET": 1, "CLIP": 1, "VAE": 1, "SR": 1}
+
         self.files = {k:{} for k in self.classes}
         self.loaded = {k:{} for k in self.classes}
         self.file_cache = {}
@@ -22,18 +24,55 @@ class ModelStorage():
 
         self.find_all()
 
-    def clear_cache(self):
+    def clear_file_cache(self):
         self.file_cache = {}
+
+    def enforce_vram_limit(self, allowed, comp, limit):
+        found = 0
+        for m in self.loaded[comp]:
+            if m == allowed:
+                continue
+            if str(self.loaded[comp][m].device) != "cpu":
+                if found >= limit:
+                    self.loaded[comp][m].to("cpu")
+                else:
+                    found += 1
+        torch.cuda.empty_cache()
+
+    def enforce_total_limit(self, allowed, comp, limit):
+        found = 0
+        for m in list(self.loaded[comp].keys()):
+            if m == allowed:
+                continue
+            if found >= limit:
+                self.loaded[comp][m].to("cpu")
+                del self.loaded[comp][m]
+            else:
+                found += 1
+        torch.cuda.empty_cache()
+
+    def enforce_network_limit(self, used, comp):
+        # networks cant have a hard limit since you can use an arbitrary number of them
+        # so they are "decayed" from gpu -> cpu -> disk as they are left unused
+        for m in list(self.loaded[comp].keys()):
+            if m in used:
+                continue
+            if str(self.loaded[comp][m].device) != "cpu":
+                self.loaded[comp][m].to("cpu")
+            else:
+                del self.loaded[comp][m]
 
     def move(self, model, name, comp, device):
         if model.device == device:
             return model
 
-        # TODO: expand on this to allow cacheing
+        if comp in self.total_limits:
+            if str(device) == "cpu":
+                self.enforce_total_limit(name, comp, self.total_limits[comp]-1)
+            else:
+                self.enforce_vram_limit(name, comp, self.vram_limits[comp]-1)
+                self.enforce_total_limit(name, comp, self.total_limits[comp]-1)
         
-        self.loaded[comp] = {name: model}
-        torch.cuda.empty_cache()
-
         return model.to(device)
 
     def get_name(self, file):
@@ -100,7 +139,8 @@ class ModelStorage():
             model = self.classes[comp].from_model(self.file_cache[file][comp], dtype)
         else:
             raise ValueError(f"ERROR model doesnt contain a {comp}: {model}")
-        
+
+        self.loaded[comp][name] = model
         return self.move(model, name, comp, device)
 
     def get_unet(self, name, device):

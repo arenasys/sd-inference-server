@@ -6,12 +6,11 @@ import storage
 import wrapper
 
 attention.use_optimized_attention()
-attention.use_split_attention_v1()
 
 storage = storage.ModelStorage("./models", torch.float16, torch.float32)
 params = wrapper.GenerationParameters(storage, torch.device("cuda"))
 
-if False:
+if True:
     print("TEST 1 - txt2img")
 
     params.reset()
@@ -101,7 +100,7 @@ if False:
     images = params.txt2img()
     images[0].save("5_a.png")
 
-if False:
+if True:
     print("TEST 6 - LoRA & HN")
     params.reset()
     params.set(model="Anything-V3", sampler="Euler a", clip_skip=2)
@@ -123,11 +122,11 @@ if False:
     images = params.txt2img()
     images[0].save(f"6_c.png")
 
-if False:
+if True:
     print("TEST 7 - SDv2")
 
     params.reset()
-    params.set(model="sd-v2", sampler="Euler a")
+    params.set(model="SDv2", sampler="Euler a")
     params.set(prompt="confused cat looking up")
     params.set(negative_prompt="bad")
     params.set(width=768, height=768, seed=665746805, steps=20, scale=7)

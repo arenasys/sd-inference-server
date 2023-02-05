@@ -102,7 +102,7 @@ class GenerationParameters():
             self.set_status("Loading VAE")
             self.vae = self.storage.get_vae(self.vae or self.model, self.device)
 
-        self.storage.clear_cache()
+        self.storage.clear_file_cache()
 
         if self.hr_upscale:
             if not self.hr_upscale in UPSCALERS_LATENT and not self.hr_upscale in UPSCALERS_PIXEL:
@@ -206,6 +206,8 @@ class GenerationParameters():
         if self.lora:
             self.set_status("Loading LoRAs")
             (lora_names, lora_strengths) = self.listify(self.lora, self.lora_strength)
+
+            self.storage.enforce_network_limit(lora_names, "LoRA")
             self.loras = [self.storage.get_lora(name, device) for name in lora_names]
 
             if len(lora_strengths) < len(self.loras):
@@ -214,10 +216,14 @@ class GenerationParameters():
             for i, lora in enumerate(self.loras):
                 lora.set_strength(lora_strengths[i])
                 lora.attach(self.unet.additional, self.clip.additional)
+        else:
+            self.storage.enforce_network_limit([], "LoRA")
 
         if self.hn:
             self.set_status("Loading Hypernetworks")
             (hn_names, hn_strengths) = self.listify(self.hn, self.hn_strength)
+
+            self.storage.enforce_network_limit(hn_names, "HN")
             self.hns = [self.storage.get_hypernetwork(name, device) for name in hn_names]
 
             if len(hn_strengths) < len(self.hns):
@@ -226,6 +232,8 @@ class GenerationParameters():
             for i, hn in enumerate(self.hns):
                 hn.set_strength(hn_strengths[i])
                 hn.attach(self.unet.additional)
+        else:
+            self.storage.enforce_network_limit([], "HN")
 
     def detach_networks(self):
         self.unet.additional.clear()
