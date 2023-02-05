@@ -119,10 +119,6 @@ def tokenize_prompt(clip, parsed):
     if not chunks:
         chunks = [[]]
     
-    # truncate chunks, only 3 allowed!
-    if len(chunks) > 3:
-        chunks = chunks[:3]
-
     return chunks
 
 def encode_tokens(clip, chunks, clip_skip=1):
