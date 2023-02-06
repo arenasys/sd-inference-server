@@ -82,7 +82,7 @@ class GuidedDenoiser():
         return original_pred
 
     def set_step(self, step):
-        self.conditioning = self.conditioning_schedule[step]
+        self.conditioning = self.conditioning_schedule[step].to(self.dtype)
 
     def reset(self):
         self.mask = None
