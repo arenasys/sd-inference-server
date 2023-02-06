@@ -14,8 +14,8 @@ class GuidedDenoiser():
         self.dtype = unet.dtype
 
     def set_mask(self, mask, original):
-        self.mask = mask
-        self.original = original * 0.18215
+        self.mask = mask.to(self.dtype)
+        self.original = original.to(self.dtype) * 0.18215
 
     def predict_noise_epsilon(self, latents, timestep, conditioning, alpha):
         noise_pred = self.unet(latents, timestep, encoder_hidden_states=conditioning).sample

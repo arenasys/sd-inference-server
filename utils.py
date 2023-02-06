@@ -28,17 +28,16 @@ def preprocess_masks(masks):
     return torch.cat([process(m) for m in masks])
 
 def encode_images(vae, seeds, images):
-    with torch.autocast(vae.autocast(), vae.dtype):
-        images = preprocess_images(images).to(vae.device)
-        noise = singular_noise(seeds, images.shape[3] // 8, images.shape[2] // 8, vae.device)
+    images = preprocess_images(images).to(vae.device).to(vae.dtype)
+    noise = singular_noise(seeds, images.shape[3] // 8, images.shape[2] // 8, vae.device).to(vae.dtype)
 
-        dists = vae.encode(images)
-        mean = torch.stack([dists.mean[i%len(images)] for i in range(len(seeds))])
-        std = torch.stack([dists.std[i%len(images)] for i in range(len(seeds))])
+    dists = vae.encode(images)
+    mean = torch.stack([dists.mean[i%len(images)] for i in range(len(seeds))])
+    std = torch.stack([dists.std[i%len(images)] for i in range(len(seeds))])
 
-        latents = mean + std * noise
-        
-        return latents
+    latents = mean + std * noise
+    
+    return latents
 
 def encode_images_disjointed(vae, seeds, images):
     latents = []
@@ -47,10 +46,9 @@ def encode_images_disjointed(vae, seeds, images):
     return latents
     
 def decode_images(vae, latents):
-    with torch.autocast(vae.autocast(), vae.dtype):
-        latents = latents.clone().detach().to(vae.device).to(vae.dtype)
-        images = vae.decode(latents).sample
-        return postprocess_images(images)
+    latents = latents.clone().detach().to(vae.device).to(vae.dtype)
+    images = vae.decode(latents).sample
+    return postprocess_images(images)
 
 def get_latents(vae, seeds, images):
     if type(images) == torch.Tensor:
@@ -143,11 +141,12 @@ def cast_state_dict(state_dict, dtype):
     return state_dict
 
 class NoiseSchedule():
-    def __init__(self, seeds, subseeds, width, height, device):
+    def __init__(self, seeds, subseeds, width, height, device, dtype):
         self.seeds = seeds
         self.subseeds = subseeds
         self.shape = (4, int(height), int(width))
         self.device = device
+        self.dtype = dtype
         self.steps = 0
         self.index = 0
 
@@ -173,13 +172,13 @@ class NoiseSchedule():
             noises += [[]]
 
             for _ in range(self.steps+1):
-                noise = torch.randn(self.shape, generator=generator, device=self.device)
+                noise = torch.randn(self.shape, generator=generator, device=self.device).to(self.dtype)
                 noises[i] += [noise]
 
         for i in range(len(self.subseeds)):
             seed, strength = self.subseeds[i]
             generator.manual_seed(seed)
-            subnoise = torch.randn(self.shape, generator=generator, device=self.device)
+            subnoise = torch.randn(self.shape, generator=generator, device=self.device).to(self.dtype)
             noises[i][0] = slerp_noise(strength, noises[i][0], subnoise)
 
         self.noise = [torch.stack(n) for n in zip(*noises)]

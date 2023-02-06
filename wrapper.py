@@ -106,8 +106,13 @@ class GenerationParameters():
 
         if self.hr_upscale:
             if not self.hr_upscale in UPSCALERS_LATENT and not self.hr_upscale in UPSCALERS_PIXEL:
-                self.set_status("status", "Loading Upscaler")
+                self.set_status("Loading Upscaler")
                 self.upscale_model = self.storage.get_upscaler(self.hr_upscale, self.device)
+
+        if self.img2img_upscale:
+            if not self.img2img_upscale in UPSCALERS_LATENT and not self.img2img_upscale in UPSCALERS_PIXEL:
+                self.set_status("Loading Upscaler")
+                self.upscale_model = self.storage.get_upscaler(self.img2img_upscale, self.device)
 
     def check_parameters(self, required, optional):
         missing, unused = list(required), []
@@ -268,7 +273,7 @@ class GenerationParameters():
 
         conditioning = prompts.ConditioningSchedule(self.clip, positive_prompts, negative_prompts, self.steps, self.clip_skip, batch_size)
         denoiser = guidance.GuidedDenoiser(self.unet, conditioning, self.scale)
-        noise = utils.NoiseSchedule(seeds, subseeds, self.width // 8, self.height // 8, device)
+        noise = utils.NoiseSchedule(seeds, subseeds, self.width // 8, self.height // 8, device, self.unet.dtype)
         sampler = SAMPLER_CLASSES[self.sampler](denoiser, self.eta)
         
         self.set_status("Generating")
@@ -282,7 +287,7 @@ class GenerationParameters():
         width = int(self.width * self.hr_factor)
         height = int(self.height * self.hr_factor)
 
-        noise = utils.NoiseSchedule(seeds, subseeds, width // 8, height // 8, device)
+        noise = utils.NoiseSchedule(seeds, subseeds, width // 8, height // 8, device, self.unet.dtype)
         conditioning.switch_to_HR()
         denoiser.reset()
         sampler = SAMPLER_CLASSES[self.hr_sampler](denoiser, self.hr_eta)
@@ -304,7 +309,7 @@ class GenerationParameters():
 
         self.set_status("Configuring")
         required = "unet, clip, vae, sampler, image, prompt, negative_prompt, seed, scale, steps, strength".split(", ")
-        optional = "mask, mask_blur, clip_skip, eta, batch_size, padding, width, height, lora".split(", ")
+        optional = "img2img_upscale, mask, mask_blur, clip_skip, eta, batch_size, padding, width, height, lora".split(", ")
         self.check_parameters(required, optional)
 
         device = self.unet.device
@@ -330,7 +335,7 @@ class GenerationParameters():
             
         conditioning = prompts.ConditioningSchedule(self.clip, positive_prompts, negative_prompts, self.steps, self.clip_skip, batch_size)
         denoiser = guidance.GuidedDenoiser(self.unet, conditioning, self.scale)
-        noise = utils.NoiseSchedule(seeds, subseeds, width // 8, height // 8, device)
+        noise = utils.NoiseSchedule(seeds, subseeds, width // 8, height // 8, device, self.unet.dtype)
         sampler = SAMPLER_CLASSES[self.sampler](denoiser, self.eta)
 
         if self.mask:

@@ -192,7 +192,7 @@ def autoconvert(folder, trash):
 
     for model in diffusers:
         comps = [f.split(os.path.sep)[-1] for f in glob.glob(os.path.join(model, "*"))]
-        if not "unet" in comps or not "vae" in comps or not "text_encoder" in comps or not "scheduler":
+        if not "unet" in comps or not "vae" in comps or not "text_encoder" in comps or not "scheduler" in comps:
             continue
         try:
             convert_diffusers_folder(model, folder)
