@@ -75,6 +75,7 @@ class GenerationParameters():
             self.callback({"type": "result", "data": {"images": images_data}})
 
     def reset(self):
+        self.storage.find_all()
         for attr in list(self.__dict__.keys()):
             if not attr in ["storage", "device", "callback"]:
                 delattr(self, attr)

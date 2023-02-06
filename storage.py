@@ -81,6 +81,7 @@ class ModelStorage():
         return file
 
     def find_all(self):
+        self.files = {k:{} for k in self.classes}
         for model in glob.glob(os.path.join(self.path, "SD", "*.st")):
             file = os.path.relpath(model, self.path)
 
