@@ -9,7 +9,6 @@ import convert
 convert.autoconvert("./models/SD", "./models/TRASH")
 
 attention.use_optimized_attention()
-attention.use_split_attention_v1()
 
 storage = storage.ModelStorage("./models", torch.float16, torch.float32)
 params = wrapper.GenerationParameters(storage, torch.device("cuda"))
@@ -30,8 +29,7 @@ if True:
     images = params.txt2img()
     images[0].save("1_b.png")
 
-
-if True:
+if False:
     print("TEST 2 - img2img")
 
     params.reset()
@@ -51,7 +49,7 @@ if True:
     images = params.img2img()
     images[0].save("2_b.png")
 
-if True:
+if False:
     print("TEST 3 - Inpainting")
 
     params.reset()
@@ -79,7 +77,7 @@ if True:
     images = params.img2img()
     images[0].save(f"3_c.png")
 
-if True:
+if False:
     print("TEST 4 - Batching")
 
     params.reset()
@@ -93,7 +91,7 @@ if True:
     images[0].save("4_a.png")
     images[1].save("4_b.png")
 
-if True:
+if False:
     print("TEST 5 - Embedding")
     
     params.reset()
@@ -105,7 +103,7 @@ if True:
     images = params.txt2img()
     images[0].save("5_a.png")
 
-if True:
+if False:
     print("TEST 6 - LoRA & HN")
     params.reset()
     params.set(model="Anything-V3", sampler="Euler a", clip_skip=2)
@@ -127,7 +125,7 @@ if True:
     images = params.txt2img()
     images[0].save(f"6_c.png")
 
-if True:
+if False:
     print("TEST 7 - SDv2")
 
     params.reset()
@@ -139,7 +137,7 @@ if True:
     images = params.txt2img()
     images[0].save("7_a.png")
 
-if True:
+if False:
     print("TEST 8 - DDIM/PLMS")
     params.reset()
     params.set(model="Anything-V3", sampler="DDIM", clip_skip=2)
@@ -162,7 +160,7 @@ if True:
     images = params.img2img()
     images[0].save(f"8_c.png")    
 
-if True:
+if False:
     print("TEST 9 - HR Sampler")
     params.reset()
     params.set(model="Anything-V3", sampler="Euler a", clip_skip=2)
@@ -180,7 +178,7 @@ if True:
     images = params.txt2img()
     images[0].save("9_c.png")
 
-if True:
+if False:
     print("TEST 10 - HR Scheduling")
     params.reset()
     params.set(model="Anything-V3", sampler="Euler a", clip_skip=2)
