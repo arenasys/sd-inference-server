@@ -6,30 +6,31 @@ from k_diffusion.sampling import get_ancestral_step, to_d, BrownianTreeNoiseSamp
 class KScheduler():
     def __init__(self):
         self.sigmas, self.log_sigmas = self.get_sigmas()
+        self.dtype = torch.float32
 
     def get_schedule(self, steps):
-        timesteps = np.linspace(0, 999, steps, dtype=float)[::-1].copy()
-        sigmas = self.sigmas.cpu().numpy()
-        sigmas = np.interp(timesteps, np.arange(0, len(sigmas)), sigmas)
-        sigmas = torch.from_numpy(sigmas).to(self.sigmas.device).to(self.sigmas.dtype)
+        timesteps = torch.linspace(999, 0, steps, device=self.sigmas.device).float()
+        low_idx, high_idx, w = timesteps.floor().long(), timesteps.ceil().long(), timesteps.frac()
+        log_sigma = (1 - w) * self.log_sigmas[low_idx] + w * self.log_sigmas[high_idx]
+        sigmas = log_sigma.exp()
         sigmas = torch.cat([sigmas, sigmas.new_zeros([1])])
-        return sigmas
+        return sigmas.to(self.dtype)
 
     def get_truncated_schedule(self, steps, scheduled_steps):
         timesteps = self.get_schedule(scheduled_steps+1)
-        return timesteps[-(steps + 1):]
+        return timesteps[-(steps + 1):].to(self.dtype)
 
     def get_sigmas(self):
-        betas = torch.linspace(0.00085 ** 0.5, 0.0120 ** 0.5, 1000) ** 2
-        alphas = torch.cumprod(1.0 - betas, 0)
-        sigmas = ((1 - alphas) / alphas) ** 0.5
+        betas = torch.linspace(0.00085 ** 0.5, 0.0120 ** 0.5, 1000, dtype=torch.float64) ** 2
+        alphas = torch.tensor(np.cumprod(1. - betas.numpy(), axis=0), dtype=torch.float16)
+        sigmas = ((1 - alphas) / alphas).to(torch.float32) ** 0.5
         log_sigmas = sigmas.log()
-
         return sigmas, log_sigmas
 
     def to(self, dtype, device):
-        self.sigmas = self.sigmas.to(dtype).to(device)
-        self.log_sigmas = self.log_sigmas.to(dtype).to(device)
+        self.dtype = dtype
+        self.sigmas = self.sigmas.to(device)
+        self.log_sigmas = self.log_sigmas.to(device)
         return self
 
     def sigma_to_timestep(self, sigma):

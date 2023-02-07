@@ -8,6 +8,48 @@ from diffusers import AutoencoderKL, UNet2DConditionModel
 from diffusers.models.vae import DiagonalGaussianDistribution
 from lora import LoRANetwork
 from hypernetwork import Hypernetwork
+from unet import SDUNET
+
+class SDUNET(SDUNET):
+    def __init__(self, model_type, prediction_type, dtype):
+        self.model_type = model_type
+        self.prediction_type = prediction_type
+        super().__init__(**SDUNET.get_config(model_type))
+        self.to(dtype)
+        self.additional = None
+
+    def __getattr__(self, name):
+        if name == "device":
+            return next(self.parameters()).device
+        if name == "dtype":
+            return next(self.parameters()).dtype
+        return super().__getattr__(name)
+        
+    @staticmethod
+    def from_model(state_dict, dtype=None):
+        if not dtype:
+            dtype = state_dict['metadata']['dtype']
+        model_type = state_dict['metadata']['model_type']
+        prediction_type = state_dict['metadata']['prediction_type']
+
+        utils.cast_state_dict(state_dict, dtype)
+        
+        with utils.DisableInitialization():
+            unet = SDUNET(model_type, prediction_type, dtype)
+            missing, _ = unet.load_state_dict(state_dict, strict=False)
+        if missing:
+            raise ValueError("ERROR missing keys: " + ", ".join(missing))
+
+        unet.additional = AdditionalNetworks(unet)
+        return unet
+
+    @staticmethod
+    def get_config(model_type):
+        if model_type == "SDv1":
+            config = dict(cross_attention_dim=768, attention_head_dim=[8,8,8,8])
+        else:
+            config = dict(cross_attention_dim=1024, attention_head_dim=[5,10,20,20], use_linear_projection=True)
+        return config
 
 class UNET(UNet2DConditionModel):
     def __init__(self, model_type, prediction_type, dtype):
