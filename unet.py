@@ -462,7 +462,7 @@ class SDUpBlock2D(nn.Module):
         if add_upsample:
             self.upsamplers = nn.ModuleList([SDUpsample2D(out_channels, use_conv=True, out_channels=out_channels)])
         else:
-            self.upsamplers = []
+            self.upsamplers = nn.ModuleList()
 
         self.gradient_checkpointing = False
 
@@ -550,7 +550,7 @@ class SDCrossAttnUpBlock2D(nn.Module):
         if add_upsample:
             self.upsamplers = nn.ModuleList([SDUpsample2D(out_channels, use_conv=True, out_channels=out_channels)])
         else:
-            self.upsamplers = []
+            self.upsamplers = nn.ModuleList()
 
         self.gradient_checkpointing = False
 
