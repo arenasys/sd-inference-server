@@ -56,31 +56,13 @@ class SDCrossAttention(nn.Module):
         super().__init__()
         inner_dim = dim_head * heads
         cross_attention_dim = cross_attention_dim if cross_attention_dim is not None else query_dim
-        self.upcast_attention = upcast_attention
-        self.upcast_softmax = upcast_softmax
 
         self.scale = dim_head**-0.5
-
         self.heads = heads
-        # for slice_size > 0 the attention score computation
-        # is split across the batch axis to save memory
-        # You can set slice_size with `set_attention_slice`
-        self.sliceable_head_dim = heads
-
-        self.added_kv_proj_dim = added_kv_proj_dim
-
-        if norm_num_groups is not None:
-            self.group_norm = nn.GroupNorm(num_channels=inner_dim, num_groups=norm_num_groups, eps=1e-5, affine=True)
-        else:
-            self.group_norm = None
 
         self.to_q = nn.Linear(query_dim, inner_dim, bias=bias)
         self.to_k = nn.Linear(cross_attention_dim, inner_dim, bias=bias)
         self.to_v = nn.Linear(cross_attention_dim, inner_dim, bias=bias)
-
-        if self.added_kv_proj_dim is not None:
-            self.add_k_proj = nn.Linear(added_kv_proj_dim, cross_attention_dim)
-            self.add_v_proj = nn.Linear(added_kv_proj_dim, cross_attention_dim)
 
         self.to_out = nn.ModuleList([])
         self.to_out.append(nn.Linear(inner_dim, query_dim))
@@ -157,7 +139,6 @@ class SDBasicTransformerBlock(nn.Module):
     ):
         super().__init__()
 
-        # 1. Self-Attn
         self.attn1 = SDCrossAttention(
             query_dim=dim,
             heads=num_attention_heads,
@@ -170,9 +151,7 @@ class SDBasicTransformerBlock(nn.Module):
 
         self.ff = FeedForward(dim, dropout=dropout, activation_fn=activation_fn, final_dropout=final_dropout)
 
-        # 2. Cross-Attn
-        if cross_attention_dim is not None:
-            self.attn2 = SDCrossAttention(
+        self.attn2 = SDCrossAttention(
                 query_dim=dim,
                 cross_attention_dim=cross_attention_dim,
                 heads=num_attention_heads,
@@ -180,20 +159,11 @@ class SDBasicTransformerBlock(nn.Module):
                 dropout=dropout,
                 bias=attention_bias,
                 upcast_attention=upcast_attention,
-            )  # is self-attn if encoder_hidden_states is none
-        else:
-            self.attn2 = None
+            )
 
         self.norm1 = nn.LayerNorm(dim, elementwise_affine=norm_elementwise_affine)
+        self.norm2 = nn.LayerNorm(dim, elementwise_affine=norm_elementwise_affine)
 
-        if cross_attention_dim is not None:
-            self.norm2 = (
-                nn.LayerNorm(dim, elementwise_affine=norm_elementwise_affine)
-            )
-        else:
-            self.norm2 = None
-
-        # 3. Feed-forward
         self.norm3 = nn.LayerNorm(dim, elementwise_affine=norm_elementwise_affine)
 
     def forward(
@@ -203,27 +173,14 @@ class SDBasicTransformerBlock(nn.Module):
     ):
         norm_hidden_states = self.norm1(hidden_states)
 
-        # 1. Self-Attention
-        attn_output = self.attn1(
-            norm_hidden_states,
-            encoder_hidden_states=norm_hidden_states
-        )
-
+        attn_output = self.attn1(norm_hidden_states, encoder_hidden_states=norm_hidden_states)
         hidden_states = attn_output + hidden_states
 
-        if self.attn2 is not None:
-            norm_hidden_states = (
-                self.norm2(hidden_states)
-            )
+        norm_hidden_states = self.norm2(hidden_states)
 
-            # 2. Cross-Attention
-            attn_output = self.attn2(
-                norm_hidden_states,
-                encoder_hidden_states=encoder_hidden_states
-            )
-            hidden_states = attn_output + hidden_states
+        attn_output = self.attn2(norm_hidden_states, encoder_hidden_states=encoder_hidden_states)
+        hidden_states = attn_output + hidden_states
 
-        # 3. Feed-forward
         norm_hidden_states = self.norm3(hidden_states)
         ff_output = self.ff(norm_hidden_states)
         hidden_states = ff_output + hidden_states
@@ -255,19 +212,10 @@ class SDTransformer2DModel(nn.Module):
         norm_elementwise_affine: bool = True,
     ):
         super().__init__()
-        self.use_linear_projection = use_linear_projection
-        self.num_attention_heads = num_attention_heads
-        self.attention_head_dim = attention_head_dim
         inner_dim = num_attention_heads * attention_head_dim
 
-        # 2. Define input layers
-        self.in_channels = in_channels
-
         self.norm = torch.nn.GroupNorm(num_groups=norm_num_groups, num_channels=in_channels, eps=1e-6, affine=True)
-        if use_linear_projection:
-            self.proj_in = nn.Linear(in_channels, inner_dim)
-        else:
-            self.proj_in = nn.Conv2d(in_channels, inner_dim, kernel_size=1, stride=1, padding=0)
+        self.proj_in = nn.Conv2d(in_channels, inner_dim, kernel_size=1, stride=1, padding=0)
 
         # 3. Define transformers blocks
         self.transformer_blocks = nn.ModuleList(
@@ -292,40 +240,26 @@ class SDTransformer2DModel(nn.Module):
 
         # 4. Define output layers
         self.out_channels = in_channels if out_channels is None else out_channels
-        if use_linear_projection:
-            self.proj_out = nn.Linear(in_channels, inner_dim)
-        else:
-            self.proj_out = nn.Conv2d(inner_dim, in_channels, kernel_size=1, stride=1, padding=0)
+        self.proj_out = nn.Conv2d(inner_dim, in_channels, kernel_size=1, stride=1, padding=0)
 
     def forward(
         self,
         hidden_states,
         encoder_hidden_states
     ):
-        # 1. Input
         batch, _, height, width = hidden_states.shape
         residual = hidden_states
 
         hidden_states = self.norm(hidden_states)
-        if not self.use_linear_projection:
-            hidden_states = self.proj_in(hidden_states)
-            inner_dim = hidden_states.shape[1]
-            hidden_states = hidden_states.permute(0, 2, 3, 1).reshape(batch, height * width, inner_dim)
-        else:
-            inner_dim = hidden_states.shape[1]
-            hidden_states = hidden_states.permute(0, 2, 3, 1).reshape(batch, height * width, inner_dim)
-            hidden_states = self.proj_in(hidden_states)
+        hidden_states = self.proj_in(hidden_states)
+        inner_dim = hidden_states.shape[1]
+        hidden_states = hidden_states.permute(0, 2, 3, 1).reshape(batch, height * width, inner_dim)
 
-        # 2. Blocks
         for block in self.transformer_blocks:
             hidden_states = block(hidden_states, encoder_hidden_states)
 
-        if not self.use_linear_projection:
-            hidden_states = hidden_states.reshape(batch, height, width, inner_dim).permute(0, 3, 1, 2).contiguous()
-            hidden_states = self.proj_out(hidden_states)
-        else:
-            hidden_states = self.proj_out(hidden_states)
-            hidden_states = hidden_states.reshape(batch, height, width, inner_dim).permute(0, 3, 1, 2).contiguous()
+        hidden_states = hidden_states.reshape(batch, height, width, inner_dim).permute(0, 3, 1, 2).contiguous()
+        hidden_states = self.proj_out(hidden_states)
 
         output = hidden_states + residual
 
@@ -423,7 +357,7 @@ class SDCrossAttnDownBlock2D(nn.Module):
         hidden_states = self.downsamplers[0](hidden_states)
         states_2 = hidden_states
 
-        return hidden_states, (states_0, states_1, states_2)
+        return hidden_states, states_0, states_1, states_2
 
 class SDDownBlock2D(nn.Module):
     def __init__(
@@ -482,7 +416,7 @@ class SDDownBlock2D(nn.Module):
         hidden_states = self.resnets[1](hidden_states, temb)
         state_1 = hidden_states
 
-        return hidden_states, (state_0, state_1)
+        return hidden_states, state_0, state_1
 
 class SDUpBlock2D(nn.Module):
     def __init__(
@@ -528,22 +462,22 @@ class SDUpBlock2D(nn.Module):
         if add_upsample:
             self.upsamplers = nn.ModuleList([SDUpsample2D(out_channels, use_conv=True, out_channels=out_channels)])
         else:
-            self.upsamplers = None
+            self.upsamplers = []
 
         self.gradient_checkpointing = False
 
-    def forward(self, hidden_states, res_hidden_states_tuple: Tuple[torch.Tensor, torch.Tensor, torch.Tensor], temb):
-        for resnet in self.resnets:
-            # pop res hidden states
-            res_hidden_states = res_hidden_states_tuple[-1]
-            res_hidden_states_tuple = res_hidden_states_tuple[:-1]
-            hidden_states = torch.cat([hidden_states, res_hidden_states], dim=1)
+    def forward(self, hidden_states, s0, s1, s2, temb):
+        hidden_states = torch.cat([hidden_states, s0], dim=1)
+        hidden_states = self.resnets[0](hidden_states, temb)
 
-            hidden_states = resnet(hidden_states, temb)
+        hidden_states = torch.cat([hidden_states, s1], dim=1)
+        hidden_states = self.resnets[1](hidden_states, temb)
 
-        if self.upsamplers is not None:
-            for upsampler in self.upsamplers:
-                hidden_states = upsampler(hidden_states)
+        hidden_states = torch.cat([hidden_states, s2], dim=1)
+        hidden_states = self.resnets[2](hidden_states, temb)
+
+        for upsampler in self.upsamplers:
+            hidden_states = upsampler(hidden_states)
 
         return hidden_states
 
@@ -616,31 +550,23 @@ class SDCrossAttnUpBlock2D(nn.Module):
         if add_upsample:
             self.upsamplers = nn.ModuleList([SDUpsample2D(out_channels, use_conv=True, out_channels=out_channels)])
         else:
-            self.upsamplers = None
+            self.upsamplers = []
 
         self.gradient_checkpointing = False
 
-    def forward(
-        self,
-        hidden_states,
-        res_hidden_states_tuple: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
-        temb,
-        encoder_hidden_states
-    ):
-        for resnet, attn in zip(self.resnets, self.attentions):
-            res_hidden_states = res_hidden_states_tuple[-1]
-            res_hidden_states_tuple = res_hidden_states_tuple[:-1]
-            hidden_states = torch.cat([hidden_states, res_hidden_states], dim=1)
-            
-            hidden_states = resnet(hidden_states, temb)
-            hidden_states = attn(
-                hidden_states,
-                encoder_hidden_states=encoder_hidden_states,
-            )
+    def forward(self, hidden_states, s0, s1, s2, temb, encoder_hidden_states):
 
-        if self.upsamplers is not None:
-            for upsampler in self.upsamplers:
-                hidden_states = upsampler(hidden_states)
+        hidden_states = self.resnets[0](torch.cat([hidden_states, s0], dim=1), temb)
+        hidden_states = self.attentions[0](hidden_states, encoder_hidden_states=encoder_hidden_states)
+
+        hidden_states = self.resnets[1](torch.cat([hidden_states, s1], dim=1), temb)
+        hidden_states = self.attentions[1](hidden_states, encoder_hidden_states=encoder_hidden_states)
+
+        hidden_states = self.resnets[2](torch.cat([hidden_states, s2], dim=1), temb)
+        hidden_states = self.attentions[2](hidden_states, encoder_hidden_states=encoder_hidden_states)
+
+        for upsampler in self.upsamplers:
+            hidden_states = upsampler(hidden_states)
 
         return hidden_states
 
@@ -726,7 +652,7 @@ class SDUNetMidBlock2DCrossAttn(nn.Module):
         return hidden_states
 
 class SDUNET(nn.Module):
-    def __init__(self, cross_attention_dim, attention_head_dim, use_linear_projection=False):
+    def __init__(self, cross_attention_dim, attention_head_dim):
         super().__init__()
 
         self.time_proj = Timesteps(320, True, 0.0)
@@ -739,7 +665,7 @@ class SDUNET(nn.Module):
         self.up_blocks = nn.ModuleList([])
 
         common = {'temb_channels': 1280, 'resnet_eps': 1e-05, 'resnet_act_fn': 'silu', 'resnet_groups': 32}
-        cross = {'cross_attention_dim': cross_attention_dim, 'use_linear_projection': use_linear_projection}
+        cross = {'cross_attention_dim': cross_attention_dim}
 
         down0 = SDCrossAttnDownBlock2D(320, 320, num_layers=2, attn_num_head_channels=attention_head_dim[0], **cross, **common)
         down1 = SDCrossAttnDownBlock2D(320, 640, num_layers=2,  attn_num_head_channels=attention_head_dim[1], **cross, **common)
@@ -765,23 +691,18 @@ class SDUNET(nn.Module):
 
         sample = self.conv_in(sample)
 
-        sample_original = sample
-        sample, down_sample_0 = self.down_blocks[0](hidden_states=sample, temb=emb, encoder_hidden_states=encoder_hidden_states)
-        sample, down_sample_1 = self.down_blocks[1](hidden_states=sample, temb=emb, encoder_hidden_states=encoder_hidden_states)
-        sample, down_sample_2 = self.down_blocks[2](hidden_states=sample, temb=emb, encoder_hidden_states=encoder_hidden_states)
-        sample, down_sample_3 = self.down_blocks[3](hidden_states=sample, temb=emb)
+        s0 = sample
+        sample, s1_1, s1_2, s1_3 = self.down_blocks[0](hidden_states=sample, temb=emb, encoder_hidden_states=encoder_hidden_states)
+        sample, s2_1, s2_2, s2_3 = self.down_blocks[1](hidden_states=sample, temb=emb, encoder_hidden_states=encoder_hidden_states)
+        sample, s3_1, s3_2, s3_3 = self.down_blocks[2](hidden_states=sample, temb=emb, encoder_hidden_states=encoder_hidden_states)
+        sample, s4_1, s4_2 = self.down_blocks[3](hidden_states=sample, temb=emb)
 
         sample = self.mid_block(sample, emb, encoder_hidden_states=encoder_hidden_states)
         
-        up_sample_0 = (down_sample_2[2], *down_sample_3)
-        up_sample_1 = (down_sample_1[2], *down_sample_2[0:2])
-        up_sample_2 = (down_sample_0[2], *down_sample_1[0:2])
-        up_sample_3 =  (sample_original, *down_sample_0[0:2])
-
-        sample = self.up_blocks[0](res_hidden_states_tuple=up_sample_0, hidden_states=sample, temb=emb)
-        sample = self.up_blocks[1](res_hidden_states_tuple=up_sample_1, hidden_states=sample, temb=emb, encoder_hidden_states=encoder_hidden_states)
-        sample = self.up_blocks[2](res_hidden_states_tuple=up_sample_2, hidden_states=sample, temb=emb, encoder_hidden_states=encoder_hidden_states)
-        sample = self.up_blocks[3](res_hidden_states_tuple=up_sample_3, hidden_states=sample, temb=emb, encoder_hidden_states=encoder_hidden_states)
+        sample = self.up_blocks[0](s0=s4_2, s1=s4_1, s2=s3_3, hidden_states=sample, temb=emb)
+        sample = self.up_blocks[1](s0=s3_2, s1=s3_1, s2=s2_3, hidden_states=sample, temb=emb, encoder_hidden_states=encoder_hidden_states)
+        sample = self.up_blocks[2](s0=s2_2, s1=s2_1, s2=s1_3, hidden_states=sample, temb=emb, encoder_hidden_states=encoder_hidden_states)
+        sample = self.up_blocks[3](s0=s1_2, s1=s1_1, s2=s0, hidden_states=sample, temb=emb, encoder_hidden_states=encoder_hidden_states)
 
         sample = self.conv_norm_out(sample)
         sample = self.conv_act(sample)

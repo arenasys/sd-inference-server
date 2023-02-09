@@ -48,7 +48,7 @@ class SDUNET(SDUNET):
         if model_type == "SDv1":
             config = dict(cross_attention_dim=768, attention_head_dim=[8,8,8,8])
         else:
-            config = dict(cross_attention_dim=1024, attention_head_dim=[5,10,20,20], use_linear_projection=True)
+            config = dict(cross_attention_dim=1024, attention_head_dim=[5,10,20,20])
         return config
 
 class UNET(UNet2DConditionModel):
@@ -104,8 +104,7 @@ class UNET(UNet2DConditionModel):
                 block_out_channels=(320, 640, 1280, 1280),
                 layers_per_block=2,
                 cross_attention_dim=1024,
-                attention_head_dim=[5, 10, 20, 20],
-                use_linear_projection=True
+                attention_head_dim=[5, 10, 20, 20]
             )
         else:
             raise ValueError(f"unknown type: {model_type}")

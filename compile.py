@@ -16,10 +16,10 @@ storage = storage.ModelStorage("./models", torch.float16, torch.float32)
 unet = storage.get_unet("SDv2", device)
 clip = storage.get_clip("SDv2", device)
 
-conditioning = prompts.ConditioningSchedule(clip, "confused cat looking up", "bad", 1, 2, 1)[0].to(dtype).to(device)
+conditioning = prompts.ConditioningSchedule(clip, "confused cat looking up", "bad", 1, 2, 1)[0].to(dtype).to(device).detach()
 noise = utils.NoiseSchedule([7], [], 512 // 8, 512 // 8, device, dtype)()
-latents  = torch.cat([noise] * 2)
-timestep = torch.tensor(900).to(dtype).to(device)
+latents  = torch.cat([noise] * 2).detach()
+timestep = torch.tensor(900).to(dtype).to(device).detach()
 
 print(conditioning.shape)
 
@@ -31,7 +31,11 @@ with torch.inference_mode():
             prediction = unet(latents, timestep, conditioning)
     
     if True:
-        script = torch.jit.optimize_for_inference(torch.jit.script(unet.eval()))
+        script = torch.jit.script(unet.eval())
+
+        script_onnx = torch.onnx.export(script, (latents, timestep, conditioning), "onnx.pb")
+        
+
     else:
         inputs = [
             torch_tensorrt.Input(

@@ -96,31 +96,49 @@ def use_split_attention_v1():
 
         q_in = self.to_q(x)
         context = default(encoder_hidden_states, x)
-        context = context.to(x.dtype)
 
         k_in = self.to_k(context)
         v_in = self.to_v(context)
         del context, x
         
-        q, k, v = map(lambda t: einops.rearrange(t, 'b n (h d) -> (b h) n d', h=h), (q_in, k_in, v_in))
-        del q_in, k_in, v_in
+        q0, q1, q2 = q_in.shape
+        q = q_in.reshape(q0, q1, h, q2//h)
+        q = q.permute(0, 2, 1, 3)
+        q = q.reshape(q0*h, q1, q2//h)
+        del q_in, q0, q1, q2
 
-        r1 = torch.zeros(q.shape[0], q.shape[1], v.shape[2], device=q.device)
+        k0, k1, k2 = k_in.shape
+        k = k_in.reshape(k0, k1, h, k2//h)
+        k = k.permute(0, 2, 1, 3)
+        k = k.reshape(k0*h, k1, k2//h)
+        del k_in, k0, k1, k2
+
+        v0, v1, v2 = v_in.shape
+        v = v_in.reshape(v0, v1, h, v2//h)
+        v = v.permute(0, 2, 1, 3)
+        v = v.reshape(v0*h, v1, v2//h)
+        del v_in, v0, v1, v2
+
+        dtype = q.dtype
+
+        r1 = torch.zeros(q.shape[0], q.shape[1], v.shape[2], device=q.device, dtype=q.dtype)
         for i in range(0, q.shape[0], 2):
             end = i + 2
             s1 = torch.einsum('b i d, b j d -> b i j', q[i:end], k[i:end])
             s1 *= self.scale
-
             s2 = s1.softmax(dim=-1)
-            del s1
-
             r1[i:end] = torch.einsum('b i j, b j d -> b i d', s2, v[i:end])
-            del s2
+        
         del q, k, v
 
-        r2 = einops.rearrange(r1, '(b h) n d -> b n (h d)', h=h)
-        del r1
+        r1 = r1.to(dtype)
 
+        z0, z1, z2 = r1.shape
+        r2 = r1.reshape(z0//h, h, z1, z2)
+        r2 = r2.permute(0, 2, 1, 3)
+        r2 = r2.reshape(z0//h, z1, z2*h)
+        del r1
+        
         out = self.to_out[0](r2)
         out = self.to_out[1](out)
 
@@ -229,7 +247,7 @@ def use_flash_attention():
 
     q, k, v = map(lambda t: einops.rearrange(t, 'b n (h d) -> b h n d', h=h), (q, k, v))
 
-    out = flash_func.apply(q, k, v, mask, False, q_bucket_size, k_bucket_size)
+    out = flash_func.apply(q, k, v, attention_mask, False, q_bucket_size, k_bucket_size)
 
     out = einops.rearrange(out, 'b h n d -> b n (h d)')
 
