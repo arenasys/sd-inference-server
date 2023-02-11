@@ -84,12 +84,7 @@ def SDv2_convert(state_dict):
     for k in state_dict:
         if ".VAE." in k and k.endswith(".weight") and "mid_block.attentions.0." in k:
             state_dict[k] = state_dict[k].squeeze()
-
-    # use_linear_projection: False
-    for k in state_dict:
-        if ".UNET." in k and k.endswith(".weight") and "proj_" in k:
-            state_dict[k] = state_dict[k].unsqueeze(2).unsqueeze(2)
-
+    
     # SDv2 models dont come with position IDs (probably because they should never be changed)
     position_ids = torch.Tensor([list(range(77))]).to(torch.int64)
     state_dict["SDv2.CLIP.text_model.embeddings.position_ids"] = position_ids
@@ -157,11 +152,6 @@ def convert_diffusers_folder(in_folder, out_folder):
     for k in list(unet.keys()):
         state_dict[f"{model_type}.UNET.{k}"] = unet[k]
         del unet[k]
-
-    # use_linear_projection: False
-    for k in state_dict:
-        if ".UNET." in k and k.endswith(".weight") and "proj_" in k:
-            state_dict[k] = state_dict[k].unsqueeze(2).unsqueeze(2)
 
     vae = AutoencoderKL.from_pretrained(vae_path).to(torch.float16).state_dict()
     for k in list(vae.keys()):

@@ -8,7 +8,7 @@ from diffusers import AutoencoderKL, UNet2DConditionModel
 from diffusers.models.vae import DiagonalGaussianDistribution
 from lora import LoRANetwork
 from hypernetwork import Hypernetwork
-from unet import SDUNET
+from unet import UNET as SDUNET
 
 class SDUNET(SDUNET):
     def __init__(self, model_type, prediction_type, dtype):
@@ -104,7 +104,8 @@ class UNET(UNet2DConditionModel):
                 block_out_channels=(320, 640, 1280, 1280),
                 layers_per_block=2,
                 cross_attention_dim=1024,
-                attention_head_dim=[5, 10, 20, 20]
+                attention_head_dim=[5, 10, 20, 20],
+                use_linear_projection=True
             )
         else:
             raise ValueError(f"unknown type: {model_type}")
