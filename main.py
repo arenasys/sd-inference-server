@@ -10,10 +10,10 @@ convert.autoconvert("./models/SD", "./models/TRASH")
 
 attention.use_optimized_attention()
 
-storage = storage.ModelStorage("./models", torch.float16, torch.float32)
+storage = storage.ModelStorage("../models", torch.float16, torch.float32)
 params = wrapper.GenerationParameters(storage, torch.device("cuda"))
 
-if True:
+if False:
     print("TEST 1 - txt2img")
 
     params.reset()
@@ -29,19 +29,19 @@ if True:
     images = params.txt2img()
     images[0].save("1_b.png")
 
-if False:
+if True:
     print("TEST 2 - img2img")
 
     params.reset()
     params.set(model="Anything-V3", sampler="Euler a", clip_skip=2)
     params.set(prompt="masterpiece, 1girl, standing in rain, coat, wet")
     params.set(negative_prompt="bad, blonde, umbrella")
-    params.set(width=512, height=512, seed=4132954439, steps=20, scale=7)
+    params.set(width=200, height=200, seed=4132954439, steps=20, scale=7)
 
     images = params.txt2img()
     images[0].save("2_a.png")
 
-    params.set(image=PIL.Image.open("2_a.png"))
+    params.set(image=[PIL.Image.open("2_a.png")])
     params.set(prompt="masterpiece, 1girl, standing in rain, coat, wet, storm, lightning")
     params.set(seed=2839558696)
     params.set(width=512, height=768, steps=30)

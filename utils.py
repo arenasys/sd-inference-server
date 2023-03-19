@@ -79,10 +79,8 @@ def apply_inpainting(images, originals, masks, extents):
             mask = mask.resize((ew, eh))
         
         outputs[i] = original.copy()
-        outputs[i].paste(image, extent, mask)
 
-        #draw = PIL.ImageDraw.Draw(outputs[i])
-        #draw.rectangle(extent, width=2, outline=(255,0,0))
+        outputs[i].paste(image.convert("RGBA"), extent, mask.convert("RGBA"))
 
     return outputs
 

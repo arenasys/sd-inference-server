@@ -52,7 +52,7 @@ class SR(RRDBNet):
         num_block = max([int(k.split(".")[1]) for k in state_dict if k.startswith("body.")] + [0]) + 1
 
         if num_block == 0:
-            raise ValueError(f"ERROR unknown upscaler format")
+            raise ValueError(f"unknown upscaler format")
 
         model = SR(3, 3, 4, 64, num_block)
         model.load_state_dict(state_dict)

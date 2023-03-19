@@ -75,7 +75,7 @@ class UNET(UNet2DConditionModel):
             unet = UNET(model_type, prediction_type, dtype)
             missing, _ = unet.load_state_dict(state_dict, strict=False)
         if missing:
-            raise ValueError("ERROR missing keys: " + ", ".join(missing))
+            raise ValueError("missing keys: " + ", ".join(missing))
         
         unet.additional = AdditionalNetworks(unet)
         return unet

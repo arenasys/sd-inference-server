@@ -128,7 +128,7 @@ class ModelStorage():
             return self.move(self.loaded[comp][name], name, comp, device)
         
         if not name in self.files[comp]:
-            raise ValueError(f"ERROR unknown {comp}: {name}")
+            raise ValueError(f"unknown {comp}: {name}")
         
         file = self.files[comp][name]
         
@@ -139,7 +139,7 @@ class ModelStorage():
             dtype = self.vae_dtype if comp == "VAE" else self.dtype
             model = self.classes[comp].from_model(self.file_cache[file][comp], dtype)
         else:
-            raise ValueError(f"ERROR model doesnt contain a {comp}: {name}")
+            raise ValueError(f"model doesnt contain a {comp}: {name}")
 
         self.loaded[comp][name] = model
         return self.move(model, name, comp, device)

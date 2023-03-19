@@ -19,6 +19,11 @@ DEFAULTS = {
     "lora_strength": 1.0, "hn_strength": 1.0
 }
 
+TYPES = {
+    int: ["width", "height", "steps", "seed", "batch_size", "clip_skip", "mask_blur", "hr_steps"],
+    float: ["scale", "eta", "hr_factor", "hr_eta"],
+}
+
 SAMPLER_CLASSES = {
     "Euler": samplers_k.Euler,
     "Euler a": samplers_k.Euler_a,
@@ -85,8 +90,20 @@ class GenerationParameters():
 
     def set(self, **kwargs):
         for key, value in kwargs.items():
-            if type(value) == bytes:
-                value = PIL.Image.open(io.BytesIO(value))
+            if key == "image" or key == "mask":
+                if type(value) == bytes:
+                    value = PIL.Image.open(io.BytesIO(value))
+                    if value[i].mode == 'RGBA':
+                        value = PIL.Image.alpha_composite(PIL.Image.new('RGBA',value.size,(0,0,0)), value)
+                        value = value.convert("RGB")
+                if type(value) == list:
+                    for i in range(len(value)):
+                        if type(value[i]) == bytes:
+                            value[i] = PIL.Image.open(io.BytesIO(value[i]))
+                            if value[i].mode == 'RGBA':
+                                value[i] = PIL.Image.alpha_composite(PIL.Image.new('RGBA',value[i].size,(0,0,0)), value[i])
+                                value[i] = value[i].convert("RGB")
+
             setattr(self, key, value)
     
     def load_models(self):
@@ -131,14 +148,19 @@ class GenerationParameters():
                 continue
             unused += [attr]
 
+        for t in TYPES:
+            for attr in TYPES[t]:
+                if getattr(self, attr) != None:
+                    setattr(self, attr, t(getattr(self, attr)))
+
         if missing:
-            raise ValueError(f"ERROR missing required parameters: {', '.join(missing)}")
+            raise ValueError(f"missing required parameters: {', '.join(missing)}")
 
         if not self.sampler in SAMPLER_CLASSES:
-            raise ValueError(f"ERROR unknown sampler: {self.sampler}")
+            raise ValueError(f"unknown sampler: {self.sampler}")
 
         if (self.width or self.height) and not (self.width and self.height):
-            raise ValueError("ERROR width and height must both be set")
+            raise ValueError("width and height must both be set")
 
     def listify(self, *args):
         if args == None:
@@ -362,5 +384,21 @@ class GenerationParameters():
 
         self.on_complete(images)
         return images
+    
+    def options(self):
+        self.set_status("Configuring")
+
+        data = {"sampler": list(SAMPLER_CLASSES.keys())}
+        for k in self.storage.files:
+            data[k] = list(self.storage.files[k].keys())
+
+        data["SR"] = list(UPSCALERS_LATENT.keys()) + list(UPSCALERS_PIXEL.keys()) + data["SR"]
+
+        if self.callback:
+            if not self.callback({"type": "options", "data": data}):
+                raise RuntimeError("Aborted")
+            
+        self.set_status("Ready")
+
 
 
