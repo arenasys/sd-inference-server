@@ -7,12 +7,13 @@ def txt2img(denoiser, sampler, noise, steps, callback):
 
     latents = sampler.prepare_noise(noise(), schedule)
 
-    for i in tqdm.trange(steps):
-        callback(i, latents)
+    iter = tqdm.trange(steps)
+    for i in iter:
+        callback(iter.format_dict)
         denoiser.set_step(i)
         latents = sampler.step(latents, schedule, i, noise)
         
-    callback(steps, latents)
+    callback(iter.format_dict)
     return latents / 0.18215
 
 def img2img(latents, denoiser, sampler, noise, steps, do_exact_steps, strength, callback):
@@ -28,10 +29,11 @@ def img2img(latents, denoiser, sampler, noise, steps, do_exact_steps, strength, 
     latents = latents.to(denoiser.unet.dtype) * 0.18215
     latents = sampler.prepare_latents(latents, noise(), schedule)
 
-    for i in tqdm.trange(steps):
-        callback(i, latents)
+    iter = tqdm.trange(steps)
+    for i in iter:
+        callback(iter.format_dict)
         denoiser.set_step(i)
         latents = sampler.step(latents, schedule, i, noise)
         
-    callback(steps, latents)
+    callback(iter.format_dict)
     return latents / 0.18215

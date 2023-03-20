@@ -170,11 +170,11 @@ if False:
     images = params.txt2img()
     images[0].save("9_a.png")
 
-    params.set(hr_factor=1.5, hr_strength=0.35, hr_steps=25, hr_upscale="Lanczos")
+    params.set(hr_factor=1.5, hr_strength=0.35, hr_steps=25, hr_upscaler="Lanczos")
     images = params.txt2img()
     images[0].save("9_b.png")
 
-    params.set(hr_factor=1.5, hr_strength=0.35, hr_steps=25, hr_sampler="DDIM", hr_upscale="Lanczos")
+    params.set(hr_factor=1.5, hr_strength=0.35, hr_steps=25, hr_sampler="DDIM", hr_upscaler="Lanczos")
     images = params.txt2img()
     images[0].save("9_c.png")
 
