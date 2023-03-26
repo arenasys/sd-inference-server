@@ -6,17 +6,21 @@ class WeightedTree(lark.Tree):
 
 prompt_grammar = lark.Lark(r"""
 !start: (prompt | /[][():]/+)*
-prompt: (emphasis | deemphasis | numeric | scheduled | alternate | plain | WHITESPACE)*
+prompt: (emphasis | deemphasis | numeric | scheduled | alternate | plain | addnet | WHITESPACE)*
 emphasis: "(" prompt ")"
 deemphasis: "[" prompt "]"
 numeric: "(" prompt ":" [_WHITESPACE] NUMBER [_WHITESPACE]")"
 scheduled: "[" [prompt ":"] prompt ":" [_WHITESPACE] specifier [_WHITESPACE]"]"
 alternate: "[" prompt ("|" prompt)+ "]"
+addnet: "<" net_type ":" plain [ ":" [_WHITESPACE] specifier [_WHITESPACE] [ ":" [_WHITESPACE] specifier [_WHITESPACE] ]] ">"
+net_type: LORA | HN
 specifier: NUMBER | HR
 HR: "HR"
+LORA: "lora"
+HN: "hypernet"
 WHITESPACE: /\s+/
 _WHITESPACE: /\s+/
-plain: /([^\\\[\]():|]|\\.)+/
+plain: /([^\\\[\]()<>:|]|\\.)+/
 %import common.SIGNED_NUMBER -> NUMBER
 """, tree_class=WeightedTree)
 
@@ -48,10 +52,25 @@ def parse_prompt(prompt, steps, HR=False):
                             children = [node.children[1]]
                 if node.data == "alternate":
                     children = [children[step%len(children)]]
+                if node.data == "addnet":
+
+                    name = str(children[0].children[0]) + ":" + str(children[1].children[0])
+
+                    unet, clip = 1.0, None
+                    if children[2]:
+                        unet = float(children[2].children[0])
+                    if children[3]:
+                        clip = float(children[3].children[0])
+                    if clip == None:
+                        clip = unet
+
+                    output.append((name, unet, clip))
+                    children = []
+
                 for child in children:
                     propagate(child, output, step, HR, node.weight)
             elif node:
-                if output and output[-1][1] == weight:
+                if output and type(output[-1]) == list and output[-1][1] == weight:
                     output[-1][0] += str(node)
                 else:
                     output.append([str(node), weight])
@@ -78,7 +97,11 @@ def tokenize_prompt(clip, parsed):
     leeway = 20 
 
     # tokenize prompt and split it into chunks
-    tokenized = tokenizer([text for text, _ in parsed])["input_ids"]
+    text = [text for text, _ in parsed]
+    if not text:
+        text = ['']
+
+    tokenized = tokenizer(text)["input_ids"]
     tokenized = [tokens[1:-1] for tokens in tokenized] # strip special tokens
 
     # weight the individual tokens
@@ -163,17 +186,34 @@ def encode_tokens(clip, chunks, clip_skip=1):
     encoding = torch.hstack(chunk_encodings)
     return encoding
 
+def seperate_schedule(schedule):
+    prompt_schedule = []
+    networks_schedule = []
+
+    for i in range(len(schedule)):
+        s = schedule[i][0]
+        n = [t for t in schedule[i][1] if type(t) == tuple]
+        t = [t for t in schedule[i][1] if type(t) == list]
+        prompt_schedule += [(s,t)]
+        networks_schedule += [(s,n)]
+    
+    return prompt_schedule, networks_schedule
+
 class PromptSchedule():
     def __init__(self, prompt, steps, clip, HR):
         self.schedule = parse_prompt(prompt, steps, HR)
+        self.schedule, self.network_schedule = seperate_schedule(self.schedule)
         self.tokenized = [(steps, tokenize_prompt(clip, prompt)) for steps, prompt in self.schedule]
         self.chunks = max(len(p) for _, p in self.tokenized)
         self.encoded = None
+        self.all_networks = {}
     
     def pad_to_length(self, max_chunks):
         self.tokenized = [(steps, chunks + [chunks[-1]] * (max_chunks-len(chunks))) for steps, chunks in self.tokenized]
         
     def encode(self, clip, clip_skip):
+        clip_networks = [{k:v[1] for k,v in self.get_networks_at_step(0).items()}]
+        clip.additional.set_strength(clip_networks)
         self.encoded = [(steps, encode_tokens(clip, chunks, clip_skip)) for steps, chunks in self.tokenized]
 
     def get_encoding_at_step(self, step):
@@ -181,6 +221,26 @@ class PromptSchedule():
             if start >= step:
                 return encoding
         return encoding[-1][1]
+    
+    def get_all_networks(self):
+        if self.all_networks:
+            return self.all_networks
+        all_networks = set()
+        for _, networks in self.network_schedule:
+            for net, _, _ in networks:
+                all_networks.add(net)
+        self.all_networks = all_networks
+        return all_networks
+
+    def get_networks_at_step(self, step):
+        step_networks = {n:(0,0) for n in self.get_all_networks()}
+        for start, network in self.network_schedule:
+            if start >= step:
+                for name, unet, clip in network:
+                    step_networks[name] = (unet, clip)
+                break
+        
+        return step_networks
     
 class ConditioningSchedule():
     def __init__(self, clip, prompt, negative_prompt, steps, clip_skip, batch_size):
@@ -191,28 +251,61 @@ class ConditioningSchedule():
         self.clip_skip = clip_skip
         self.batch_size = batch_size
         self.HR = False
-        self.prepare()
+        self.parse()
 
     def switch_to_HR(self):
         self.HR = True
-        self.prepare()
+        self.parse()
 
-    def prepare(self):
+    def parse(self):
         self.positives = [PromptSchedule(p, self.steps, self.clip, self.HR) for p in self.prompt]
         self.negatives = [PromptSchedule(p, self.steps, self.clip, self.HR) for p in self.negative_prompt]
+
+        self.sync_networks()
 
         max_chunks = max([p.chunks for p in self.positives + self.negatives])
 
         for p in self.positives + self.negatives:
             p.pad_to_length(max_chunks)
-            p.encode(self.clip, self.clip_skip)
 
         self.reset()
 
+    def encode(self):
+        for p in self.positives + self.negatives:
+            p.encode(self.clip, self.clip_skip)        
+    
+    def sync_networks(self):
+        # need user options
+        for i in range(self.batch_size):
+            p = i % len(self.positives)
+            n = i % len(self.negatives)
+            self.negatives[n].network_schedule = self.positives[p].network_schedule
+
     def reset(self):
         self.offset = 0
+
+    def get_all_networks(self):
+        networks = self.get_networks_at_step(0)
+        all_networks = set()
+        for n in networks:
+            all_networks = all_networks.union(set(n.keys()))
+        return all_networks
     
-    def __getitem__(self, step):
+    def get_networks_at_step(self, step, idx=0):
+        step += self.offset
+        networks_pos = []
+        networks_neg = []
+
+        for i in range(self.batch_size):
+            p = i % len(self.positives)
+            n = i % len(self.negatives)
+
+            networks_pos += [{k:v[idx] for k,v in self.positives[p].get_networks_at_step(step).items()}]
+            networks_neg += [{k:v[idx] for k,v in self.negatives[n].get_networks_at_step(step).items()}]
+
+        return networks_neg + networks_pos
+    
+    def get_conditioning_at_step(self, step):
         step += self.offset
 
         conditioning_pos = []
@@ -224,4 +317,5 @@ class ConditioningSchedule():
             conditioning_pos += [self.positives[p].get_encoding_at_step(step)]
             conditioning_neg += [self.negatives[n].get_encoding_at_step(step)]
 
-        return torch.cat(conditioning_neg + conditioning_pos)
+        c = torch.cat(conditioning_neg + conditioning_pos)
+        return c

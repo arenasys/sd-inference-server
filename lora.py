@@ -5,8 +5,9 @@ from functools import reduce
 # adapted from Kohyas LoRA code https://github.com/kohya-ss/sd-scripts/blob/main/networks/lora.py
 
 class LoRAModule(torch.nn.Module):
-    def __init__(self, name, lora_up, lora_down, alpha):
+    def __init__(self, net_name, name, lora_up, lora_down, alpha):
         super().__init__()
+        self.net_name = net_name
         self.name = name
 
         if "unet" in name and "_proj_" in name:
@@ -18,15 +19,14 @@ class LoRAModule(torch.nn.Module):
         
         self.register_buffer("alpha", torch.tensor(alpha or lora_down.shape[0]))
         self.register_buffer("dim", torch.tensor(lora_down.shape[0]), False)
-        self.register_buffer("multiplier", torch.tensor(1.0), False)
 
     def forward(self, x):
-        return self.lora_up(self.lora_down(x)) * self.multiplier * (self.alpha / self.dim)
+        return self.lora_up(self.lora_down(x)) * (self.alpha / self.dim)
 
 class LoRANetwork(torch.nn.Module):
-    def __init__(self, state_dict) -> None:
+    def __init__(self, name, state_dict) -> None:
         super().__init__()
-        self.multiplier = 1.0
+        self.net_name = name
         self.build_modules(state_dict)
         self.load_state_dict(state_dict, strict=False)
 
@@ -41,7 +41,7 @@ class LoRANetwork(torch.nn.Module):
             if name+".alpha" in state_dict:
                 alpha = state_dict[name+".alpha"].numpy()
 
-            lora = LoRAModule(name, up, down, alpha)
+            lora = LoRAModule(self.net_name, name, up, down, alpha)
             self.add_module(name, lora)
 
     def attach(self, *models):

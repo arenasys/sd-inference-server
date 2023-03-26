@@ -6,6 +6,19 @@ import shutil
 import torch
 import safetensors.torch
 
+import psutil
+
+def has_handle(fpath):
+    for proc in psutil.process_iter():
+        try:
+            for item in proc.open_files():
+                if fpath == item.path:
+                    return True
+        except Exception:
+            pass
+
+    return False
+
 def relative_file(file):
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), file)
 
@@ -36,7 +49,7 @@ def SDv1_convert(state_dict):
 
     # cast to fp16
     for k in state_dict:
-        if state_dict[k].dtype == torch.float32:
+        if state_dict[k].dtype == torch.float32 or state_dict[k].dtype == torch.float64:
             state_dict[k] = state_dict[k].to(torch.float16)
 
     # most keys are just renamed
@@ -72,7 +85,7 @@ def SDv2_convert(state_dict):
 
     # cast to fp16
     for k in state_dict:
-        if state_dict[k].dtype == torch.float32:
+        if state_dict[k].dtype == torch.float32 or state_dict[k].dtype == torch.float64:
             state_dict[k] = state_dict[k].to(torch.float16)
 
     # most keys are just renamed
@@ -93,6 +106,9 @@ def SDv2_convert(state_dict):
 
 def convert_checkpoint(in_file, out_folder):
     print(f"CONVERTING {in_file}")
+    
+    if has_handle(os.path.abspath(in_file)):
+        raise Exception("model is still being written")
 
     name = in_file.split(os.path.sep)[-1].split(".")[0]
     if in_file.endswith(".ckpt"):

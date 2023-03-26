@@ -84,37 +84,57 @@ def apply_inpainting(images, originals, masks, extents):
 
     return outputs
 
-def prepare_inpainting(originals, masks, padding):
-    def pad_extent(extent, p, w, h):
+def prepare_inpainting(originals, masks, padding, width, height):
+    def pad_extent(extent, p, src, wrk):
+        wrk_w, wrk_h = wrk
+        src_w, src_h = src
+
         x1, y1, x2, y2 = extent
 
-        # add padding
-        x1, y1 = max(x1-p, 0), max(y1-p, 0)
-        x2, y2 = min(x2+p, w), min(y2+p, h)
+        ar = wrk_w/wrk_h
+        cx,cy = x1 + (x2-x1)//2, y1 + (y2-y1)//2
+        rw,rh = min(src_w, (x2-x1)+2*p), min(src_h, (y2-y1)+2*p)
 
-        # scale to image aspect ratio
-        ew = (x2-x1)
-        eh = (y2-y1)
-
-        if ew > eh:
-            while y2-y1 != ew:
-                o = ew-(y2-y1)
-                y1 = max(y1-(o//2), 0)
-                y2 = min(y2+(o-o//2), h)
+        if wrk_w/rw < wrk_h/rh:
+            w = rw
+            h = int(w/ar)
+            if h > src_h:
+                h = src_h
+                w = int(h*ar)
         else:
-            while x2-x1 != eh:
-                o = (eh-(x2-x1))//2
-                x1 = max(x1-(o//2), 0)
-                x2 = min(x2+(o-o//2), w)
+            h = rh
+            w = int(h*ar)
+            if w > src_w:
+                w = src_w
+                h = int(w/ar)
+
+        x1 = cx - w//2
+        x2 = cx + w - (w//2)
+
+        if x1 < 0:
+            x2 += -x1
+            x1 = 0
+        if x2 > src_w:
+            x1 -= x2-src_w
+            x2 = src_w
+
+        y1 = cy - h//2
+        y2 = cy + h - (h//2)
+
+        if y1 < 0:
+            y2 += -y1
+            y1 = 0
+        if y2 > src_h:
+            y1 -= y2-src_h
+            y2 = src_h
 
         return x1, y1, x2, y2
 
     w, h = originals[0].size[0], originals[0].size[1]
     if padding != None:
-        extents = [pad_extent(mask.getbbox(), padding, w, h) for mask in masks]
+        extents = [pad_extent(mask.getbbox(), padding, (w,h), (width, height)) for mask in masks]
     else:
-        # dont resize for inpainting (extent is the entire image)
-        extents = [(0, 0, w, h) for _ in masks]
+        extents = [pad_extent(mask.getbbox(), 10240, (w,h), (width, height)) for mask in masks]
 
     # crop masks according to their extent
     masks = [m for m in masks]
@@ -122,13 +142,16 @@ def prepare_inpainting(originals, masks, padding):
         extent = extents[i]
         if extent != (0,0,w,h):
             masks[i] = masks[i].crop(extent)
+            masks[i].save("MASK.png")
 
     # crop images according to their extent
     images = [i for i in originals]
     for i in range(len(images)):
         extent = extents[i%len(extents)]
         if extent != (0,0,w,h):
+            print(extent)
             images[i] = images[i].crop(extent)
+            images[i].save("CROP.png")
 
     return images, masks, extents
 

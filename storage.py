@@ -105,11 +105,17 @@ class ModelStorage():
             name = self.get_name(file)
             self.files["SR"][name] = file
 
-        self.embeddings = {}
-        for model in glob.glob(os.path.join(self.path, "TI", "*.pt")):
+        for model in glob.glob(os.path.join(self.path, "TI", "*.*")):
             file = os.path.relpath(model, self.path)
             name = self.get_name(file)
-            vectors = torch.load(model)["string_to_param"]["*"]
+            if name in self.embeddings:
+                continue
+
+            ti = self.load_file(file, "TI")["TI"]
+            if "string_to_param" in ti:
+                vectors = ti["string_to_param"]["*"]
+            else:
+                vectors = ti['emb_params']
             vectors.requires_grad = False
             self.embeddings[name] = vectors
 
@@ -137,7 +143,7 @@ class ModelStorage():
 
         if comp in self.file_cache[file]:
             dtype = self.vae_dtype if comp == "VAE" else self.dtype
-            model = self.classes[comp].from_model(self.file_cache[file][comp], dtype)
+            model = self.classes[comp].from_model(name, self.file_cache[file][comp], dtype)
         else:
             raise ValueError(f"model doesnt contain a {comp}: {name}")
 

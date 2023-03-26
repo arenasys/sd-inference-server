@@ -26,7 +26,7 @@ class SDUNET(SDUNET):
         return super().__getattr__(name)
         
     @staticmethod
-    def from_model(state_dict, dtype=None):
+    def from_model(name, state_dict, dtype=None):
         if not dtype:
             dtype = state_dict['metadata']['dtype']
         model_type = state_dict['metadata']['model_type']
@@ -63,7 +63,7 @@ class UNET(UNet2DConditionModel):
         return "cuda" if "cuda" in str(self.device) else "cpu"
         
     @staticmethod
-    def from_model(state_dict, dtype=None):
+    def from_model(name, state_dict, dtype=None):
         if not dtype:
             dtype = state_dict['metadata']['dtype']
         model_type = state_dict['metadata']['model_type']
@@ -133,7 +133,7 @@ class VAE(AutoencoderKL):
         return posterior
         
     @staticmethod
-    def from_model(state_dict, dtype=None):
+    def from_model(name, state_dict, dtype=None):
         if not dtype:
             dtype = state_dict['metadata']['dtype']
         model_type = state_dict['metadata']['model_type']
@@ -177,7 +177,7 @@ class CLIP(CustomCLIP):
         return "cuda" if "cuda" in str(self.device) else "cpu"
         
     @staticmethod
-    def from_model(state_dict, dtype=None):
+    def from_model(name, state_dict, dtype=None):
         if not dtype:
             dtype = state_dict['metadata']['dtype']
         model_type = state_dict['metadata']['model_type']
@@ -263,34 +263,35 @@ class Tokenizer():
 
 class LoRA(LoRANetwork):
     @staticmethod
-    def from_model(state_dict, dtype=None):
+    def from_model(name, state_dict, dtype=None):
         if not dtype:
             dtype = state_dict['metadata']['dtype']
 
         utils.cast_state_dict(state_dict, dtype)
 
-        model = LoRA(state_dict)
+        model = LoRA("lora:"+name, state_dict)
         model.to(dtype)
 
         return model
 
 class HN(Hypernetwork):
     @staticmethod
-    def from_model(state_dict, dtype=None):
+    def from_model(name, state_dict, dtype=None):
         if not dtype:
             dtype = state_dict['metadata']['dtype']
 
         utils.cast_state_dict(state_dict, dtype)
 
-        model = HN(state_dict)
+        model = HN("hypernet:"+name, state_dict)
         model.to(dtype)
 
         return model
 
 class AdditionalNetworks():
     class AdditionalModule(torch.nn.Module):
-        def __init__(self, name, module: torch.nn.Module):
+        def __init__(self, parent, name, module: torch.nn.Module):
             super().__init__()
+            self.parent = parent
             self.name = name
             self.original = module.forward
             self.dim = module.in_features if hasattr(module, "in_features") else None
@@ -299,11 +300,21 @@ class AdditionalNetworks():
             self.loras = []
 
         def forward(self, x):
+            if self.hns:
+                x = x.clone()
             for hn in self.hns:
-                x = x + hn(x)
+                v = hn(x)
+                for i in range(len(self.parent.strength)):
+                    if hn.net_name in self.parent.strength[i]:
+                        x[i] += ((v[i] * self.parent.strength[i][hn.net_name])).clone()
             out = self.original(x)
             for lora in self.loras:
-                out = out + lora(x)
+                v = None
+                for i in range(len(self.parent.strength)):
+                    if lora.net_name in self.parent.strength[i]:
+                        if v == None:
+                            v = lora(x)
+                        out[i] += v[i] * self.parent.strength[i][lora.net_name]
             return out
 
         def attach_lora(self, module):
@@ -318,6 +329,7 @@ class AdditionalNetworks():
 
     def __init__(self, model):
         self.modules = {}
+        self.strength = {}
 
         model_type = str(type(model))
         if "CLIP" in model_type:
@@ -330,6 +342,10 @@ class AdditionalNetworks():
     def clear(self):
         for name in self.modules:
             self.modules[name].clear()
+        self.strength = {}
+    
+    def set_strength(self, strength):
+        self.strength = strength
 
     def hijack_model(self, model, prefix, targets):
         modules = {}
@@ -339,6 +355,6 @@ class AdditionalNetworks():
                     child_class = child_module.__class__.__name__
                     if child_class == "Linear" or (child_class == "Conv2d" and child_module.kernel_size == (1, 1)):
                         name = (prefix + '.' + module_name + '.' + child_name).replace('.', '_')
-                        modules[name] = AdditionalNetworks.AdditionalModule(name, child_module)
+                        modules[name] = AdditionalNetworks.AdditionalModule(self, name, child_module)
                         child_module.forward = modules[name].forward
         return modules

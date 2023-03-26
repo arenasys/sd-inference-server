@@ -3,7 +3,6 @@ import torchvision.transforms as transforms
 import PIL
 import random
 import io
-import tqdm
 
 import prompts
 import samplers_k
@@ -13,15 +12,15 @@ import utils
 import storage
 import upscalers
 import inference
+import convert
 
 DEFAULTS = {
     "strength": 0.75, "sampler": "Euler_a", "clip_skip": 1, "eta": 1,
-    "hr_upscaler": "Latent (nearest)", "hr_strength": 0.7, "img2img_upscaler": "Lanczos", "mask_blur": 4,
-    "lora_strength": 1.0, "hn_strength": 1.0
+    "hr_upscaler": "Latent (nearest)", "hr_strength": 0.7, "img2img_upscaler": "Lanczos", "mask_blur": 4
 }
 
 TYPES = {
-    int: ["width", "height", "steps", "seed", "batch_size", "clip_skip", "mask_blur", "hr_steps"],
+    int: ["width", "height", "steps", "seed", "batch_size", "clip_skip", "mask_blur", "hr_steps", "padding"],
     float: ["scale", "eta", "hr_factor", "hr_eta"],
 }
 
@@ -67,15 +66,17 @@ class GenerationParameters():
                 raise RuntimeError("Aborted")
 
     def on_step(self, progress):
-        step = progress["n"]
-        total = progress["total"]
+        step = self.current_step
+        total = self.total_steps
         rate = progress["rate"]
         remaining = (total - step) / rate if rate and total else 0
 
+        if "n" in progress:
+            self.current_step += 1
+
         progress = {"current": step, "total": total, "rate": rate, "remaining": remaining}
 
-        if step:
-            self.current_step += 1
+
         self.set_progress(progress)
     
     def on_complete(self, images, metadata):
@@ -189,6 +190,7 @@ class GenerationParameters():
         else:
             images = upscalers.upscale_super_resolution(images, self.upscale_model, width, height)
         
+        self.set_status("Encoding")
         return utils.encode_images(self.vae, seeds, images)
 
     def upscale_images(self, vae, images, mode, width, height, seeds):
@@ -202,6 +204,7 @@ class GenerationParameters():
         else:
             images = upscalers.upscale_super_resolution(images, self.upscale_model, width, height)
 
+        self.set_status("Encoding")
         latents = utils.get_latents(vae, seeds, images)
         return latents
 
@@ -256,23 +259,37 @@ class GenerationParameters():
                 "clip_skip": self.clip_skip
             }
 
-            if self.eta != 0.0:
+            if subseeds != None:
+                sds = []
+                strs = []
+                active = False
+                for s, r in subseeds:
+                    if r != 0.0:
+                        active = True
+                    sds += [str(s)]
+                    strs += [str(r)]
+                if active:
+                    m["subseed"] = ", ".join(sds)
+                    m["subseed_strength"] = ", ".join(strs)
+
+            if self.eta != DEFAULTS["eta"]:
                 m["eta"] = self.eta
 
             if len({self.unet_name, self.clip_name,self.vae_name}) == 1:
                 m["model"] = self.unet_name
             else:
-                m["unet"] = self.unet_name
-                m["clip"] = self.clip_name
-                m["vae"] = self.vae_name
+                m["UNET"] = self.unet_name
+                m["CLIP"] = self.clip_name
+                m["VAE"] = self.vae_name
 
             if mode == "img2img":
                 m["img2img_upscaler"] = self.img2img_upscaler
-                m["padding"] = self.padding
+                if self.padding:
+                    m["padding"] = self.padding
                 m["mask_blur"] = self.mask_blur
 
             if mode == "txt2img":
-                if self.hr_factor:
+                if self.hr_factor and self.hr_factor != 1.0:
                     m["hr_steps"] = self.hr_steps
                     m["hr_factor"] = self.hr_factor
                     m["hr_upscaler"] = self.hr_upscaler
@@ -280,49 +297,40 @@ class GenerationParameters():
                     m["hr_sampler"] = self.hr_sampler
                     m["hr_eta"] = self.hr_eta
 
-            if self.lora:
-                m["lora"] = self.lora
-                m["lora_strength"] = self.lora_strength
-
-            if self.hn:
-                m["hn"] = self.hn
-                m["hn_strength"] = self.hn_strength
             metadata += [m]
         return metadata
 
-    def attach_networks(self):
+    def attach_networks(self, networks):
         self.detach_networks()
 
         device = self.unet.device
 
-        if self.lora:
-            self.set_status("Loading LoRAs")
-            (lora_names, lora_strengths) = self.listify(self.lora, self.lora_strength)
+        lora_names = []
+        hn_names = []
 
+        for n in networks:
+            prefix, n = n.split(":",1)
+            if prefix == "lora":
+                lora_names += [n]
+            if prefix == "hypernet":
+                hn_names += [n]
+
+        if lora_names:
+            self.set_status("Loading LoRAs")
             self.storage.enforce_network_limit(lora_names, "LoRA")
             self.loras = [self.storage.get_lora(name, device) for name in lora_names]
 
-            if len(lora_strengths) < len(self.loras):
-                lora_strengths += [1 for _ in range(len(self.loras)-len(lora_strengths))]
-
-            for i, lora in enumerate(self.loras):
-                lora.set_strength(lora_strengths[i])
+            for lora in self.loras:
                 lora.attach(self.unet.additional, self.clip.additional)
         else:
             self.storage.enforce_network_limit([], "LoRA")
 
-        if self.hn:
+        if hn_names:
             self.set_status("Loading Hypernetworks")
-            (hn_names, hn_strengths) = self.listify(self.hn, self.hn_strength)
-
             self.storage.enforce_network_limit(hn_names, "HN")
             self.hns = [self.storage.get_hypernetwork(name, device) for name in hn_names]
 
-            if len(hn_strengths) < len(self.hns):
-                hn_strengths += [1 for _ in range(len(self.hns)-len(hn_strengths))]
-
-            for i, hn in enumerate(self.hns):
-                hn.set_strength(hn_strengths[i])
+            for hn in self.hns:
                 hn.attach(self.unet.additional)
         else:
             self.storage.enforce_network_limit([], "HN")
@@ -338,7 +346,7 @@ class GenerationParameters():
 
         self.set_status("Configuring")
         required = "unet, clip, vae, sampler, prompt, negative_prompt, width, height, seed, scale, steps".split(", ")
-        optional = "clip_skip, eta, batch_size, hr_steps, hr_factor, hr_upscaler, hr_strength, hr_sampler, hr_eta, lora, hn".split(", ")
+        optional = "clip_skip, eta, batch_size, hr_steps, hr_factor, hr_upscaler, hr_strength, hr_sampler, hr_eta".split(", ")
         self.check_parameters(required, optional)
 
         batch_size = self.get_batch_size()
@@ -347,8 +355,6 @@ class GenerationParameters():
         positive_prompts, negative_prompts = self.get_prompts()
         seeds, subseeds = self.get_seeds(batch_size)
         
-        self.attach_networks()
-
         self.current_step = 0
         self.total_steps = self.steps
 
@@ -363,6 +369,9 @@ class GenerationParameters():
         metadata = self.get_metadata("txt2img", batch_size, positive_prompts, negative_prompts, seeds, subseeds, self.width, self.height)
 
         conditioning = prompts.ConditioningSchedule(self.clip, positive_prompts, negative_prompts, self.steps, self.clip_skip, batch_size)
+        self.attach_networks(conditioning.get_all_networks())
+        conditioning.encode()
+
         denoiser = guidance.GuidedDenoiser(self.unet, conditioning, self.scale)
         noise = utils.NoiseSchedule(seeds, subseeds, self.width // 8, self.height // 8, device, self.unet.dtype)
         sampler = SAMPLER_CLASSES[self.sampler](denoiser, self.eta)
@@ -371,6 +380,7 @@ class GenerationParameters():
         latents = inference.txt2img(denoiser, sampler, noise, self.steps, self.on_step)
 
         if not self.hr_factor:
+            self.set_status("Decoding")
             images = utils.decode_images(self.vae, latents)
             self.on_complete(images, metadata)
             return images
@@ -380,6 +390,9 @@ class GenerationParameters():
 
         noise = utils.NoiseSchedule(seeds, subseeds, width // 8, height // 8, device, self.unet.dtype)
         conditioning.switch_to_HR()
+        self.attach_networks(conditioning.get_all_networks())
+        conditioning.encode()
+
         denoiser.reset()
         sampler = SAMPLER_CLASSES[self.hr_sampler](denoiser, self.hr_eta)
 
@@ -389,6 +402,7 @@ class GenerationParameters():
         self.set_status("Generating")
         latents = inference.img2img(latents, denoiser, sampler, noise, hr_steps, True, self.hr_strength, self.on_step)
 
+        self.set_status("Decoding")
         images = utils.decode_images(self.vae, latents)
         self.on_complete(images, metadata)
         return images
@@ -400,7 +414,7 @@ class GenerationParameters():
 
         self.set_status("Configuring")
         required = "unet, clip, vae, sampler, image, prompt, negative_prompt, seed, scale, steps, strength".split(", ")
-        optional = "img2img_upscaler, mask, mask_blur, clip_skip, eta, batch_size, padding, width, height, lora".split(", ")
+        optional = "img2img_upscaler, mask, mask_blur, clip_skip, eta, batch_size, padding, width, height".split(", ")
         self.check_parameters(required, optional)
 
         batch_size = self.get_batch_size()
@@ -421,18 +435,20 @@ class GenerationParameters():
 
         metadata = self.get_metadata("img2img", batch_size, positive_prompts, negative_prompts, seeds, subseeds, width, height)
 
-        self.attach_networks()
-
         self.current_step = 0
         self.total_steps = int(self.steps * self.strength) + 1
-            
+        
         conditioning = prompts.ConditioningSchedule(self.clip, positive_prompts, negative_prompts, self.steps, self.clip_skip, batch_size)
+        self.attach_networks(conditioning.get_all_networks())
+        conditioning.encode()
+
         denoiser = guidance.GuidedDenoiser(self.unet, conditioning, self.scale)
         noise = utils.NoiseSchedule(seeds, subseeds, width // 8, height // 8, device, self.unet.dtype)
         sampler = SAMPLER_CLASSES[self.sampler](denoiser, self.eta)
 
         if self.mask:
-            images, masks, extents = utils.prepare_inpainting(images, masks, self.padding)
+            self.set_status("Preparing")
+            images, masks, extents = utils.prepare_inpainting(images, masks, self.padding, width, height)
 
         self.set_status("Upscaling")
         latents = self.upscale_images(self.vae, images, self.img2img_upscaler, width, height, seeds)
@@ -447,6 +463,7 @@ class GenerationParameters():
         self.set_status("Generating")
         latents = inference.img2img(latents, denoiser, sampler, noise, self.steps, False, self.strength, self.on_step)
 
+        self.set_status("Decoding")
         images = utils.decode_images(self.vae, latents)
 
         if self.mask:
@@ -468,3 +485,8 @@ class GenerationParameters():
         if self.callback:
             if not self.callback({"type": "options", "data": data}):
                 raise RuntimeError("Aborted")
+            
+    def convert(self):
+        self.set_status("Converting")
+        convert.autoconvert(self.model_folder, self.trash_folder)
+        self.set_status("Ready")

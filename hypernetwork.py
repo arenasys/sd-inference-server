@@ -4,8 +4,9 @@ import inspect
 # adapted from AUTOs HN code https://github.com/AUTOMATIC1111/stable-diffusion-webui/blob/master/modules/hypernetworks/hypernetwork.py
 
 class HypernetworkModule(torch.nn.Module):
-    def __init__(self, dim, layer_structure, activation_func, add_layer_norm, activate_output, dropout_structure):
+    def __init__(self, net_name, dim, layer_structure, activation_func, add_layer_norm, activate_output, dropout_structure):
         super().__init__()
+        self.net_name = net_name
         self.activation_dict = {
             "linear": torch.nn.Identity,
             "relu": torch.nn.ReLU,
@@ -41,8 +42,9 @@ class HypernetworkModule(torch.nn.Module):
         return self.linear(x) * self.multiplier
 
 class Hypernetwork(torch.nn.Module):
-    def __init__(self, state_dict) -> None:
+    def __init__(self, name, state_dict) -> None:
         super().__init__()
+        self.net_name = name
         self.build_model(state_dict)
         self.load_model(state_dict)
 
@@ -93,8 +95,8 @@ class Hypernetwork(torch.nn.Module):
         self.layers = {}
         for size in self.sizes:
             self.layers[size] = (
-                HypernetworkModule(size, self.layer_structure, self.activation_func, self.add_layer_norm, self.activate_output, self.dropout_structure),
-                HypernetworkModule(size, self.layer_structure, self.activation_func, self.add_layer_norm, self.activate_output, self.dropout_structure)
+                HypernetworkModule(self.net_name, size, self.layer_structure, self.activation_func, self.add_layer_norm, self.activate_output, self.dropout_structure),
+                HypernetworkModule(self.net_name, size, self.layer_structure, self.activation_func, self.add_layer_norm, self.activate_output, self.dropout_structure)
             )
             self.add_module(f"{size}_0", self.layers[size][0])
             self.add_module(f"{size}_1", self.layers[size][1])

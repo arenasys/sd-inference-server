@@ -4,7 +4,7 @@ class GuidedDenoiser():
     def __init__(self, unet, conditioning_schedule, scale):
         self.unet = unet
         self.conditioning_schedule = conditioning_schedule
-        self.conditioning = self.conditioning_schedule[0]
+        self.conditioning = None
         self.scale = scale
 
         self.mask = None
@@ -82,9 +82,11 @@ class GuidedDenoiser():
         return original_pred
 
     def set_step(self, step):
-        self.conditioning = self.conditioning_schedule[step].to(self.dtype)
-
+        self.conditioning= self.conditioning_schedule.get_conditioning_at_step(step).to(self.dtype)
+        nets = self.conditioning_schedule.get_networks_at_step(step)
+        self.unet.additional.set_strength(nets)
+        
     def reset(self):
         self.mask = None
         self.original = None
-        self.conditioning = self.conditioning_schedule[0]
+        self.conditioning = None
