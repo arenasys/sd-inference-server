@@ -87,7 +87,7 @@ class GenerationParameters():
                 i.save(bytesio, format='PNG')
                 images_data += [bytesio.getvalue()]
             self.callback({"type": "result", "data": {"images": images_data, "metadata": metadata}})
-
+            
     def reset(self):
         for attr in list(self.__dict__.keys()):
             if not attr in ["storage", "device", "callback"]:
@@ -489,4 +489,5 @@ class GenerationParameters():
     def convert(self):
         self.set_status("Converting")
         convert.autoconvert(self.model_folder, self.trash_folder)
-        self.set_status("Ready")
+        if not self.callback({"type": "done", "data": {}}):
+            raise RuntimeError("Aborted")

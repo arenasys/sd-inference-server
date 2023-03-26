@@ -1,5 +1,7 @@
 import threading
+import traceback
 import queue
+import os
 import torch
 
 import simple_websocket_server as ws_server
@@ -12,6 +14,7 @@ import wrapper
 class Inference(threading.Thread):
     def __init__(self, wrapper, callback):
         super().__init__()
+        
         self.wrapper = wrapper
         wrapper.callback = self.got_response
 
@@ -35,13 +38,31 @@ class Inference(threading.Thread):
                 elif request["type"] == "img2img":
                     self.wrapper.set(**request["data"])
                     self.wrapper.img2img()
+                elif request["type"] == "options":
+                    self.wrapper.options()
+                elif request["type"] == "convert":
+                    self.wrapper.set(**request["data"])
+                    self.wrapper.convert()
                 self.requests.task_done()
             except queue.Empty:
                 pass
-            except RuntimeError:
-                pass
             except Exception as e:
-                self.got_response({"type":"error", "data":{"message":str(e)}})
+                if str(e) == "Aborted":
+                    self.got_response({"type":"aborted", "data":{}})
+                    continue
+                additional = ""
+                try:
+                    s = traceback.extract_tb(e.__traceback__).format()
+                    s = [e for e in s if not "site-packages" in e][-1]
+                    s = s.split(", ")
+                    file = s[0].split(os.path.sep)[-1][:-1]
+                    line = s[1].split(" ")[1]
+                    additional = f" ({file}:{line})"
+                except Exception:
+                    pass
+
+                self.got_response({"type":"error", "data":{"message":str(e) + additional}})
+
 
 class Server(ws_server.WebSocketServer):
     class Connection(ws_server.WebSocket):
@@ -55,8 +76,8 @@ class Server(ws_server.WebSocketServer):
             try:
                 request = bson.loads(self.data)
                 assert type(request["type"]) == str
-                assert type(request["data"]) == dict
-            except Exception:
+                assert not "data" in request or type(request["data"]) == dict
+            except Exception as e:
                 self.send_error("malformed request")
                 return
             self.id = self.server.on_request(self.id, request)
@@ -82,6 +103,7 @@ class Server(ws_server.WebSocketServer):
 
         self.id = 0
         self.clients = {}
+        self.cancelled = set()
 
         self.stay_alive = True
 
@@ -127,8 +149,12 @@ class Server(ws_server.WebSocketServer):
         return self.id
 
     def on_request(self, id, request):
-        if request["type"] == "abort":
+        if request["type"] == "stop":
             return self.on_reset(id)
+        if request["type"] == "cancel":
+            id = self.on_reset(id)
+            self.responses.put((id, {'type': 'aborted', 'data': {}}))
+            return id
 
         self.inference.requests.put((id, request))
         return id
@@ -140,7 +166,7 @@ class Server(ws_server.WebSocketServer):
 if __name__ == "__main__":
     attention.use_optimized_attention()
 
-    model_storage = storage.ModelStorage("./models", torch.float16, torch.float32)
+    model_storage = storage.ModelStorage("../models", torch.float16, torch.float32)
     params = wrapper.GenerationParameters(model_storage, torch.device("cuda"))
 
     server = Server(params, "127.0.0.1", "28888")
