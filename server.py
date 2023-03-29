@@ -3,6 +3,7 @@ import traceback
 import queue
 import os
 import torch
+import ssl
 
 import simple_websocket_server as ws_server
 import bson
@@ -94,8 +95,8 @@ class Server(ws_server.WebSocketServer):
             response = {"type": "error", "data": {"message":error}}
             self.send(response)
 
-    def __init__(self, wrapper, host, port):
-        super().__init__(host, port, Server.Connection, select_interval=0.01)
+    def __init__(self, wrapper, host, port, certfile=None, keyfile=None, ssl_version=ssl.PROTOCOL_TLSv1_2):
+        super().__init__(host, port, Server.Connection, select_interval=0.01, certfile=certfile, keyfile=keyfile, ssl_version=ssl_version)
         self.inference = Inference(wrapper, callback=self.on_response)
         self.serve = threading.Thread(target=self.serve_forever)
 
