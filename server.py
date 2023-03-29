@@ -12,6 +12,25 @@ import attention
 import storage
 import wrapper
 
+import base64
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.fernet import Fernet, InvalidToken
+
+def get_scheme(password):
+    password = password.encode("utf8")
+    h = hashes.Hash(hashes.SHA256())
+    h.update(password)
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=h.finalize()[:16], #lol
+        iterations=480000,
+    )
+    key = base64.urlsafe_b64encode(kdf.derive(password))
+    print(key)
+    return Fernet(key)
+
 class Inference(threading.Thread):
     def __init__(self, wrapper, callback):
         super().__init__()
@@ -75,18 +94,24 @@ class Server(ws_server.WebSocketServer):
 
         def handle(self):
             try:
-                request = bson.loads(self.data)
+                data = self.data
+                if self.scheme:
+                    data = self.scheme.decrypt(bytes(data))
+                request = bson.loads(data)
                 assert type(request["type"]) == str
                 assert not "data" in request or type(request["data"]) == dict
             except Exception as e:
+                print(e)
                 self.send_error("malformed request")
                 return
             self.id = self.server.on_request(self.id, request)
 
         def send(self, response):
             try:
-                response = bson.dumps(response)
-                self.send_message(response)
+                data = bson.dumps(response)
+                if self.scheme:
+                    data = self.scheme.encrypt(data)
+                self.send_message(data)
             except Exception:
                 self.close()
                 return
@@ -95,8 +120,8 @@ class Server(ws_server.WebSocketServer):
             response = {"type": "error", "data": {"message":error}}
             self.send(response)
 
-    def __init__(self, wrapper, host, port, certfile=None, keyfile=None, ssl_version=ssl.PROTOCOL_TLSv1_2):
-        super().__init__(host, port, Server.Connection, select_interval=0.01, certfile=certfile, keyfile=keyfile, ssl_version=ssl_version)
+    def __init__(self, wrapper, host, port, password=None):
+        super().__init__(host, port, Server.Connection, select_interval=0.01)
         self.inference = Inference(wrapper, callback=self.on_response)
         self.serve = threading.Thread(target=self.serve_forever)
 
@@ -107,6 +132,10 @@ class Server(ws_server.WebSocketServer):
         self.cancelled = set()
 
         self.stay_alive = True
+
+        self.scheme = None
+        if password != None:
+            self.scheme = get_scheme(password)
 
     def start(self):
         print("SERVER: starting")
@@ -136,7 +165,7 @@ class Server(ws_server.WebSocketServer):
     def on_connected(self, connection):
         self.id += 1
         self.clients[self.id] = connection
-        print(f"SERVER: client connected")
+        connection.scheme = self.scheme
         return self.id
 
     def on_disconnected(self, id):
