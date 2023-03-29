@@ -28,7 +28,6 @@ def get_scheme(password):
         iterations=480000,
     )
     key = base64.urlsafe_b64encode(kdf.derive(password))
-    print(key)
     return Fernet(key)
 
 class Inference(threading.Thread):
