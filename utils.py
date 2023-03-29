@@ -80,7 +80,7 @@ def apply_inpainting(images, originals, masks, extents):
         
         outputs[i] = original.copy()
 
-        outputs[i].paste(image.convert("RGBA"), extent, mask.convert("RGBA"))
+        outputs[i].paste(image.convert("RGBA"), extent, mask.convert("L"))
 
     return outputs
 

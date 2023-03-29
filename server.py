@@ -3,7 +3,6 @@ import traceback
 import queue
 import os
 import torch
-import ssl
 
 import simple_websocket_server as ws_server
 import bson
@@ -64,6 +63,7 @@ class Inference(threading.Thread):
                     self.wrapper.convert()
                 elif request["type"] == "download":
                     self.download(**request["data"])
+                    self.got_response({"type": "done", "data": {}})
                 self.requests.task_done()
             except queue.Empty:
                 pass
@@ -85,7 +85,35 @@ class Inference(threading.Thread):
                 self.got_response({"type":"error", "data":{"message":str(e) + additional}})
         
     def download(self, type, url):
-        print(type, url)
+        import gdown
+        import mega
+        import subprocess
+
+        folder = os.path.join(self.wrapper.storage.path, type)
+        if not os.path.exists(folder):
+            return
+        if 'drive.google' in url:
+            parts = url.split("/")
+            id = None
+            if len(parts) == 4:
+                id = parts[3].split("=",1)[1].split("&",1)[0]
+            elif len(parts) == 7:
+                id = parts[5]
+            else:
+                return
+            
+            thread = threading.Thread(target=lambda folder, id: gdown.download(output=folder, id=id+"&confirm=t"), args=([folder, id]))
+            thread.start()
+            return
+        if 'mega.nz' in url:
+            thread = threading.Thread(target=lambda folder, url: mega.Mega().login().download_url(url, folder), args=([folder, url]))
+            thread.start()
+            return
+        if 'huggingface' in url:
+            url = url.replace("/blob/", "/resolve/")
+        if 'civitai.com' in url:
+            pass
+        subprocess.Popen(["curl", "-O", "-J", "-L", url], shell=True, stdin=None, stdout=None, stderr=None, close_fds=True, cwd=folder)
 
 
 class Server(ws_server.WebSocketServer):
@@ -202,7 +230,7 @@ class Server(ws_server.WebSocketServer):
 if __name__ == "__main__":
     attention.use_optimized_attention()
 
-    model_storage = storage.ModelStorage("../models", torch.float16, torch.float32)
+    model_storage = storage.ModelStorage("../../models", torch.float16, torch.float32)
     params = wrapper.GenerationParameters(model_storage, torch.device("cuda"))
 
     server = Server(params, "127.0.0.1", "28888")

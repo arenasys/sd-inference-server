@@ -99,14 +99,14 @@ class GenerationParameters():
     def set(self, **kwargs):
         for key, value in kwargs.items():
             if key == "image" or key == "mask":
-                if type(value) == bytes:
+                if type(value) == bytes or type(value) == bytearray:
                     value = PIL.Image.open(io.BytesIO(value))
                     if value[i].mode == 'RGBA':
                         value = PIL.Image.alpha_composite(PIL.Image.new('RGBA',value.size,(0,0,0)), value)
                         value = value.convert("RGB")
                 if type(value) == list:
                     for i in range(len(value)):
-                        if type(value[i]) == bytes:
+                        if type(value[i]) == bytes or type(value) == bytearray:
                             value[i] = PIL.Image.open(io.BytesIO(value[i]))
                             if value[i].mode == 'RGBA':
                                 value[i] = PIL.Image.alpha_composite(PIL.Image.new('RGBA',value[i].size,(0,0,0)), value[i])
