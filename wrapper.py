@@ -76,11 +76,11 @@ class GenerationParameters():
 
         progress = {"current": step, "total": total, "rate": rate, "remaining": remaining}
 
-
         self.set_progress(progress)
     
     def on_complete(self, images, metadata):
         if self.callback:
+            self.set_status("Fetching")
             images_data = []
             for i in images:
                 bytesio = io.BytesIO()
