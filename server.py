@@ -62,6 +62,8 @@ class Inference(threading.Thread):
                 elif request["type"] == "convert":
                     self.wrapper.set(**request["data"])
                     self.wrapper.convert()
+                elif request["type"] == "download":
+                    self.download(**request["data"])
                 self.requests.task_done()
             except queue.Empty:
                 pass
@@ -81,6 +83,9 @@ class Inference(threading.Thread):
                     pass
 
                 self.got_response({"type":"error", "data":{"message":str(e) + additional}})
+        
+    def download(self, type, url):
+        print(type, url)
 
 
 class Server(ws_server.WebSocketServer):
@@ -119,7 +124,7 @@ class Server(ws_server.WebSocketServer):
             response = {"type": "error", "data": {"message":error}}
             self.send(response)
 
-    def __init__(self, wrapper, host, port, password=None):
+    def __init__(self, wrapper, host, port, password=None, allow_downloading=False):
         super().__init__(host, port, Server.Connection, select_interval=0.01)
         self.inference = Inference(wrapper, callback=self.on_response)
         self.serve = threading.Thread(target=self.serve_forever)
@@ -131,6 +136,8 @@ class Server(ws_server.WebSocketServer):
         self.cancelled = set()
 
         self.stay_alive = True
+
+        self.allow_downloading = allow_downloading
 
         self.scheme = None
         if password != None:
