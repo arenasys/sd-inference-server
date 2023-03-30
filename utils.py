@@ -89,6 +89,9 @@ def prepare_inpainting(originals, masks, padding, width, height):
         wrk_w, wrk_h = wrk
         src_w, src_h = src
 
+        if not extent:
+            return 0, 0, src_w, src_h
+
         x1, y1, x2, y2 = extent
 
         ar = wrk_w/wrk_h
@@ -142,16 +145,13 @@ def prepare_inpainting(originals, masks, padding, width, height):
         extent = extents[i]
         if extent != (0,0,w,h):
             masks[i] = masks[i].crop(extent)
-            masks[i].save("MASK.png")
 
     # crop images according to their extent
     images = [i for i in originals]
     for i in range(len(images)):
         extent = extents[i%len(extents)]
         if extent != (0,0,w,h):
-            print(extent)
             images[i] = images[i].crop(extent)
-            images[i].save("CROP.png")
 
     return images, masks, extents
 

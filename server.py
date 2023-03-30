@@ -6,6 +6,7 @@ import torch
 
 import simple_websocket_server as ws_server
 import bson
+import time
 
 import attention
 import storage
@@ -40,6 +41,8 @@ class Inference(threading.Thread):
         self.requests = queue.Queue()
         self.current = None
 
+        self.uploads = {}
+
         self.stay_alive = True
 
     def got_response(self, response):
@@ -48,24 +51,30 @@ class Inference(threading.Thread):
     def run(self):
         while self.stay_alive:
             try:
-                self.current, request = self.requests.get(True, 0.1)
-                self.wrapper.reset()
+                self.current, request = self.requests.get(False)
+                
                 if request["type"] == "txt2img":
+                    self.wrapper.reset()
                     self.wrapper.set(**request["data"])
                     self.wrapper.txt2img()
                 elif request["type"] == "img2img":
+                    self.wrapper.reset()
                     self.wrapper.set(**request["data"])
                     self.wrapper.img2img()
                 elif request["type"] == "options":
+                    self.wrapper.reset()
                     self.wrapper.options()
                 elif request["type"] == "convert":
+                    self.wrapper.reset()
                     self.wrapper.set(**request["data"])
                     self.wrapper.convert()
                 elif request["type"] == "download":
                     self.download(**request["data"])
-                    self.got_response({"type": "done", "data": {}})
+                elif request["type"] == "chunk":
+                    self.upload(**request["data"])
                 self.requests.task_done()
             except queue.Empty:
+                time.sleep(0.01)
                 pass
             except Exception as e:
                 if str(e) == "Aborted":
@@ -89,31 +98,72 @@ class Inference(threading.Thread):
         import mega
         import subprocess
 
+        def gdownload(self, folder, url):
+            try:
+                parts = url.split("/")
+                id = None
+                if len(parts) == 4:
+                    id = parts[3].split("=",1)[1].split("&",1)[0]
+                elif len(parts) == 7:
+                    id = parts[5]
+                else:
+                    raise Exception()
+                gdown.download(output=folder, id=id+"&confirm=t")
+                self.got_response({"type":"downloaded", "data":{"message": "Success: " + url}})
+            except:
+                self.got_response({"type":"downloaded", "data":{"message": "Failed: " + url}})
+
+        def megadownload(self, folder, url):
+            try:
+                mega.Mega().login().download_url(url, folder)
+                self.got_response({"type":"downloaded", "data":{"message": "Success: " + url}})
+            except:
+                self.got_response({"type":"downloaded", "data":{"message": "Failed: " + url}})
+
+        def curldownload(self, folder, url):
+            r = subprocess.run(["curl", "-s", "-O", "-J", "-L", url], cwd=folder)
+            if r.returncode == 0:
+                self.got_response({"type":"downloaded", "data":{"message": "Success: " + url}})
+            else:
+                self.got_response({"type":"downloaded", "data":{"message": "Failed: " + url}})
+
         folder = os.path.join(self.wrapper.storage.path, type)
+
+        self.got_response({"type":"downloaded", "data":{"message": "Downloading: " + url + " to " + type}})
         if not os.path.exists(folder):
             return
         if 'drive.google' in url:
-            parts = url.split("/")
-            id = None
-            if len(parts) == 4:
-                id = parts[3].split("=",1)[1].split("&",1)[0]
-            elif len(parts) == 7:
-                id = parts[5]
-            else:
-                return
-            
-            thread = threading.Thread(target=lambda folder, id: gdown.download(output=folder, id=id+"&confirm=t"), args=([folder, id]))
+            thread = threading.Thread(target=gdownload, args=([self, folder, url]))
             thread.start()
             return
         if 'mega.nz' in url:
-            thread = threading.Thread(target=lambda folder, url: mega.Mega().login().download_url(url, folder), args=([folder, url]))
+            thread = threading.Thread(target=megadownload, args=([self, folder, url]))
             thread.start()
             return
         if 'huggingface' in url:
             url = url.replace("/blob/", "/resolve/")
-        if 'civitai.com' in url:
-            pass
-        subprocess.Popen(["curl", "-O", "-J", "-L", url], shell=True, stdin=None, stdout=None, stderr=None, close_fds=True, cwd=folder)
+        if 'civitai.com' in url and not "civitai.com/api/" in url:
+            self.got_response({"type":"downloaded", "data":{"message": "Failed: " + url}})
+            return
+        
+        thread = threading.Thread(target=curldownload, args=([self, folder, url]))
+        thread.start()
+
+    def upload(self, type, name, chunk=None, index=-1):
+        rel_file = os.path.join(type, name)
+        file = os.path.join(self.wrapper.storage.path, rel_file)
+        tmp = file + ".tmp"
+        if index == 0:
+            self.got_response({"type":"downloaded", "data":{"message": "Uploading: " + name + " to " + rel_file}})
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        if chunk:
+            with open(tmp, 'ab') as f:
+                f.write(chunk)
+        else:
+            if os.path.exists(tmp):
+                os.rename(tmp, file)
+            self.got_response({"type":"downloaded", "data":{"message": "Finished: " + rel_file}})
 
 
 class Server(ws_server.WebSocketServer):
@@ -128,7 +178,7 @@ class Server(ws_server.WebSocketServer):
             try:
                 data = self.data
                 if self.scheme:
-                    data = self.scheme.decrypt(bytes(data))
+                    data = self.scheme.decrypt(base64.urlsafe_b64encode(bytes(data)))
                 request = bson.loads(data)
                 assert type(request["type"]) == str
                 assert not "data" in request or type(request["data"]) == dict
@@ -142,7 +192,7 @@ class Server(ws_server.WebSocketServer):
             try:
                 data = bson.dumps(response)
                 if self.scheme:
-                    data = self.scheme.encrypt(data)
+                    data = self.scheme.encrypt(base64.urlsafe_b64decode(data))
                 self.send_message(data)
             except Exception:
                 self.close()
