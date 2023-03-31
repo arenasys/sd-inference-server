@@ -13,6 +13,7 @@ import storage
 import upscalers
 import inference
 import convert
+import attention
 
 DEFAULTS = {
     "strength": 0.75, "sampler": "Euler_a", "clip_skip": 1, "eta": 1,
@@ -47,6 +48,21 @@ UPSCALERS_PIXEL = {
     "Bilinear": transforms.InterpolationMode.BILINEAR,
     "Nearest": transforms.InterpolationMode.NEAREST,
 }
+
+CROSS_ATTENTION = {
+    "Default": attention.use_optimized_attention,
+    "Split v1": attention.use_split_attention_v1,
+    "Split v2": attention.use_split_attention,
+    "Flash": attention.use_flash_attention,
+    "xFormers": attention.use_xformers_attention
+}
+
+HAVE_XFORMERS = False
+try:
+    import xformers
+    HAVE_XFORMERS = True
+except Exception:
+    pass
 
 class GenerationParameters():
     def __init__(self, storage: storage.ModelStorage, device):
@@ -172,6 +188,9 @@ class GenerationParameters():
 
         if (self.width or self.height) and not (self.width and self.height):
             raise ValueError("width and height must both be set")
+        
+        if self.attention and self.attention in CROSS_ATTENTION:
+            CROSS_ATTENTION[self.attention]()
 
     def listify(self, *args):
         if args == None:
@@ -479,6 +498,9 @@ class GenerationParameters():
             data[k] = list(self.storage.files[k].keys())
 
         data["upscaler"] = list(UPSCALERS_LATENT.keys()) + list(UPSCALERS_PIXEL.keys()) 
+        data["attention"] = list(CROSS_ATTENTION.keys())
+        if not HAVE_XFORMERS:
+            data["attention"].remove("xFormers")
 
         data["SR"] = data["SR"]
 
