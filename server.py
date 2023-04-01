@@ -192,7 +192,7 @@ class Server(ws_server.WebSocketServer):
             try:
                 data = bson.dumps(response)
                 if self.scheme:
-                    data = self.scheme.encrypt(base64.urlsafe_b64decode(data))
+                    data = base64.urlsafe_b64decode(self.scheme.encrypt(data))
                 self.send_message(data)
             except Exception:
                 self.close()
