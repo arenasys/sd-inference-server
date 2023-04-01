@@ -4,6 +4,7 @@ import glob
 import safetensors.torch
 
 import models
+import convert
 import upscalers
 
 class ModelStorage():
@@ -82,7 +83,7 @@ class ModelStorage():
 
     def find_all(self):
         self.files = {k:{} for k in self.classes}
-        for model in glob.glob(os.path.join(self.path, "SD", "*.st")):
+        for model in sum([glob.glob(os.path.join(self.path, "SD", ext)) for ext in ["*.st", "*.safetensors", "*.ckpt"]], []):
             file = os.path.relpath(model, self.path)
 
             if ".unet." in file:
@@ -179,6 +180,10 @@ class ModelStorage():
     def load_file(self, file, comp):
         print(f"LOADING {file}...")
         file = os.path.join(self.path, file)
+
+        if comp in ["UNET", "CLIP", "VAE"] and (file.endswith(".safetensors") or file.endswith(".ckpt")):
+            state_dict = convert.convert_checkpoint(file)
+            return self.parse_model(state_dict)
 
         if file.endswith(".st") or file.endswith(".safetensors"):
             state_dict = safetensors.torch.load_file(file)

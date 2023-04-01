@@ -52,7 +52,7 @@ class Inference(threading.Thread):
         while self.stay_alive:
             try:
                 self.current, request = self.requests.get(False)
-                
+                print(request["type"])
                 if request["type"] == "txt2img":
                     self.wrapper.reset()
                     self.wrapper.set(**request["data"])

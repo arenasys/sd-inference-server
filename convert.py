@@ -104,7 +104,7 @@ def SDv2_convert(state_dict):
 
     return state_dict
 
-def convert_checkpoint(in_file, out_folder):
+def convert_checkpoint(in_file):
     print(f"CONVERTING {in_file}")
     
     if has_handle(os.path.abspath(in_file)):
@@ -138,6 +138,12 @@ def convert_checkpoint(in_file, out_folder):
     model_type = "SDv2" if v2 else "SDv1"
     state_dict["metadata.model_type"] = torch.as_tensor([ord(c) for c in model_type])
     state_dict["metadata.prediction_type"] = torch.as_tensor([ord(c) for c in prediction_type])
+    
+    return state_dict
+
+def convert_checkpoint_save(in_file, out_folder):
+    name = in_file.split(os.path.sep)[-1].split(".")[0]
+    state_dict = convert_checkpoint(in_file)
     
     out_file = os.path.join(out_folder, f"{name}.st")
     print(f"SAVING {out_file}")
@@ -191,7 +197,7 @@ def autoconvert(folder, trash):
     checkpoints += glob.glob(os.path.join(folder, "*.safetensors"))
     for checkpoint in checkpoints:
         try:
-            convert_checkpoint(checkpoint, folder)
+            convert_checkpoint_save(checkpoint, folder)
         except Exception as e:
             print("FAILED", str(e))
             continue
@@ -231,4 +237,4 @@ if __name__ == '__main__':
     if os.path.isdir(in_path):
         convert_diffusers_folder(in_path, out_folder)
     else:
-        convert_checkpoint(in_path, out_folder)
+        convert_checkpoint_save(in_path, out_folder)
