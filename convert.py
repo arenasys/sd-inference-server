@@ -54,9 +54,9 @@ def SDv1_convert(state_dict):
 
     # most keys are just renamed
     for src, dst in mapping.items():
-        state_dict[dst] = state_dict[src]
-        del state_dict[src]
-    
+        if src in state_dict:
+            state_dict[dst] = state_dict[src]
+            del state_dict[src]
     # some keys in the VAE need to be squeezed
     for k in state_dict:
         if ".VAE." in k and k.endswith(".weight") and "mid_block.attentions.0." in k:
@@ -90,8 +90,9 @@ def SDv2_convert(state_dict):
 
     # most keys are just renamed
     for src, dst in mapping.items():
-        state_dict[dst] = state_dict[src]
-        del state_dict[src]
+        if src in state_dict:
+            state_dict[dst] = state_dict[src]
+            del state_dict[src]
 
     # some keys in the VAE need to be squeezed
     for k in state_dict:
@@ -111,8 +112,10 @@ def convert_checkpoint(in_file):
         raise Exception("model is still being written")
 
     name = in_file.split(os.path.sep)[-1].split(".")[0]
-    if in_file.endswith(".ckpt"):
-        state_dict = torch.load(in_file, map_location="cpu")["state_dict"]
+    if in_file.endswith(".ckpt") or in_file.endswith(".pt"):
+        state_dict = torch.load(in_file, map_location="cpu")
+        if 'state_dict' in state_dict:
+            state_dict = state_dict['state_dict']
     elif in_file.endswith(".safetensors"):
         state_dict = safetensors.torch.load_file(in_file, "cpu")
 

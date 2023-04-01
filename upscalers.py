@@ -42,7 +42,7 @@ def upscale_super_resolution(images, model, width, height):
 
 class SR(RRDBNet):
     @staticmethod
-    def from_model(state_dict, dtype=None):
+    def from_model(name, state_dict, dtype=None):
         if len(state_dict) == 1:
             state_dict = next(iter(state_dict.values()))
 

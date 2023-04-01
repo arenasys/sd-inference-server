@@ -83,7 +83,7 @@ class ModelStorage():
 
     def find_all(self):
         self.files = {k:{} for k in self.classes}
-        for model in sum([glob.glob(os.path.join(self.path, "SD", ext)) for ext in ["*.st", "*.safetensors", "*.ckpt"]], []):
+        for model in sum([glob.glob(os.path.join(self.path, "SD", ext)) for ext in ["*.st", "*.safetensors", "*.ckpt", "*.pt"]], []):
             file = os.path.relpath(model, self.path)
 
             if ".unet." in file:
@@ -181,7 +181,7 @@ class ModelStorage():
         print(f"LOADING {file}...")
         file = os.path.join(self.path, file)
 
-        if comp in ["UNET", "CLIP", "VAE"] and (file.endswith(".safetensors") or file.endswith(".ckpt")):
+        if comp in ["UNET", "CLIP", "VAE"] and file.rsplit(".",1)[-1] in {"safetensors", "ckpt", "pt"}:
             state_dict = convert.convert_checkpoint(file)
             return self.parse_model(state_dict)
 
