@@ -122,7 +122,7 @@ class GenerationParameters():
                         value = value.convert("RGB")
                 if type(value) == list:
                     for i in range(len(value)):
-                        if type(value[i]) == bytes or type(value) == bytearray:
+                        if type(value[i]) == bytes or type(value[i]) == bytearray:
                             value[i] = PIL.Image.open(io.BytesIO(value[i]))
                             if value[i].mode == 'RGBA':
                                 value[i] = PIL.Image.alpha_composite(PIL.Image.new('RGBA',value[i].size,(0,0,0)), value[i])

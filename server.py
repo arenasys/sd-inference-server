@@ -3,6 +3,9 @@ import traceback
 import queue
 import os
 import torch
+import sys
+import datetime
+import argparse
 
 import simple_websocket_server as ws_server
 import bson
@@ -16,6 +19,15 @@ import base64
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.fernet import Fernet, InvalidToken
+
+DEFAULT_PASSWORD = "qDiffusion"
+
+def log_traceback(label):
+    exc_type, exc_value, exc_tb = sys.exc_info()
+    tb = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+    with open("crash.log", "a") as f:
+        f.write(f"{label} {datetime.datetime.now()}\n{tb}\n")
+    print(tb)
 
 def get_scheme(password):
     password = password.encode("utf8")
@@ -52,7 +64,6 @@ class Inference(threading.Thread):
         while self.stay_alive:
             try:
                 self.current, request = self.requests.get(False)
-                print(request["type"])
                 if request["type"] == "txt2img":
                     self.wrapper.reset()
                     self.wrapper.set(**request["data"])
@@ -82,6 +93,7 @@ class Inference(threading.Thread):
                     continue
                 additional = ""
                 try:
+                    log_traceback("SERVER")
                     s = traceback.extract_tb(e.__traceback__).format()
                     s = [e for e in s if not "site-packages" in e][-1]
                     s = s.split(", ")
@@ -183,7 +195,7 @@ class Server(ws_server.WebSocketServer):
                 assert type(request["type"]) == str
                 assert not "data" in request or type(request["data"]) == dict
             except Exception as e:
-                print(e)
+                log_traceback("SERVER RECV")
                 self.send_error("malformed request")
                 return
             self.id = self.server.on_request(self.id, request)
@@ -195,6 +207,7 @@ class Server(ws_server.WebSocketServer):
                     data = base64.urlsafe_b64decode(self.scheme.encrypt(data))
                 self.send_message(data)
             except Exception:
+                log_traceback("SERVER SEND")
                 self.close()
                 return
 
@@ -202,7 +215,7 @@ class Server(ws_server.WebSocketServer):
             response = {"type": "error", "data": {"message":error}}
             self.send(response)
 
-    def __init__(self, wrapper, host, port, password=None, allow_downloading=False):
+    def __init__(self, wrapper, host, port, password=DEFAULT_PASSWORD, allow_downloading=False):
         super().__init__(host, port, Server.Connection, select_interval=0.01)
         self.inference = Inference(wrapper, callback=self.on_response)
         self.serve = threading.Thread(target=self.serve_forever)
@@ -278,12 +291,20 @@ class Server(ws_server.WebSocketServer):
         return id in self.clients
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='sd-inference-server')
+    parser.add_argument('--bind', type=str, help='address (ip:port) to listen on', default="127.0.0.1:28888")
+    parser.add_argument('--password', type=str, help='password to derive encryption key from', default=DEFAULT_PASSWORD)
+    parser.add_argument('--models', type=str, help='models folder', default="../../models")
+    args = parser.parse_args()
+
+    ip, port = args.bind.rsplit(":",1)
+
     attention.use_optimized_attention()
 
-    model_storage = storage.ModelStorage("../../models", torch.float16, torch.float32)
+    model_storage = storage.ModelStorage(args.models, torch.float16, torch.float32)
     params = wrapper.GenerationParameters(model_storage, torch.device("cuda"))
 
-    server = Server(params, "127.0.0.1", "28888")
+    server = Server(params, ip, port, args.password)
     server.start()
     
     try:

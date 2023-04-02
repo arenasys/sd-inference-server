@@ -72,8 +72,9 @@ def apply_inpainting(images, originals, masks, extents):
         original = originals[i%len(originals)]
         mask = masks[i%len(masks)]
         extent = extents[i%len(extents)]
+        x1,y1,x2,y2 = extent
         
-        ew, eh = extent[2]-extent[0], extent[3]-extent[1]
+        ew, eh = x2-x1, y2-y1
         if (ew, eh) != images[i].size:
             image = image.resize((ew, eh))
             mask = mask.resize((ew, eh))
@@ -81,7 +82,6 @@ def apply_inpainting(images, originals, masks, extents):
         outputs[i] = original.copy()
 
         outputs[i].paste(image.convert("RGBA"), extent, mask.convert("L"))
-
     return outputs
 
 def prepare_inpainting(originals, masks, padding, width, height):
@@ -96,7 +96,7 @@ def prepare_inpainting(originals, masks, padding, width, height):
 
         ar = wrk_w/wrk_h
         cx,cy = x1 + (x2-x1)//2, y1 + (y2-y1)//2
-        rw,rh = min(src_w, (x2-x1)+2*p), min(src_h, (y2-y1)+2*p)
+        rw,rh = min(src_w, (x2-x1)+p), min(src_h, (y2-y1)+p)
 
         if wrk_w/rw < wrk_h/rh:
             w = rw
@@ -131,7 +131,7 @@ def prepare_inpainting(originals, masks, padding, width, height):
             y1 -= y2-src_h
             y2 = src_h
 
-        return x1, y1, x2, y2
+        return int(x1), int(y1), int(x2), int(y2)
 
     w, h = originals[0].size[0], originals[0].size[1]
     if padding != None:

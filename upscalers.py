@@ -12,9 +12,9 @@ def upscale(inputs, mode, width, height):
         else:
             ar = input.size[0] / input.size[1]
         
-        z = min(width, height)
-        if ar != width/height:
-            z = max(width, height)
+        z = max(width, height)
+        if abs(ar-(width/height)) < 0.01:
+            z = min(width, height)
         
         resize = transforms.transforms.Resize(z, mode)
         crop = transforms.CenterCrop((height, width))
