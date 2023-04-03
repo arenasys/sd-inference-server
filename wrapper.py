@@ -237,7 +237,7 @@ class GenerationParameters():
                 subseeds[i] = (int(a), float(b))
         else:
             subseeds = [(0,0)]
-            
+
         for i in range(len(seeds)):
             if seeds[i] == -1:
                 seeds[i] = random.randrange(2147483646)
@@ -501,12 +501,13 @@ class GenerationParameters():
         for k in self.storage.files:
             data[k] = list(self.storage.files[k].keys())
 
-        data["upscaler"] = list(UPSCALERS_LATENT.keys()) + list(UPSCALERS_PIXEL.keys()) 
+        data["hr_upscaler"] = list(UPSCALERS_LATENT.keys()) + list(UPSCALERS_PIXEL.keys()) + data["SR"]
+        data["img2img_upscaler"] = list(UPSCALERS_PIXEL.keys()) + list(UPSCALERS_LATENT.keys()) + data["SR"]
         data["attention"] = list(CROSS_ATTENTION.keys())
         if not HAVE_XFORMERS:
             data["attention"].remove("xFormers")
 
-        data["SR"] = data["SR"]
+        del data["SR"]
 
         if self.callback:
             if not self.callback({"type": "options", "data": data}):
