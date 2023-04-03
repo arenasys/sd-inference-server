@@ -231,7 +231,7 @@ class GenerationParameters():
         (seeds,) = self.listify(self.seed)
         if self.subseed:
             (subseeds,) = self.listify(self.subseed)
-            print(self.subseed, subseeds)
+            
             for i in range(len(subseeds)):
                 a, b = subseeds[i]
                 subseeds[i] = (int(a), float(b))

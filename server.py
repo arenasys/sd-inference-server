@@ -27,7 +27,7 @@ def log_traceback(label):
     tb = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
     with open("crash.log", "a") as f:
         f.write(f"{label} {datetime.datetime.now()}\n{tb}\n")
-    print(tb)
+    print(label, tb)
 
 def get_scheme(password):
     password = password.encode("utf8")
@@ -58,12 +58,14 @@ class Inference(threading.Thread):
         self.stay_alive = True
 
     def got_response(self, response):
+        print("RESP", response["type"])
         return self.callback(self.current, response)
 
     def run(self):
         while self.stay_alive:
             try:
                 self.current, request = self.requests.get(False)
+                print("RECV", request["type"])
                 if request["type"] == "txt2img":
                     self.wrapper.reset()
                     self.wrapper.set(**request["data"])
@@ -88,6 +90,7 @@ class Inference(threading.Thread):
                 time.sleep(0.01)
                 pass
             except Exception as e:
+                print("EXC1",e)
                 if str(e) == "Aborted":
                     self.got_response({"type":"aborted", "data":{}})
                     continue
@@ -101,7 +104,7 @@ class Inference(threading.Thread):
                     line = s[1].split(" ")[1]
                     additional = f" ({file}:{line})"
                 except Exception as e:
-                    print(e)
+                    print("EXC2",e)
                     pass
 
                 self.got_response({"type":"error", "data":{"message":str(e) + additional}})
@@ -257,6 +260,7 @@ class Server(ws_server.WebSocketServer):
             while not self.responses.empty():
                 id, response = self.responses.get()
                 if id in self.clients:
+                    print("SEND", response["type"])
                     self.clients[id].send(response)
         self.close()
 
