@@ -106,17 +106,23 @@ class ModelStorage():
             name = self.get_name(file)
             self.files["SR"][name] = file
 
-        for model in glob.glob(os.path.join(self.path, "TI", "*.*")):
+        for model in sum([glob.glob(os.path.join(self.path, "TI", ext)) for ext in ["*.pt", "*.safetensors", "*.bin"]], []):
             file = os.path.relpath(model, self.path)
             name = self.get_name(file)
             if name in self.embeddings:
                 continue
 
             ti = self.load_file(file, "TI")["TI"]
+
             if "string_to_param" in ti:
                 vectors = ti["string_to_param"]["*"]
-            else:
+            elif 'emb_params' in ti:
                 vectors = ti['emb_params']
+            elif len(ti) == 1:
+                vectors = ti[list(ti.keys())[0]]
+            else:
+                raise Exception("Unknown TI format")
+            
             vectors.requires_grad = False
             self.embeddings[name] = vectors
 
