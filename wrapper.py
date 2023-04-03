@@ -231,14 +231,13 @@ class GenerationParameters():
         (seeds,) = self.listify(self.seed)
         if self.subseed:
             (subseeds,) = self.listify(self.subseed)
+            print(self.subseed, subseeds)
             for i in range(len(subseeds)):
                 a, b = subseeds[i]
                 subseeds[i] = (int(a), float(b))
         else:
             subseeds = [(0,0)]
-
-        print(subseeds)
-
+            
         for i in range(len(seeds)):
             if seeds[i] == -1:
                 seeds[i] = random.randrange(2147483646)
