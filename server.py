@@ -95,12 +95,13 @@ class Inference(threading.Thread):
                 try:
                     log_traceback("SERVER")
                     s = traceback.extract_tb(e.__traceback__).format()
-                    s = [e for e in s if not "site-packages" in e][-1]
+                    s = [e for e in s if not "venv" in e][-1]
                     s = s.split(", ")
                     file = s[0].split(os.path.sep)[-1][:-1]
                     line = s[1].split(" ")[1]
                     additional = f" ({file}:{line})"
-                except Exception:
+                except Exception as e:
+                    print(e)
                     pass
 
                 self.got_response({"type":"error", "data":{"message":str(e) + additional}})
