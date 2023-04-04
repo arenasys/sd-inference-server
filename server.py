@@ -7,7 +7,10 @@ import sys
 import datetime
 import argparse
 
-import simple_websocket_server as ws_server
+import threading
+import queue
+import websockets.exceptions
+import websockets.sync.server
 import bson
 import time
 
@@ -19,6 +22,8 @@ import base64
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.fernet import Fernet, InvalidToken
+
+import random
 
 DEFAULT_PASSWORD = "qDiffusion"
 
@@ -41,6 +46,9 @@ def get_scheme(password):
     )
     key = base64.urlsafe_b64encode(kdf.derive(password))
     return Fernet(key)
+
+def get_id():
+    return random.SystemRandom().randint(1, 2**31 - 1)
 
 class Inference(threading.Thread):
     def __init__(self, wrapper, callback):
@@ -181,62 +189,20 @@ class Inference(threading.Thread):
                 os.rename(tmp, file)
             self.got_response({"type":"downloaded", "data":{"message": "Finished: " + rel_file}})
 
+class Server():
+    def __init__(self, wrapper, host, port, password=DEFAULT_PASSWORD):
+        self.stopping = False
 
-class Server(ws_server.WebSocketServer):
-    class Connection(ws_server.WebSocket):
-        def connected(self):
-            self.id = self.server.on_connected(self)
-
-        def handle_close(self):
-            self.server.on_disconnected(self.id)
-
-        def handle(self):
-            try:
-                data = self.data
-                if self.scheme:
-                    data = self.scheme.decrypt(base64.urlsafe_b64encode(bytes(data)))
-                request = bson.loads(data)
-                assert type(request["type"]) == str
-                assert not "data" in request or type(request["data"]) == dict
-            except Exception as e:
-                log_traceback("SERVER RECV")
-                self.send_error("malformed request")
-                return
-            self.id = self.server.on_request(self.id, request)
-
-        def send(self, response):
-            try:
-                data = bson.dumps(response)
-                if self.scheme:
-                    data = base64.urlsafe_b64decode(self.scheme.encrypt(data))
-                self.send_message(data)
-            except Exception:
-                log_traceback("SERVER SEND")
-                self.close()
-                return
-
-        def send_error(self, error):
-            response = {"type": "error", "data": {"message":error}}
-            self.send(response)
-
-    def __init__(self, wrapper, host, port, password=DEFAULT_PASSWORD, allow_downloading=False):
-        super().__init__(host, port, Server.Connection, select_interval=0.01)
-        self.inference = Inference(wrapper, callback=self.on_response)
-        self.serve = threading.Thread(target=self.serve_forever)
-
-        self.responses = queue.Queue()
-
-        self.id = 0
+        self.requests = {}
         self.clients = {}
-        self.cancelled = set()
-
-        self.stay_alive = True
-
-        self.allow_downloading = allow_downloading
 
         self.scheme = None
         if password != None:
             self.scheme = get_scheme(password)
+
+        self.inference = Inference(wrapper, callback=self.on_response)
+        self.server = websockets.sync.server.serve(self.handle_connection, host=host, port=int(port))
+        self.serve = threading.Thread(target=self.serve_forever)
 
     def start(self):
         print("SERVER: starting")
@@ -245,9 +211,8 @@ class Server(ws_server.WebSocketServer):
 
     def stop(self):
         print("SERVER: stopping")
-        self.clients = {}
         self.inference.stay_alive = False
-        self.stay_alive = False
+        self.server.shutdown()
         self.join()
 
     def join(self):
@@ -255,44 +220,89 @@ class Server(ws_server.WebSocketServer):
         self.serve.join()
 
     def serve_forever(self):
-        while self.stay_alive:
-            self.handle_request()
-            while not self.responses.empty():
-                id, response = self.responses.get()
-                if id in self.clients:
-                    self.clients[id].send(response)
-        self.close()
+        self.server.serve_forever()
 
-    def on_connected(self, connection):
-        self.id += 1
-        self.clients[self.id] = connection
-        connection.scheme = self.scheme
-        return self.id
+    def handle_connection(self, connection):
+        print(f"SERVER: client connected")
+        client_id = get_id()
+        self.clients[client_id] = queue.Queue()
+        self.clients[client_id].put((-1, {"type":"hello", "data":{"id": client_id}}))
+        mapping = {}
+        ctr = 0
+        try:
+            while True:
+                if not self.clients[client_id].empty():
+                    id, response = self.clients[client_id].get()
+                    if id in mapping: id = mapping[id]
+                    response["id"] = id
+                    data = bson.dumps(response)
+                    data = base64.urlsafe_b64decode(self.scheme.encrypt(data))
+                    connection.send(data)
+                else:
+                    data = None
+                    try:
+                        data = connection.recv(timeout=0)
+                    except TimeoutError:
+                        pass
+                    if not data:
+                        time.sleep(0.01)
+                        ctr += 1
+                        if ctr == 200:
+                            connection.ping()
+                            ctr = 0
+                        continue
+                    error = None
+                    request = None
+                    if type(data) in {bytes, bytearray}:
+                        try:
+                            if self.scheme:
+                                data = self.scheme.decrypt(base64.urlsafe_b64encode(bytes(data)))
+                            try:
+                                request = bson.loads(data)
+                            except:
+                                error = "Malformed request"
+                        except:
+                            error = "Incorrect password"
+                    else:
+                        error = "Invalid request"
+                    if request:
+                        if request["type"] == "cancel":
+                            id = 0
+                            for k,v in mapping.items():
+                                if v == request["data"]["id"]:
+                                    id = k
+                                    break
+                            if id in self.requests and self.requests[id] == client_id:
+                                del self.requests[id]
+                                self.clients[client_id].put((id, {'type': 'aborted', 'data': {}}))
 
-    def on_disconnected(self, id):
-        del self.clients[id]
+                        request_id = get_id()
+                        user_id = request_id
+                        if "id" in request:
+                            user_id = request["id"]
+                        self.requests[request_id] = client_id
+                        mapping[request_id] = user_id
+                        self.inference.requests.put((request_id, request))
+                        self.clients[client_id].put((-1, {"type":"ack", "data":{"id": user_id}}))
+                    else:
+                        self.clients[client_id].put((-1, {"type":"error", "data":{"message": error}}))
+        except websockets.exceptions.WebSocketException:
+            del self.clients[client_id]
+        except Exception as e:
+            del self.clients[client_id]
+            log_traceback("CLIENT")
         print(f"SERVER: client disconnected")
 
-    def on_reset(self, id):
-        self.id += 1
-        self.clients[self.id] = self.clients[id]
-        del self.clients[id]
-        return self.id
-
-    def on_request(self, id, request):
-        if request["type"] == "stop":
-            return self.on_reset(id)
-        if request["type"] == "cancel":
-            id = self.on_reset(id)
-            self.responses.put((id, {'type': 'aborted', 'data': {}}))
-            return id
-
-        self.inference.requests.put((id, request))
-        return id
-
     def on_response(self, id, response):
-        self.responses.put((id, response))
-        return id in self.clients
+        if id in self.requests:
+            client = self.requests[id]
+            if client in self.clients:
+                self.clients[client].put((id, response))
+                return True
+            else:
+                return False
+        else:
+            return False
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='sd-inference-server')
