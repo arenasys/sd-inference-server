@@ -132,7 +132,7 @@ def tokenize_prompt(clip, parsed):
             chunk = tokenized[:chunk_size]
 
             # split on a comma if its close to the end of the chunk
-            commas = [i for i, (c, _) in enumerate(chunk) if c == comma_token and i > chunk_size - leeway]
+            commas = [i for i, (c, _) in enumerate(chunk) if type(c) == int and c == comma_token and i > chunk_size - leeway]
             if commas:
                 chunk = tokenized[:commas[-1]+1]
 
