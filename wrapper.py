@@ -230,8 +230,13 @@ class GenerationParameters():
     def get_seeds(self, batch_size):
         (seeds,) = self.listify(self.seed)
         if self.subseed:
-            (subseeds,) = self.listify(self.subseed)
-            
+            subseeds = []
+            if type(self.subseed[0]) in {tuple, list}:
+                subseeds = self.subseed
+            else:
+                subseeds = [self.subseed]
+            subseeds = [tuple(s) for s in subseeds]
+
             for i in range(len(subseeds)):
                 a, b = subseeds[i]
                 subseeds[i] = (int(a), float(b))
