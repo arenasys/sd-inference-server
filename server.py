@@ -100,7 +100,9 @@ class Inference(threading.Thread):
                     file = s[0].split(os.path.sep)[-1][:-1]
                     line = s[1].split(" ")[1]
                     additional = f" ({file}:{line})"
-                except Exception as e:
+                except Exception as a:
+                    log_traceback("LOGGING", a)
+                    additional = " THEN " + str(a)
                     pass
 
                 self.got_response({"type":"error", "data":{"message":str(e) + additional}})
