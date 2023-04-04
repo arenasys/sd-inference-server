@@ -83,6 +83,8 @@ class Inference(threading.Thread):
                     self.download(**request["data"])
                 elif request["type"] == "chunk":
                     self.upload(**request["data"])
+                elif request["type"] == "ping":
+                    self.got_response({"type":"pong"})
                 self.requests.task_done()
             except queue.Empty:
                 time.sleep(0.01)
@@ -101,7 +103,7 @@ class Inference(threading.Thread):
                     line = s[1].split(" ")[1]
                     additional = f" ({file}:{line})"
                 except Exception as a:
-                    log_traceback("LOGGING", a)
+                    log_traceback("LOGGING")
                     additional = " THEN " + str(a)
                     pass
 
