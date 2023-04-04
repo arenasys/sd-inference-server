@@ -14,6 +14,11 @@ import websockets.sync.server
 import bson
 import time
 
+import json
+from urllib.parse import unquote
+
+gofile_token = None
+
 import attention
 import storage
 import wrapper
@@ -145,11 +150,38 @@ class Inference(threading.Thread):
                 self.got_response({"type":"downloaded", "data":{"message": "Failed: " + url}})
 
         def curldownload(self, folder, url):
+            r = subprocess.run(["curl", "-I", url], capture_output=True)
+            content_type = r.stdout.decode('utf-8').split("content-type: ", 1)[1].split(";",1)[0].split("\n",1)[0]
+            if not content_type in {"application/octet-stream", "multipart/form-data"}:
+                self.got_response({"type":"downloaded", "data":{"message": f"Unsupport type ({content_type}): " + url}})
+                return
             r = subprocess.run(["curl", "-s", "-O", "-J", "-L", url], cwd=folder)
             if r.returncode == 0:
                 self.got_response({"type":"downloaded", "data":{"message": "Success: " + url}})
             else:
                 self.got_response({"type":"downloaded", "data":{"message": "Failed: " + url}})
+        def gofiledownload(self, folder, url):
+            name = unquote(url.rsplit("/",1)[-1])
+            content_id = url.split("d/",1)[1].split("/",1)[0]
+            global gofile_token
+            if not gofile_token:
+                r = subprocess.run(["curl", "-s", "https://api.gofile.io/createAccount"], capture_output=True)
+                gofile_token = json.loads(r.stdout)["data"]["token"]
+                subprocess.run(["curl", "-s", f"https://api.gofile.io/getAccountDetails?token={gofile_token}"], capture_output=True)
+            
+            r = subprocess.run(["curl", f"https://api.gofile.io/getContent?contentId={content_id}&token={gofile_token}&websiteToken=12345&cache=true"], capture_output=True)
+
+            r = subprocess.run(["curl", "-H", f'Cookie: accountToken={gofile_token}', "-I", url], capture_output=True)
+            content_type = r.stdout.decode('utf-8').split("content-type: ", 1)[1].split(";",1)[0].split("\n",1)[0]
+            if content_type in {'text/plain', 'text/html'}:
+                self.got_response({"type":"downloaded", "data":{"message": f"Unsupport type ({content_type}): " + url}})
+                return
+            r = subprocess.run(["curl", "-sH", f'Cookie: accountToken={gofile_token}', url, '-o', name], cwd=folder)
+            if r.returncode == 0:
+                self.got_response({"type":"downloaded", "data":{"message": "Success: " + url}})
+            else:
+                self.got_response({"type":"downloaded", "data":{"message": "Failed: " + url}})
+
 
         folder = os.path.join(self.wrapper.storage.path, type)
 
@@ -162,6 +194,10 @@ class Inference(threading.Thread):
             return
         if 'mega.nz' in url:
             thread = threading.Thread(target=megadownload, args=([self, folder, url]))
+            thread.start()
+            return
+        if 'gofile.io' in url:
+            thread = threading.Thread(target=gofiledownload, args=([self, folder, url]))
             thread.start()
             return
         if 'huggingface' in url:
