@@ -157,8 +157,9 @@ def prepare_inpainting(originals, masks, padding, width, height):
 
 def cast_state_dict(state_dict, dtype):
     for k in state_dict:
-        if type(k) == torch.Tensor and k.dtype in {torch.float16, torch.float32}:
-            state_dict[k] = state_dict[k].to(dtype)
+        if type(state_dict[k]) == torch.Tensor and state_dict[k].dtype != dtype and state_dict[k].dtype in {torch.float16, torch.float32, torch.bfloat16}:
+            tmp = state_dict[k].clone().detach()
+            state_dict[k] = tmp.to('cpu', dtype=dtype)
     return state_dict
 
 class NoiseSchedule():
