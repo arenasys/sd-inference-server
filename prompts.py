@@ -253,7 +253,8 @@ class ConditioningSchedule():
         self.HR = False
         self.parse()
 
-    def switch_to_HR(self):
+    def switch_to_HR(self, hr_steps):
+        self.steps = hr_steps
         self.HR = True
         self.parse()
 

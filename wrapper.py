@@ -417,7 +417,7 @@ class GenerationParameters():
         height = int(self.height * self.hr_factor)
 
         noise = utils.NoiseSchedule(seeds, subseeds, width // 8, height // 8, device, self.unet.dtype)
-        conditioning.switch_to_HR()
+        conditioning.switch_to_HR(hr_steps)
         self.attach_networks(conditioning.get_all_networks())
         conditioning.encode()
 
