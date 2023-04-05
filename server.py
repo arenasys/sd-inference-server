@@ -39,6 +39,7 @@ def log_traceback(label):
     with open("crash.log", "a") as f:
         f.write(f"{label} {datetime.datetime.now()}\n{tb}\n")
     print(label, tb)
+    return tb
 
 def get_scheme(password):
     password = password.encode("utf8")
@@ -108,8 +109,9 @@ class Inference(threading.Thread):
                     self.got_response({"type":"aborted", "data":{}})
                     continue
                 additional = ""
+                tb = ""
                 try:
-                    log_traceback("SERVER")
+                    tb = log_traceback("SERVER")
                     s = traceback.extract_tb(e.__traceback__).format()
                     s = [e for e in s if not "venv" in e][-1]
                     s = s.split(", ")
@@ -117,11 +119,11 @@ class Inference(threading.Thread):
                     line = s[1].split(" ")[1]
                     additional = f" ({file}:{line})"
                 except Exception as a:
-                    log_traceback("LOGGING")
+                    tb = log_traceback("LOGGING")
                     additional = " THEN " + str(a)
                     pass
 
-                self.got_response({"type":"error", "data":{"message":str(e) + additional}})
+                self.got_response({"type":"error", "data":{"message":str(e) + additional, "traceback": tb}})
         
     def download(self, type, url):
         import gdown

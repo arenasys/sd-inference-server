@@ -218,7 +218,11 @@ class GenerationParameters():
         if mode in UPSCALERS_LATENT:
             latents = utils.get_latents(vae, seeds, images)
             latents = upscalers.upscale(latents, UPSCALERS_LATENT[mode], width//8, height//8)
-            return torch.stack(latents)
+
+            if type(latents) == list:
+                return torch.stack(latents)
+            else:
+                return latents
         
         if mode in UPSCALERS_PIXEL:
             images = upscalers.upscale(images, UPSCALERS_PIXEL[mode], width, height)
