@@ -73,7 +73,7 @@ def apply_inpainting(images, originals, masks, extents):
         mask = masks[i%len(masks)]
         extent = extents[i%len(extents)]
         x1,y1,x2,y2 = extent
-        
+
         ew, eh = x2-x1, y2-y1
         if (ew, eh) != images[i].size:
             image = image.resize((ew, eh))

@@ -16,7 +16,7 @@ import convert
 import attention
 
 DEFAULTS = {
-    "strength": 0.75, "sampler": "Euler_a", "clip_skip": 1, "eta": 1,
+    "strength": 0.75, "sampler": "Euler a", "clip_skip": 1, "eta": 1,
     "hr_upscaler": "Latent (nearest)", "hr_strength": 0.7, "img2img_upscaler": "Lanczos", "mask_blur": 4
 }
 
@@ -277,20 +277,14 @@ class GenerationParameters():
                 batch_size = max(batch_size, len(i))
         return batch_size
     
-    def get_metadata(self, mode, batch_size, prompts, negative_prompts, seeds, subseeds, width, height):
+    def get_metadata(self, mode, width, height, batch_size, prompts=None, negative_prompts=None, seeds=None, subseeds=None):
         metadata = []
+
         for i in range(batch_size):
             m = {
                 "mode": mode,
-                "prompt": prompts[i%len(prompts)],
-                "negative_prompt": negative_prompts[i%len(negative_prompts)],
-                "seed": seeds[i],
                 "width": width,
-                "height": height,
-                "steps": self.steps,
-                "scale": format_float(self.scale),
-                "sampler": self.sampler,
-                "clip_skip": self.clip_skip
+                "height": height
             }
 
             if subseeds != None:
@@ -309,12 +303,20 @@ class GenerationParameters():
             if self.eta != DEFAULTS["eta"]:
                 m["eta"] = format_float(self.eta)
 
-            if len({self.unet_name, self.clip_name,self.vae_name}) == 1:
-                m["model"] = self.unet_name
-            else:
-                m["UNET"] = self.unet_name
-                m["CLIP"] = self.clip_name
-                m["VAE"] = self.vae_name
+            if mode in {"txt2img", "img2img"}:
+                if len({self.unet_name, self.clip_name,self.vae_name}) == 1:
+                    m["model"] = self.unet_name
+                else:
+                    m["UNET"] = self.unet_name
+                    m["CLIP"] = self.clip_name
+                    m["VAE"] = self.vae_name
+                m["prompt"] = prompts[i%len(prompts)]
+                m["negative_prompt"] = negative_prompts[i%len(negative_prompts)]
+                m["seed"] = seeds[i]
+                m["steps"] = self.steps
+                m["scale"] = format_float(self.scale)
+                m["sampler"] = self.sampler
+                m["clip_skip"] = self.clip_skip
 
             if mode == "img2img":
                 m["strength"] = format_float(self.strength)
@@ -334,8 +336,15 @@ class GenerationParameters():
                         m["hr_sampler"] = self.hr_sampler
                     if self.hr_eta and self.hr_eta != self.eta:
                         m["hr_eta"] = format_float(self.hr_eta)
+            
+            if mode == "upscale":
+                m["img2img_upscaler"] = self.img2img_upscaler
+                if self.padding:
+                    m["padding"] = self.padding
+                m["mask_blur"] = self.mask_blur
 
             metadata += [m]
+
         return metadata
 
     def attach_networks(self, networks):
@@ -404,7 +413,7 @@ class GenerationParameters():
         if not self.hr_eta:
             self.hr_eta = self.eta
 
-        metadata = self.get_metadata("txt2img", batch_size, positive_prompts, negative_prompts, seeds, subseeds, self.width, self.height)
+        metadata = self.get_metadata("txt2img", self.width, self.height, batch_size, positive_prompts, negative_prompts, seeds, subseeds)
 
         conditioning = prompts.ConditioningSchedule(self.clip, positive_prompts, negative_prompts, self.steps, self.clip_skip, batch_size)
         self.attach_networks(conditioning.get_all_networks())
@@ -471,7 +480,7 @@ class GenerationParameters():
         if self.width and self.height:
             width, height = self.width, self.height
 
-        metadata = self.get_metadata("img2img", batch_size, positive_prompts, negative_prompts, seeds, subseeds, width, height)
+        metadata = self.get_metadata("img2img",  width, height, batch_size, positive_prompts, negative_prompts, seeds, subseeds)
 
         self.current_step = 0
         self.total_steps = int(self.steps * self.strength) + 1
@@ -487,15 +496,15 @@ class GenerationParameters():
         if self.mask:
             self.set_status("Preparing")
             images, masks, extents = utils.prepare_inpainting(images, masks, self.padding, width, height)
+            masks = upscalers.upscale(masks, transforms.InterpolationMode.NEAREST, width, height)
+            masks = [mask.filter(PIL.ImageFilter.GaussianBlur(self.mask_blur)) for mask in masks]
+            mask_latents = utils.get_masks(device, masks)
 
         self.set_status("Upscaling")
         latents = self.upscale_images(self.vae, images, self.img2img_upscaler, width, height, seeds)
         original_latents = latents
 
         if self.mask:
-            masks = upscalers.upscale(masks, transforms.InterpolationMode.NEAREST, width, height)
-            masks = [mask.filter(PIL.ImageFilter.GaussianBlur(self.mask_blur)) for mask in masks]
-            mask_latents = utils.get_masks(device, masks)
             denoiser.set_mask(mask_latents, original_latents)
 
         self.set_status("Generating")
@@ -505,6 +514,50 @@ class GenerationParameters():
         images = utils.decode_images(self.vae, latents)
 
         if self.mask:
+            images = utils.apply_inpainting(images, original_images, masks, extents)
+
+        self.on_complete(images, metadata)
+        return images
+    
+    @torch.inference_mode()
+    def upscale(self):
+        self.set_status("Loading")
+        self.storage.clear_file_cache()
+        if not self.img2img_upscaler in UPSCALERS_PIXEL and not self.img2img_upscaler in UPSCALERS_LATENT:
+            self.set_status("Loading Upscaler")
+            self.upscale_model = self.storage.get_upscaler(self.img2img_upscaler, self.device)
+
+        self.set_status("Configuring")
+        required = "image, img2img_upscaler, width, height".split(", ")
+        optional = "mask, mask_blur, padding".split(", ")
+        self.check_parameters(required, optional)
+
+        batch_size = self.get_batch_size()
+
+        (images,) = self.listify(self.image)
+        original_images = images
+
+        if self.mask:
+            (masks,)= self.listify(self.mask)
+
+        width, height = self.width, self.height
+
+        metadata = self.get_metadata("upscale", width, height, batch_size)
+
+        if self.mask:
+            self.set_status("Preparing")
+            images, masks, extents = utils.prepare_inpainting(images, masks, self.padding, width, height)
+            masks = [mask.filter(PIL.ImageFilter.GaussianBlur(self.mask_blur)) for mask in masks]
+
+        self.set_status("Upscaling")
+        
+        if not self.upscale_model:
+            images = upscalers.upscale(images, UPSCALERS_PIXEL[self.img2img_upscaler], width, height)
+        else:
+            images = upscalers.upscale_super_resolution(images, self.upscale_model, width, height)
+
+        if self.mask:
+            images[0].save("RESULT.png")
             images = utils.apply_inpainting(images, original_images, masks, extents)
 
         self.on_complete(images, metadata)
