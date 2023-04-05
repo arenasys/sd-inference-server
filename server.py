@@ -31,6 +31,7 @@ from cryptography.fernet import Fernet, InvalidToken
 import random
 
 DEFAULT_PASSWORD = "qDiffusion"
+FRAGMENT_SIZE = 1048576
 
 def log_traceback(label):
     exc_type, exc_value, exc_tb = sys.exc_info()
@@ -237,7 +238,7 @@ class Server():
             self.scheme = get_scheme(password)
 
         self.inference = Inference(wrapper, callback=self.on_response)
-        self.server = websockets.sync.server.serve(self.handle_connection, host=host, port=int(port))
+        self.server = websockets.sync.server.serve(self.handle_connection, host=host, port=int(port), max_size=None)
         self.serve = threading.Thread(target=self.serve_forever)
 
     def start(self):
@@ -247,13 +248,14 @@ class Server():
 
     def stop(self):
         print("SERVER: stopping")
+        self.stopping = True
         self.inference.stay_alive = False
         self.server.shutdown()
         self.join()
 
     def join(self):
-        self.inference.join()
         self.serve.join()
+        self.inference.join()
 
     def serve_forever(self):
         self.server.serve_forever()
@@ -266,13 +268,14 @@ class Server():
         mapping = {}
         ctr = 0
         try:
-            while True:
+            while not self.stopping:
                 if not self.clients[client_id].empty():
                     id, response = self.clients[client_id].get()
                     if id in mapping: id = mapping[id]
                     response["id"] = id
                     data = bson.dumps(response)
                     data = base64.urlsafe_b64decode(self.scheme.encrypt(data))
+                    data = [data[i:min(i+FRAGMENT_SIZE,len(data))] for i in range(0, len(data), FRAGMENT_SIZE)]
                     connection.send(data)
                 else:
                     data = None
@@ -330,6 +333,8 @@ class Server():
         print(f"SERVER: client disconnected")
 
     def on_response(self, id, response):
+        if self.stopping:
+            return False
         if id in self.requests:
             client = self.requests[id]
             if client in self.clients:

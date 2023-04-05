@@ -63,6 +63,9 @@ try:
 except Exception:
     pass
 
+def format_float(x):
+    return f"{x:.4f}".rstrip('0').rstrip('.')
+
 class GenerationParameters():
     def __init__(self, storage: storage.ModelStorage, device):
         self.storage = storage
@@ -281,7 +284,7 @@ class GenerationParameters():
                 "width": width,
                 "height": height,
                 "steps": self.steps,
-                "scale": self.scale,            
+                "scale": format_float(self.scale),
                 "sampler": self.sampler,
                 "clip_skip": self.clip_skip
             }
@@ -294,13 +297,13 @@ class GenerationParameters():
                     if r != 0.0:
                         active = True
                     sds += [str(s)]
-                    strs += [str(r)]
+                    strs += [format_float(r)]
                 if active:
                     m["subseed"] = ", ".join(sds)
                     m["subseed_strength"] = ", ".join(strs)
 
             if self.eta != DEFAULTS["eta"]:
-                m["eta"] = self.eta
+                m["eta"] = format_float(self.eta)
 
             if len({self.unet_name, self.clip_name,self.vae_name}) == 1:
                 m["model"] = self.unet_name
@@ -310,6 +313,7 @@ class GenerationParameters():
                 m["VAE"] = self.vae_name
 
             if mode == "img2img":
+                m["strength"] = format_float(self.strength)
                 m["img2img_upscaler"] = self.img2img_upscaler
                 if self.padding:
                     m["padding"] = self.padding
@@ -317,16 +321,15 @@ class GenerationParameters():
 
             if mode == "txt2img":
                 if self.hr_factor and self.hr_factor != 1.0:
-                    m["hr_factor"] = self.hr_factor
+                    m["hr_factor"] = format_float(self.hr_factor)
                     m["hr_upscaler"] = self.hr_upscaler
-                    m["hr_strength"] = self.hr_strength
-                    if self.hr_steps != self.steps:
+                    m["hr_strength"] = format_float(self.hr_strength)
+                    if self.hr_steps and self.hr_steps != self.steps:
                         m["hr_steps"] = self.hr_steps
-                    if self.hr_sampler != self.sampler:
+                    if self.hr_sampler and self.hr_sampler != self.sampler:
                         m["hr_sampler"] = self.hr_sampler
-                    if self.hr_eta != self.eta:
-                        m["hr_eta"] = self.hr_eta
-                
+                    if self.hr_eta and self.hr_eta != self.eta:
+                        m["hr_eta"] = format_float(self.hr_eta)
 
             metadata += [m]
         return metadata
