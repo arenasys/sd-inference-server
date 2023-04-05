@@ -36,7 +36,6 @@ SAMPLER_CLASSES = {
 }
 
 UPSCALERS_LATENT = {
-    "Latent (lanczos)": transforms.InterpolationMode.LANCZOS,
     "Latent (bicubic)": transforms.InterpolationMode.BICUBIC,
     "Latent (bilinear)": transforms.InterpolationMode.BILINEAR,
     "Latent (nearest)": transforms.InterpolationMode.NEAREST,
@@ -318,12 +317,16 @@ class GenerationParameters():
 
             if mode == "txt2img":
                 if self.hr_factor and self.hr_factor != 1.0:
-                    m["hr_steps"] = self.hr_steps
                     m["hr_factor"] = self.hr_factor
                     m["hr_upscaler"] = self.hr_upscaler
                     m["hr_strength"] = self.hr_strength
-                    m["hr_sampler"] = self.hr_sampler
-                    m["hr_eta"] = self.hr_eta
+                    if self.hr_steps != self.steps:
+                        m["hr_steps"] = self.hr_steps
+                    if self.hr_sampler != self.sampler:
+                        m["hr_sampler"] = self.hr_sampler
+                    if self.hr_eta != self.eta:
+                        m["hr_eta"] = self.hr_eta
+                
 
             metadata += [m]
         return metadata
