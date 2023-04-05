@@ -511,6 +511,7 @@ class GenerationParameters():
         data["attention"] = list(CROSS_ATTENTION.keys())
         if not HAVE_XFORMERS:
             data["attention"].remove("xFormers")
+        data["TI"] = list(self.storage.embeddings.keys())
 
         del data["SR"]
 
