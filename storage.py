@@ -83,23 +83,28 @@ class ModelStorage():
 
     def find_all(self):
         self.files = {k:{} for k in self.classes}
+
+        standalone = {k:{} for k in ["UNET", "CLIP", "VAE"]}
         for model in sum([glob.glob(os.path.join(self.path, "SD", ext)) for ext in ["*.st", "*.safetensors", "*.ckpt", "*.pt"]], []):
             file = os.path.relpath(model, self.path)
 
             if ".unet." in file:
                 name = self.get_name(file)
-                self.files["UNET"][name] = file
+                standalone["UNET"][name] = file
             elif ".clip." in file:
                 name = self.get_name(file)
-                self.files["CLIP"][name] = file
+                standalone["CLIP"][name] = file
             elif ".vae." in file:
                 name = self.get_name(file)
-                self.files["VAE"][name] = file
+                standalone["VAE"][name] = file
             else:
                 name = self.get_name(file)
                 self.files["UNET"][name] = file
                 self.files["CLIP"][name] = file
                 self.files["VAE"][name] = file
+        for comp in standalone:
+            for name, file in standalone[comp].items():
+                self.files[comp][name] = file
         
         for model in glob.glob(os.path.join(self.path, "SR", "*.pth")):
             file = os.path.relpath(model, self.path)
