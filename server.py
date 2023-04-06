@@ -153,9 +153,9 @@ class Inference(threading.Thread):
                 self.got_response({"type":"downloaded", "data":{"message": "Failed: " + url}})
 
         def curldownload(self, folder, url):
-            r = subprocess.run(["curl", "-I", url], capture_output=True)
-            content_type = r.stdout.decode('utf-8').split("content-type: ", 1)[1].split(";",1)[0].split("\n",1)[0]
-            if not content_type in {"application/octet-stream", "multipart/form-data"}:
+            r = subprocess.run(["curl", "-IL", url], capture_output=True)
+            content_type = r.stdout.decode('utf-8').split("content-type: ")[-1].split(";",1)[0].split("\n",1)[0].strip()
+            if not content_type in {"binary/octet-stream", "application/octet-stream", "multipart/form-data"}:
                 self.got_response({"type":"downloaded", "data":{"message": f"Unsupport type ({content_type}): " + url}})
                 return
             r = subprocess.run(["curl", "-s", "-O", "-J", "-L", url], cwd=folder)
