@@ -152,12 +152,13 @@ class Inference(threading.Thread):
             except:
                 self.got_response({"type":"downloaded", "data":{"message": "Failed: " + url}})
 
-        def curldownload(self, folder, url):
-            r = subprocess.run(["curl", "-IL", url], capture_output=True)
-            content_type = r.stdout.decode('utf-8').split("content-type: ")[-1].split(";",1)[0].split("\n",1)[0].strip()
-            if not content_type in {"application/zip", "binary/octet-stream", "application/octet-stream", "multipart/form-data"}:
-                self.got_response({"type":"downloaded", "data":{"message": f"Unsupport type ({content_type}): " + url}})
-                return
+        def curldownload(self, folder, url, check=True):
+            if check:
+                r = subprocess.run(["curl", "-IL", url], capture_output=True)
+                content_type = r.stdout.decode('utf-8').split("content-type: ")[-1].split(";",1)[0].split("\n",1)[0].strip()
+                if not content_type in {"application/zip", "binary/octet-stream", "application/octet-stream", "multipart/form-data"}:
+                    self.got_response({"type":"downloaded", "data":{"message": f"Unsupport type ({content_type}): " + url}})
+                    return
             r = subprocess.run(["curl", "-OJL", url], cwd=folder)
             if r.returncode == 0:
                 self.got_response({"type":"downloaded", "data":{"message": "Success: " + url}})
@@ -189,6 +190,8 @@ class Inference(threading.Thread):
         folder = os.path.join(self.wrapper.storage.path, type)
 
         self.got_response({"type":"downloaded", "data":{"message": "Downloading: " + url + " to " + type}})
+
+        check = True
         if not os.path.exists(folder):
             return
         if 'drive.google' in url:
@@ -205,11 +208,13 @@ class Inference(threading.Thread):
             return
         if 'huggingface' in url:
             url = url.replace("/blob/", "/resolve/")
-        if 'civitai.com' in url and not "civitai.com/api/" in url:
-            self.got_response({"type":"downloaded", "data":{"message": "Failed: " + url}})
-            return
+        if 'civitai.com' in url:
+            check = False
+            if not "civitai.com/api/download/models" in url:
+                self.got_response({"type":"downloaded", "data":{"message": "Failed: " + url}})
+                return
         
-        thread = threading.Thread(target=curldownload, args=([self, folder, url]))
+        thread = threading.Thread(target=curldownload, args=([self, folder, url, check]))
         thread.start()
 
     def upload(self, type, name, chunk=None, index=-1):
