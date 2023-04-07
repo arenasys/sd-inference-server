@@ -257,8 +257,11 @@ class Server():
         print("SERVER: stopping")
         self.stopping = True
         self.inference.stay_alive = False
+        print("SERVER: shutdown")
         self.server.shutdown()
+        print("SERVER: join")
         self.join()
+        print("SERVER: done")
 
     def join(self):
         self.serve.join()

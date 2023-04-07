@@ -576,8 +576,6 @@ class GenerationParameters():
             data["attention"].remove("xFormers")
         data["TI"] = list(self.storage.embeddings.keys())
 
-        del data["SR"]
-
         if self.callback:
             if not self.callback({"type": "options", "data": data}):
                 raise RuntimeError("Aborted")
