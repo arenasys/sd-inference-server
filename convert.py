@@ -62,6 +62,65 @@ def SDv1_convert(state_dict):
         if ".VAE." in k and k.endswith(".weight") and "mid_block.attentions.0." in k:
             state_dict[k] = state_dict[k].squeeze()
 
+def SDv1_revert(state_dict):
+    mapping = {}
+    with open(relative_file(os.path.join("mappings", "SDv1_mapping.txt"))) as file:
+        for line in file:
+            if line.split('.',1)[0] in {"model", "first_stage_model", "cond_stage_model"}:
+                src, dst = line.strip().split(" TO ")
+                mapping[dst] = src
+
+    for k in state_dict:
+        if ".VAE." in k and k.endswith(".weight") and "mid_block.attentions.0." in k and len(state_dict[k].shape) == 2:
+            state_dict[k] = state_dict[k].unsqueeze(-1).unsqueeze(-1)
+
+    for k in list(state_dict.keys()):
+        if not k in mapping:
+            del state_dict[k]
+
+    for src, dst in mapping.items():
+        if src in state_dict:
+            state_dict[dst] = state_dict[src]
+            del state_dict[src]
+
+    return state_dict
+
+def SDv2_revert(state_dict):
+    mapping = {}
+    with open(relative_file(os.path.join("mappings", "SDv2_mapping.txt"))) as file:
+        for line in file:
+            src, dst = line.strip().split(" TO ")
+            mapping[dst] = src
+
+    for k in state_dict:
+        if ".VAE." in k and k.endswith(".weight") and "mid_block.attentions.0." in k and len(state_dict[k].shape) == 2:
+            state_dict[k] = state_dict[k].unsqueeze(-1).unsqueeze(-1)
+
+    for k in list(state_dict.keys()):
+        if not k in mapping:
+            del state_dict[k]
+
+    for src, dst in mapping.items():
+        if src in state_dict:
+            state_dict[dst] = state_dict[src]
+            del state_dict[src]
+
+    chunks = {}
+    for k in list(state_dict.keys()):
+        if k.startswith("chunk"):
+            c, o = k.split("-",1)
+            c = int(c[-1])
+            if not o in chunks:
+                chunks[o] = [None,None,None]
+            chunks[o][c] = state_dict[k]
+            del state_dict[k]
+
+    for k in list(chunks.keys()):
+        state_dict[k] = torch.cat(chunks[k])
+        del chunks[k]
+
+    return state_dict
+
 def SDv2_convert(state_dict):
     mapping = {}
     with open(relative_file(os.path.join("mappings", "SDv2_mapping.txt"))) as file:
@@ -226,6 +285,14 @@ def autoconvert(folder, trash):
             continue
         os.makedirs(trash, exist_ok=True)
         shutil.move(model, trash)
+
+def revert(model_type, state_dict):
+    if model_type == "SDv1":
+        return SDv1_revert(state_dict)
+    elif model_type == "SDv2":
+        return SDv2_revert(state_dict)
+    else:
+        raise ValueError(f"unknown model type: {model_type}")
         
 if __name__ == '__main__':
     import argparse

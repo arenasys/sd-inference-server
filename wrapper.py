@@ -3,6 +3,8 @@ import torchvision.transforms as transforms
 import PIL
 import random
 import io
+import os
+import safetensors.torch
 
 import prompts
 import samplers_k
@@ -583,5 +585,80 @@ class GenerationParameters():
     def convert(self):
         self.set_status("Converting")
         convert.autoconvert(self.model_folder, self.trash_folder)
+        if not self.callback({"type": "done", "data": {}}):
+            raise RuntimeError("Aborted")
+        
+    def build(self):
+        self.set_status("Building")
+                
+        file_type = self.filename.rsplit(".",1)[-1]
+        if not file_type  in {"st", "safetensors"}:
+            raise ValueError(f"unsuported checkpoint type: {file_type}. supported types are: safetensors, st")
+
+        self.set_status("Finding models")
+
+        source = {}
+        unet_file = self.storage.get_filename(self.unet, "UNET")
+        source[unet_file] = ["UNET"]
+
+        clip_file = self.storage.get_filename(self.clip, "CLIP")
+        source[clip_file] = source.get(clip_file, []) + ["CLIP"]
+
+        vae_file = self.storage.get_filename(self.vae, "VAE")
+        source[vae_file] = source.get(vae_file, []) + ["VAE"]
+
+        self.set_status(f"Loading models")
+        model = {}
+        metadata = {}
+        for file in source:
+            path = os.path.join(self.storage.path, file)
+
+            state_dict = {}
+            if file.rsplit(".",1)[-1] in {"safetensors", "ckpt", "pt"}:
+                state_dict = convert.convert_checkpoint(path)
+            elif file.endswith(".st"):
+                state_dict = safetensors.torch.load_file(path)
+            else:
+                ValueError(f"unknown format: {file.rsplit(os.path.sep)[-1]}")
+            
+            source_metadata = {}
+            for k in state_dict:
+                if k.startswith("metadata."):
+                    kk = k.split(".", 1)[1]
+                    source_metadata[kk] = ''.join([chr(c) for c in state_dict[k]])
+            for k in source_metadata:
+                if not k in metadata:
+                    metadata[k] = source_metadata[k]
+                elif metadata[k] != source_metadata[k]:
+                    raise ValueError(f"metadata mismatch: {k}, {metadata[k]} != {source_metadata[k]}")
+
+            model_type = metadata["model_type"]
+            for comp in source[file]:
+                prefix = f"{model_type}.{comp}."
+                found = False
+                for k in state_dict.keys():
+                    if k.startswith(prefix):
+                        found = True
+                        model[k] = state_dict[k]
+                if not found:
+                    raise ValueError(f"model doesnt contain a {model_type} {comp}: {file.rsplit(os.path.sep)[-1]}")
+                
+            del state_dict
+
+        self.set_status(f"Assembling")
+
+        if not len(list(model.keys())) == {"SDv1":1131, "SDv2":1307}[model_type]:
+            raise ValueError(f"model is missing keys")
+        
+        if file_type == "safetensors":
+            model = convert.revert(model_type, model)
+        else:
+            model["metadata.model_type"] = torch.as_tensor([ord(c) for c in model_type])
+            model["metadata.prediction_type"] = torch.as_tensor([ord(c) for c in metadata['prediction_type']])
+
+        self.set_status(f"Saving")
+        filename = os.path.join(self.storage.path, "SD", self.filename)
+        safetensors.torch.save_file(model, filename)
+
         if not self.callback({"type": "done", "data": {}}):
             raise RuntimeError("Aborted")

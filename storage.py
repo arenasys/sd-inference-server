@@ -162,6 +162,16 @@ class ModelStorage():
         self.loaded[comp][name] = model
         return self.move(model, name, comp, device)
 
+    def get_state_dict(self, file, comp):
+        if not file in self.file_cache:
+            self.file_cache[file] = self.load_file(file, comp)
+        return self.file_cache[file][comp]
+    
+    def get_filename(self, name, comp):
+        if not name in self.files[comp]:
+            raise ValueError(f"unknown {comp}: {name}")
+        return self.files[comp][name]
+
     def get_unet(self, name, device):
         unet = self.get_component(name, "UNET", device)
         return unet

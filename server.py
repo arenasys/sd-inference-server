@@ -94,6 +94,10 @@ class Inference(threading.Thread):
                     self.wrapper.reset()
                     self.wrapper.set(**request["data"])
                     self.wrapper.convert()
+                elif request["type"] == "build":
+                    self.wrapper.reset()
+                    self.wrapper.set(**request["data"])
+                    self.wrapper.build()
                 elif request["type"] == "download":
                     self.download(**request["data"])
                 elif request["type"] == "chunk":
