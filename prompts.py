@@ -280,7 +280,8 @@ class ConditioningSchedule():
         for i in range(self.batch_size):
             p = i % len(self.positives)
             n = i % len(self.negatives)
-            self.negatives[n].network_schedule = self.positives[p].network_schedule
+            if not any([nets for _, nets in self.negatives[p].network_schedule]):
+                self.negatives[n].network_schedule = self.positives[p].network_schedule
 
     def reset(self):
         self.offset = 0

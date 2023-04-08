@@ -10,8 +10,17 @@ class LoRAModule(torch.nn.Module):
         self.net_name = net_name
         self.name = name
 
-        if "unet" in name and "_proj_" in name:
-            self.lora_down = torch.nn.Conv2d(lora_down.shape[1], lora_down.shape[0], (1, 1), bias=False)
+        if "unet" in name and ("_proj_" in name or "_conv" in name):
+            kernel = lora_down.shape[2]
+            padding = 0
+            stride = 1
+
+            if kernel == 3:
+                padding = 1
+            if "downsamplers" in name:
+                stride = 2
+
+            self.lora_down = torch.nn.Conv2d(lora_down.shape[1], lora_down.shape[0], (kernel, kernel), (stride, stride), (padding, padding), bias=False)
             self.lora_up = torch.nn.Conv2d(lora_up.shape[1], lora_up.shape[0], (1, 1), bias=False)
         else:
             self.lora_down = torch.nn.Linear(lora_down.shape[1], lora_down.shape[0], bias=False)
