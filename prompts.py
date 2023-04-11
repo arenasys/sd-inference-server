@@ -316,8 +316,11 @@ class BatchedConditioningSchedules():
         self.steps = steps
         self.clip_skip = clip_skip
         self.batch_size = len(prompts)
-        self.HR = False
         self.parse()
+
+    def switch_to_HR(self, hr_steps):
+        for b in self.batches:
+            b.switch_to_HR(hr_steps)
 
     def parse(self):
         self.batches = []
