@@ -279,7 +279,7 @@ class GenerationParameters():
                 batch_size = max(batch_size, len(i))
         return batch_size
     
-    def get_metadata(self, mode, width, height, batch_size, prompts=None, negative_prompts=None, seeds=None, subseeds=None):
+    def get_metadata(self, mode, width, height, batch_size, prompts, seeds=None, subseeds=None):
         metadata = []
 
         for i in range(batch_size):
@@ -312,8 +312,8 @@ class GenerationParameters():
                     m["UNET"] = self.unet_name
                     m["CLIP"] = self.clip_name
                     m["VAE"] = self.vae_name
-                m["prompt"] = prompts[i%len(prompts)]
-                m["negative_prompt"] = negative_prompts[i%len(negative_prompts)]
+                m["prompt"] = ' AND '.join(prompts[i][0])
+                m["negative_prompt"] = ' AND '.join(prompts[i][1])
                 m["seed"] = seeds[i]
                 m["steps"] = self.steps
                 m["scale"] = format_float(self.scale)
@@ -415,9 +415,11 @@ class GenerationParameters():
         if not self.hr_eta:
             self.hr_eta = self.eta
 
-        metadata = self.get_metadata("txt2img", self.width, self.height, batch_size, positive_prompts, negative_prompts, seeds, subseeds)
+        prompt = [([positive_prompts[i]], [negative_prompts[i]]) for i in range(len(positive_prompts))]
 
-        conditioning = prompts.ConditioningSchedule(self.clip, positive_prompts, negative_prompts, self.steps, self.clip_skip, batch_size)
+        metadata = self.get_metadata("txt2img", self.width, self.height, batch_size, prompt, seeds, subseeds)
+
+        conditioning = prompts.BatchedConditioningSchedules(self.clip, prompt, self.steps, self.clip_skip)
         self.attach_networks(conditioning.get_all_networks())
         conditioning.encode()
 
@@ -482,12 +484,14 @@ class GenerationParameters():
         if self.width and self.height:
             width, height = self.width, self.height
 
-        metadata = self.get_metadata("img2img",  width, height, batch_size, positive_prompts, negative_prompts, seeds, subseeds)
+        prompt = [([positive_prompts[i]], [negative_prompts[i]]) for i in range(len(positive_prompts))]
+
+        metadata = self.get_metadata("img2img",  width, height, batch_size, prompt, seeds, subseeds)
 
         self.current_step = 0
         self.total_steps = int(self.steps * self.strength) + 1
         
-        conditioning = prompts.ConditioningSchedule(self.clip, positive_prompts, negative_prompts, self.steps, self.clip_skip, batch_size)
+        conditioning = prompts.BatchedConditioningSchedules(self.clip, prompt, self.steps, self.clip_skip)
         self.attach_networks(conditioning.get_all_networks())
         conditioning.encode()
 

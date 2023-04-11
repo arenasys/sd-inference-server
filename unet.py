@@ -224,9 +224,9 @@ class BasicTransformerBlock(nn.Module):
 
         self.attn2 = CrossAttention(
                 query_dim=dim,
-                cross_attention_dim=cross_attention_dim,
                 heads=num_attention_heads,
-                dim_head=attention_head_dim
+                dim_head=attention_head_dim,
+                cross_attention_dim=cross_attention_dim           
             )
 
         self.norm1 = nn.LayerNorm(dim)

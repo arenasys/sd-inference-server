@@ -12,9 +12,10 @@ deemphasis: "[" prompt "]"
 numeric: "(" prompt ":" [_WHITESPACE] NUMBER [_WHITESPACE]")"
 scheduled: "[" [prompt ":"] prompt ":" [_WHITESPACE] specifier [_WHITESPACE]"]"
 alternate: "[" prompt ("|" prompt)+ "]"
-addnet: "<" net_type ":" plain [ ":" [_WHITESPACE] specifier [_WHITESPACE] [ ":" [_WHITESPACE] specifier [_WHITESPACE] ]] ">"
+addnet: "<" [ local ] net_type ":" plain [ ":" [_WHITESPACE] specifier [_WHITESPACE] [ ":" [_WHITESPACE] specifier [_WHITESPACE] ]] ">"
 net_type: LORA | HN
 specifier: NUMBER | HR
+local: "@"
 HR: "HR"
 LORA: "lora"
 HN: "hypernet"
@@ -53,6 +54,10 @@ def parse_prompt(prompt, steps, HR=False):
                 if node.data == "alternate":
                     children = [children[step%len(children)]]
                 if node.data == "addnet":
+                    local = False
+                    if children[0]:
+                        local = True
+                    children = children[1:]
 
                     name = str(children[0].children[0]) + ":" + str(children[1].children[0])
 
@@ -64,7 +69,7 @@ def parse_prompt(prompt, steps, HR=False):
                     if clip == None:
                         clip = unet
 
-                    output.append((name, unet, clip))
+                    output.append((name, unet, clip, local))
                     children = []
 
                 for child in children:
@@ -100,7 +105,6 @@ def tokenize_prompt(clip, parsed):
     text = [text for text, _ in parsed]
     if not text:
         text = ['']
-
     tokenized = tokenizer(text)["input_ids"]
     tokenized = [tokens[1:-1] for tokens in tokenized] # strip special tokens
 
@@ -200,7 +204,9 @@ def seperate_schedule(schedule):
     return prompt_schedule, networks_schedule
 
 class PromptSchedule():
-    def __init__(self, prompt, steps, clip, HR):
+    def __init__(self, parent, index, prompt, steps, clip, HR):
+        self.parent = parent
+        self.index = index
         self.schedule = parse_prompt(prompt, steps, HR)
         self.schedule, self.network_schedule = seperate_schedule(self.schedule)
         self.tokenized = [(steps, tokenize_prompt(clip, prompt)) for steps, prompt in self.schedule]
@@ -212,7 +218,7 @@ class PromptSchedule():
         self.tokenized = [(steps, chunks + [chunks[-1]] * (max_chunks-len(chunks))) for steps, chunks in self.tokenized]
         
     def encode(self, clip, clip_skip):
-        clip_networks = [{k:v[1] for k,v in self.get_networks_at_step(0).items()}]
+        clip_networks = [self.parent.get_networks_at_step(0,1)[self.index]]
         clip.additional.set_strength(clip_networks)
         self.encoded = [(steps, encode_tokens(clip, chunks, clip_skip)) for steps, chunks in self.tokenized]
 
@@ -227,7 +233,7 @@ class PromptSchedule():
             return self.all_networks
         all_networks = set()
         for _, networks in self.network_schedule:
-            for net, _, _ in networks:
+            for net, _, _, _ in networks:
                 all_networks.add(net)
         self.all_networks = all_networks
         return all_networks
@@ -236,20 +242,19 @@ class PromptSchedule():
         step_networks = {n:(0,0) for n in self.get_all_networks()}
         for start, network in self.network_schedule:
             if start >= step:
-                for name, unet, clip in network:
-                    step_networks[name] = (unet, clip)
+                for name, unet, clip, local in network:
+                    step_networks[name] = (unet, clip, local)
                 break
         
         return step_networks
     
 class ConditioningSchedule():
-    def __init__(self, clip, prompt, negative_prompt, steps, clip_skip, batch_size):
+    def __init__(self, clip, prompt, negative_prompt, steps, clip_skip):
         self.clip = clip
         self.prompt = prompt
         self.negative_prompt = negative_prompt
         self.steps = steps
         self.clip_skip = clip_skip
-        self.batch_size = batch_size
         self.HR = False
         self.parse()
 
@@ -259,32 +264,17 @@ class ConditioningSchedule():
         self.parse()
 
     def parse(self):
-        self.positives = [PromptSchedule(p, self.steps, self.clip, self.HR) for p in self.prompt]
-        self.negatives = [PromptSchedule(p, self.steps, self.clip, self.HR) for p in self.negative_prompt]
-
-        self.sync_networks()
+        self.positives = [PromptSchedule(self, i, p, self.steps, self.clip, self.HR) for i, p in enumerate(self.prompt)]
+        self.negatives = [PromptSchedule(self, i + len(self.positives), p, self.steps, self.clip, self.HR) for i, p in enumerate(self.negative_prompt)]
 
         max_chunks = max([p.chunks for p in self.positives + self.negatives])
 
         for p in self.positives + self.negatives:
             p.pad_to_length(max_chunks)
 
-        self.reset()
-
     def encode(self):
         for p in self.positives + self.negatives:
-            p.encode(self.clip, self.clip_skip)        
-    
-    def sync_networks(self):
-        # need user options
-        for i in range(self.batch_size):
-            p = i % len(self.positives)
-            n = i % len(self.negatives)
-            if not any([nets for _, nets in self.negatives[p].network_schedule]):
-                self.negatives[n].network_schedule = self.positives[p].network_schedule
-
-    def reset(self):
-        self.offset = 0
+            p.encode(self.clip, self.clip_skip)
 
     def get_all_networks(self):
         networks = self.get_networks_at_step(0)
@@ -294,30 +284,71 @@ class ConditioningSchedule():
         return all_networks
     
     def get_networks_at_step(self, step, idx=0):
-        step += self.offset
-        networks_pos = []
-        networks_neg = []
+        networks = [p.get_networks_at_step(step) for p in self.positives] + \
+                   [n.get_networks_at_step(step) for n in self.negatives]
+        local_networks = [{k:v[idx] for k,v in n.items() if v[-1]} for n in networks]
 
-        for i in range(self.batch_size):
-            p = i % len(self.positives)
-            n = i % len(self.negatives)
+        global_networks = {}
+        for network in networks:
+            for k, v in network.items():
+                if v[-1]:
+                    continue
+                global_networks[k] = max(global_networks.get(k, -10), v[idx])
 
-            networks_pos += [{k:v[idx] for k,v in self.positives[p].get_networks_at_step(step).items()}]
-            networks_neg += [{k:v[idx] for k,v in self.negatives[n].get_networks_at_step(step).items()}]
-
-        return networks_neg + networks_pos
+        for k, v in global_networks.items():
+            for network in local_networks:
+                if not k in network:
+                    network[k] = v
+        
+        return local_networks
     
     def get_conditioning_at_step(self, step):
-        step += self.offset
+        return [p.get_encoding_at_step(step) for p in self.positives] + \
+               [n.get_encoding_at_step(step) for n in self.negatives]
+    
+    def get_composition(self):
+        return [[1] * len(self.positives), [1] * len(self.negatives)]
+    
+class BatchedConditioningSchedules():
+    def __init__(self, clip, prompts, steps, clip_skip):
+        self.clip = clip
+        self.prompts = prompts
+        self.steps = steps
+        self.clip_skip = clip_skip
+        self.batch_size = len(prompts)
+        self.HR = False
+        self.parse()
 
-        conditioning_pos = []
-        conditioning_neg = []
+    def parse(self):
+        self.batches = []
+        for positive, negative in self.prompts:
+            self.batches += [ConditioningSchedule(self.clip, positive, negative, self.steps, self.clip_skip)]
+    
+    def encode(self):
+        for b in self.batches:
+            b.encode()        
 
-        for i in range(self.batch_size):
-            p = i % len(self.positives)
-            n = i % len(self.negatives)
-            conditioning_pos += [self.positives[p].get_encoding_at_step(step)]
-            conditioning_neg += [self.negatives[n].get_encoding_at_step(step)]
-
-        c = torch.cat(conditioning_neg + conditioning_pos)
-        return c
+    def get_all_networks(self):
+        all_networks = set()
+        for b in self.batches:
+            all_networks = all_networks.union(b.get_all_networks())
+        return all_networks
+    
+    def get_networks_at_step(self, step, idx=0):
+        networks = []
+        for b in self.batches:
+            networks += b.get_networks_at_step(step, idx)
+        return networks
+    
+    def get_conditioning_at_step(self, step):
+        conditioning = []
+        for b in self.batches:
+            conditioning += b.get_conditioning_at_step(step)
+        cond = torch.cat(conditioning)
+        return cond
+    
+    def get_compositions(self):
+        compositions = []
+        for b in self.batches:
+            compositions += [b.get_composition()]
+        return compositions

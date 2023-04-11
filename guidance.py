@@ -10,6 +10,8 @@ class GuidedDenoiser():
         self.mask = None
         self.original = None
 
+        self.compositions = self.conditioning_schedule.get_compositions()
+
         self.device = unet.device
         self.dtype = unet.dtype
 
@@ -32,7 +34,11 @@ class GuidedDenoiser():
         return latents
 
     def predict_noise(self, latents, timestep, alpha):
-        model_input = torch.cat([latents] * 2)
+        model_input = []
+        for i, (p, n) in enumerate(self.compositions):
+            model_input += [latents[i:i+1]]*(len(p) + len(n))
+        model_input = torch.cat(model_input)
+
         conditioning = self.conditioning
 
         if self.unet.prediction_type == "epsilon":
@@ -40,10 +46,17 @@ class GuidedDenoiser():
         elif self.unet.prediction_type == "v":
             noise_pred = self.predict_noise_v(model_input, timestep, conditioning, alpha)
 
-        neg_pred, pos_pred = noise_pred.chunk(2)
-        noise_pred = neg_pred + self.scale * (pos_pred - neg_pred)
+        composed_pred = []
+        i = 0
+        for p, n in self.compositions:
+            pl, nl = len(p), len(n)
+            pos = noise_pred[i:i+pl].sum(dim=0, keepdims=True)
+            neg = noise_pred[i+pl:i+pl+nl].sum(dim=0, keepdims=True)
+            i += pl + nl
+            composed_pred += [(self.scale * pos) - ((self.scale - 1) * neg)]
 
-        return noise_pred
+        composed_pred = torch.cat(composed_pred)
+        return composed_pred
 
     def predict_original_epsilon(self, latents, timestep, sigma, conditioning):
         c_in = 1 / (sigma ** 2 + 1) ** 0.5
@@ -66,7 +79,11 @@ class GuidedDenoiser():
         return original_pred
 
     def predict_original(self, latents, timestep, sigma):
-        model_input = torch.cat([latents] * 2)
+        model_input = []
+        for i, (p, n) in enumerate(self.compositions):
+            model_input += [latents[i:i+1]]*(len(p) + len(n))
+        model_input = torch.cat(model_input)
+
         conditioning = self.conditioning
 
         if self.unet.prediction_type == "epsilon":
@@ -74,15 +91,21 @@ class GuidedDenoiser():
         elif self.unet.prediction_type == "v":
             original_pred = self.predict_original_v(model_input, timestep, sigma, conditioning)
 
-        neg_pred, pos_pred = original_pred.chunk(2)
-        original_pred = neg_pred + self.scale * (pos_pred - neg_pred)
+        composed_pred = []
+        i = 0
+        for p, n in self.compositions:
+            pl, nl = len(p), len(n)
+            pos = original_pred[i:i+pl].sum(dim=0, keepdims=True)
+            neg = original_pred[i+pl:i+pl+nl].sum(dim=0, keepdims=True)
+            i += pl + nl
+            composed_pred += [(self.scale * pos) - ((self.scale - 1) * neg)]
 
-        original_pred = self.mask_original(original_pred)
-        
-        return original_pred
+        composed_pred = torch.cat(composed_pred)
+        masked_pred = self.mask_original(composed_pred)
+        return masked_pred
 
     def set_step(self, step):
-        self.conditioning= self.conditioning_schedule.get_conditioning_at_step(step).to(self.dtype)
+        self.conditioning = self.conditioning_schedule.get_conditioning_at_step(step).to(self.dtype)
         nets = self.conditioning_schedule.get_networks_at_step(step)
         self.unet.additional.set_strength(nets)
         
