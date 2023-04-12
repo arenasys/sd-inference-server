@@ -10,8 +10,6 @@ class GuidedDenoiser():
         self.mask = None
         self.original = None
 
-        self.compositions = self.conditioning_schedule.get_compositions()
-
         self.device = unet.device
         self.dtype = unet.dtype
 
@@ -95,10 +93,10 @@ class GuidedDenoiser():
         i = 0
         for p, n in self.compositions:
             pl, nl = len(p), len(n)
-            pos = original_pred[i:i+pl].sum(dim=0, keepdims=True)
-            neg = original_pred[i+pl:i+pl+nl].sum(dim=0, keepdims=True)
+            neg = (original_pred[i+pl:i+pl+nl]*n).sum(dim=0, keepdims=True) / torch.sum(n)
+            pred = neg + ((original_pred[i:i+pl] - neg) * (p * self.scale)).sum(dim=0, keepdims=True)
             i += pl + nl
-            composed_pred += [(self.scale * pos) - ((self.scale - 1) * neg)]
+            composed_pred += [pred]
 
         composed_pred = torch.cat(composed_pred)
         masked_pred = self.mask_original(composed_pred)
@@ -108,6 +106,10 @@ class GuidedDenoiser():
         self.conditioning = self.conditioning_schedule.get_conditioning_at_step(step).to(self.dtype)
         nets = self.conditioning_schedule.get_networks_at_step(step)
         self.unet.additional.set_strength(nets)
+
+        self.compositions = [[torch.tensor(pos, dtype=self.dtype, device=self.device).reshape(-1,1,1,1),
+                              torch.tensor(neg, dtype=self.dtype, device=self.device).reshape(-1,1,1,1)]
+                              for pos, neg in self.conditioning_schedule.get_compositions()]
         
     def reset(self):
         self.mask = None

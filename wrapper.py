@@ -394,14 +394,13 @@ class GenerationParameters():
         self.load_models()
 
         self.set_status("Configuring")
-        required = "unet, clip, vae, sampler, prompt, negative_prompt, width, height, seed, scale, steps".split(", ")
+        required = "unet, clip, vae, sampler, prompt, width, height, seed, scale, steps".split(", ")
         optional = "clip_skip, eta, batch_size, hr_steps, hr_factor, hr_upscaler, hr_strength, hr_sampler, hr_eta".split(", ")
         self.check_parameters(required, optional)
 
         batch_size = self.get_batch_size()
 
         device = self.unet.device
-        positive_prompts, negative_prompts = self.get_prompts()
         seeds, subseeds = self.get_seeds(batch_size)
         
         self.current_step = 0
@@ -415,11 +414,9 @@ class GenerationParameters():
         if not self.hr_eta:
             self.hr_eta = self.eta
 
-        prompt = [([positive_prompts[i]], [negative_prompts[i]]) for i in range(len(positive_prompts))]
+        metadata = self.get_metadata("txt2img", self.width, self.height, batch_size, self.prompt, seeds, subseeds)
 
-        metadata = self.get_metadata("txt2img", self.width, self.height, batch_size, prompt, seeds, subseeds)
-
-        conditioning = prompts.BatchedConditioningSchedules(self.clip, prompt, self.steps, self.clip_skip)
+        conditioning = prompts.BatchedConditioningSchedules(self.clip, self.prompt, self.steps, self.clip_skip)
         self.attach_networks(conditioning.get_all_networks())
         conditioning.encode()
 
@@ -464,14 +461,13 @@ class GenerationParameters():
         self.load_models()
 
         self.set_status("Configuring")
-        required = "unet, clip, vae, sampler, image, prompt, negative_prompt, seed, scale, steps, strength".split(", ")
+        required = "unet, clip, vae, sampler, image, prompt, seed, scale, steps, strength".split(", ")
         optional = "img2img_upscaler, mask, mask_blur, clip_skip, eta, batch_size, padding, width, height".split(", ")
         self.check_parameters(required, optional)
 
         batch_size = self.get_batch_size()
 
         device = self.unet.device
-        positive_prompts, negative_prompts = self.get_prompts()
         seeds, subseeds = self.get_seeds(batch_size)
 
         (images,) = self.listify(self.image)
@@ -484,14 +480,12 @@ class GenerationParameters():
         if self.width and self.height:
             width, height = self.width, self.height
 
-        prompt = [([positive_prompts[i]], [negative_prompts[i]]) for i in range(len(positive_prompts))]
-
-        metadata = self.get_metadata("img2img",  width, height, batch_size, prompt, seeds, subseeds)
+        metadata = self.get_metadata("img2img",  width, height, batch_size, self.prompt, seeds, subseeds)
 
         self.current_step = 0
         self.total_steps = int(self.steps * self.strength) + 1
         
-        conditioning = prompts.BatchedConditioningSchedules(self.clip, prompt, self.steps, self.clip_skip)
+        conditioning = prompts.BatchedConditioningSchedules(self.clip, self.prompt, self.steps, self.clip_skip)
         self.attach_networks(conditioning.get_all_networks())
         conditioning.encode()
 
