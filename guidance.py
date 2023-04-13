@@ -106,10 +106,7 @@ class GuidedDenoiser():
         self.conditioning = self.conditioning_schedule.get_conditioning_at_step(step).to(self.dtype)
         nets = self.conditioning_schedule.get_networks_at_step(step)
         self.unet.additional.set_strength(nets)
-
-        self.compositions = [[torch.tensor(pos, dtype=self.dtype, device=self.device).reshape(-1,1,1,1),
-                              torch.tensor(neg, dtype=self.dtype, device=self.device).reshape(-1,1,1,1)]
-                              for pos, neg in self.conditioning_schedule.get_compositions()]
+        self.compositions = self.conditioning_schedule.get_compositions(self.dtype, self.device)
         
     def reset(self):
         self.mask = None

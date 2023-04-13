@@ -249,12 +249,13 @@ class PromptSchedule():
         return step_networks
     
 class ConditioningSchedule():
-    def __init__(self, clip, prompt, negative_prompt, steps, clip_skip):
+    def __init__(self, clip, prompt, negative_prompt, steps, clip_skip, areas):
         self.clip = clip
         self.prompt = prompt
         self.negative_prompt = negative_prompt
         self.steps = steps
         self.clip_skip = clip_skip
+        self.areas = areas
         self.HR = False
         self.parse()
 
@@ -306,16 +307,28 @@ class ConditioningSchedule():
         return [p.get_encoding_at_step(step) for p in self.positives] + \
                [n.get_encoding_at_step(step) for n in self.negatives]
     
-    def get_composition(self):
-        return [[1] * len(self.positives), [1] * len(self.negatives)]
+    def get_composition(self, dtype, device):
+        if self.areas:
+            shape = self.areas[0].shape
+            pos = [torch.ones(shape, dtype=dtype, device=device)] * len(self.positives)
+            neg = [torch.ones(shape, dtype=dtype, device=device)] * len(self.negatives)
+            for i in range(len(self.areas)):
+                if i + 1 < len(pos):
+                    pos[i + 1] = pos[i + 1] * self.areas[i]
+            return [torch.stack(pos), torch.stack(neg)]
+        else:
+            pos = torch.tensor([1] * len(self.positives), dtype=dtype, device=device).reshape(-1,1,1,1)
+            neg = torch.tensor([1] * len(self.negatives), dtype=dtype, device=device).reshape(-1,1,1,1)
+            return [pos, neg]
     
 class BatchedConditioningSchedules():
-    def __init__(self, clip, prompts, steps, clip_skip):
+    def __init__(self, clip, prompts, steps, clip_skip, areas):
         self.clip = clip
         self.prompts = prompts
         self.steps = steps
         self.clip_skip = clip_skip
         self.batch_size = len(prompts)
+        self.areas = areas
         self.parse()
 
     def switch_to_HR(self, hr_steps):
@@ -324,8 +337,11 @@ class BatchedConditioningSchedules():
 
     def parse(self):
         self.batches = []
-        for positive, negative in self.prompts:
-            self.batches += [ConditioningSchedule(self.clip, positive, negative, self.steps, self.clip_skip)]
+        for i, (positive, negative) in enumerate(self.prompts):
+            areas = []
+            if i < len(self.areas):
+                areas = self.areas[i]
+            self.batches += [ConditioningSchedule(self.clip, positive, negative, self.steps, self.clip_skip, areas)]
     
     def encode(self):
         for b in self.batches:
@@ -350,8 +366,8 @@ class BatchedConditioningSchedules():
         cond = torch.cat(conditioning)
         return cond
     
-    def get_compositions(self):
+    def get_compositions(self, dtype, device):
         compositions = []
         for b in self.batches:
-            compositions += [b.get_composition()]
+            compositions += [b.get_composition(dtype, device)]
         return compositions

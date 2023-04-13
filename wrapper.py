@@ -128,20 +128,30 @@ class GenerationParameters():
 
     def set(self, **kwargs):
         for key, value in kwargs.items():
-            if key == "image" or key == "mask":
-                if type(value) == bytes or type(value) == bytearray:
-                    value = PIL.Image.open(io.BytesIO(value))
-                    if value[i].mode == 'RGBA':
-                        value = PIL.Image.alpha_composite(PIL.Image.new('RGBA',value.size,(0,0,0)), value)
-                        value = value.convert("RGB")
-                if type(value) == list:
-                    for i in range(len(value)):
-                        if type(value[i]) == bytes or type(value[i]) == bytearray:
-                            value[i] = PIL.Image.open(io.BytesIO(value[i]))
-                            if value[i].mode == 'RGBA':
-                                value[i] = PIL.Image.alpha_composite(PIL.Image.new('RGBA',value[i].size,(0,0,0)), value[i])
-                                value[i] = value[i].convert("RGB")
-
+            if key == "image":
+                for i in range(len(value)):
+                    if type(value[i]) == bytes or type(value[i]) == bytearray:
+                        value[i] = PIL.Image.open(io.BytesIO(value[i]))
+                        if value[i].mode == 'RGBA':
+                            value[i] = PIL.Image.alpha_composite(PIL.Image.new('RGBA',value[i].size,(0,0,0)), value[i])
+                            value[i] = value[i].convert("RGB")
+            if key == "mask":
+                for i in range(len(value)):
+                    if type(value[i]) == bytes or type(value[i]) == bytearray:
+                        value[i] = PIL.Image.open(io.BytesIO(value[i]))
+                        if value[i].mode == 'RGBA':
+                            value[i] = value[i].split()[-1]
+                        else:
+                            value[i] = value[i].convert("L")
+            if key == "area":
+                for i in range(len(value)):
+                    for j in range(len(value[i])):
+                        if type(value[i][j]) == bytes or type(value) == bytearray:
+                            value[i][j] = PIL.Image.open(io.BytesIO(value[i][j]))
+                            if value[i][j].mode == 'RGBA':
+                                value[i][j] = value[i][j].split()[-1]
+                            else:
+                                value[i][j] = value[i][j].convert("L")
             setattr(self, key, value)
     
     def load_models(self):
@@ -296,7 +306,7 @@ class GenerationParameters():
     
     def get_batch_size(self):
         batch_size = max(self.batch_size or 1, 1)
-        for i in [self.prompt, self.negative_prompt, self.seeds, self.subseeds, self.image, self.mask]:
+        for i in [self.prompt, self.negative_prompt, self.seeds, self.subseeds, self.image, self.mask, self.area]:
             if i != None and type(i) == list:
                 batch_size = max(batch_size, len(i))
         return batch_size
@@ -418,7 +428,7 @@ class GenerationParameters():
 
         self.set_status("Configuring")
         required = "unet, clip, vae, sampler, prompt, width, height, seed, scale, steps".split(", ")
-        optional = "clip_skip, eta, batch_size, hr_steps, hr_factor, hr_upscaler, hr_strength, hr_sampler, hr_eta".split(", ")
+        optional = "clip_skip, eta, batch_size, hr_steps, hr_factor, hr_upscaler, hr_strength, hr_sampler, hr_eta, area".split(", ")
         self.check_parameters(required, optional)
 
         batch_size = self.get_batch_size()
@@ -439,7 +449,13 @@ class GenerationParameters():
 
         metadata = self.get_metadata("txt2img", self.width, self.height, batch_size, self.prompt, seeds, subseeds)
 
-        conditioning = prompts.BatchedConditioningSchedules(self.clip, self.prompt, self.steps, self.clip_skip)
+        if self.area:
+            for i in range(len(self.area)):
+                self.area[i] = utils.preprocess_areas(self.area[i])
+        else:
+            self.area = []
+
+        conditioning = prompts.BatchedConditioningSchedules(self.clip, self.prompt, self.steps, self.clip_skip, self.area)
         self.attach_networks(conditioning.get_all_networks())
         conditioning.encode()
 
@@ -498,7 +514,7 @@ class GenerationParameters():
         original_images = images
 
         if self.mask:
-            (masks,)= self.listify(self.mask)
+            (masks,) = self.listify(self.mask)
 
         width, height = images[0].size
         if self.width and self.height:
@@ -506,10 +522,16 @@ class GenerationParameters():
 
         metadata = self.get_metadata("img2img",  width, height, batch_size, self.prompt, seeds, subseeds)
 
+        if self.area:
+            for i in range(len(self.area)):
+                self.area[i] = utils.preprocess_areas(self.area[i])
+        else:
+            self.area = []
+
         self.current_step = 0
         self.total_steps = int(self.steps * self.strength) + 1
         
-        conditioning = prompts.BatchedConditioningSchedules(self.clip, self.prompt, self.steps, self.clip_skip)
+        conditioning = prompts.BatchedConditioningSchedules(self.clip, self.prompt, self.steps, self.clip_skip, self.area)
         self.attach_networks(conditioning.get_all_networks())
         conditioning.encode()
 
