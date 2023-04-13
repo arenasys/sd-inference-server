@@ -13,6 +13,11 @@ class GuidedDenoiser():
         self.device = unet.device
         self.dtype = unet.dtype
 
+        self.get_compositions()
+
+    def get_compositions(self):
+        self.compositions = self.conditioning_schedule.get_compositions(self.dtype, self.device)
+
     def set_mask(self, mask, original):
         self.mask = mask.to(self.dtype)
         self.original = original.to(self.dtype) * 0.18215
@@ -30,13 +35,27 @@ class GuidedDenoiser():
             noised_original = alpha.sqrt() * self.original + (1-alpha).sqrt() * noise()
             latents = (noised_original * self.mask) + (latents * (1 - self.mask))
         return latents
+    
+    def get_model_inputs(self, latents):
+        model_input = []
+        for i, ((m, p), n) in enumerate(self.compositions):
+            model_input += [latents[i:i+1]]*(len(p) + len(n))
+        return torch.cat(model_input)
+
+    def compose_predictions(self, pred):
+        composed_pred = []
+        i = 0
+        for (m, p), n in self.compositions:
+            pl, nl = len(p), len(n)
+            neg = (pred[i+pl:i+pl+nl]*n).sum(dim=0, keepdims=True) / torch.sum(n)
+            pred[i:i+pl] = pred[i:i+pl] * m + (neg * (1 - m))
+            pred = neg + ((pred[i:i+pl] - neg) * (p * self.scale)).sum(dim=0, keepdims=True)
+            i += pl + nl
+            composed_pred += [pred]
+        return torch.cat(composed_pred)
 
     def predict_noise(self, latents, timestep, alpha):
-        model_input = []
-        for i, (p, n) in enumerate(self.compositions):
-            model_input += [latents[i:i+1]]*(len(p) + len(n))
-        model_input = torch.cat(model_input)
-
+        model_input = self.get_model_inputs(latents)
         conditioning = self.conditioning
 
         if self.unet.prediction_type == "epsilon":
@@ -44,16 +63,7 @@ class GuidedDenoiser():
         elif self.unet.prediction_type == "v":
             noise_pred = self.predict_noise_v(model_input, timestep, conditioning, alpha)
 
-        composed_pred = []
-        i = 0
-        for p, n in self.compositions:
-            pl, nl = len(p), len(n)
-            neg = (noise_pred[i+pl:i+pl+nl]*n).sum(dim=0, keepdims=True) / torch.sum(n)
-            pred = neg + ((noise_pred[i:i+pl] - neg) * (p * self.scale)).sum(dim=0, keepdims=True)
-            i += pl + nl
-            composed_pred += [pred]
-
-        composed_pred = torch.cat(composed_pred)
+        composed_pred = self.compose_predictions(noise_pred)
         return composed_pred
 
     def predict_original_epsilon(self, latents, timestep, sigma, conditioning):
@@ -77,11 +87,7 @@ class GuidedDenoiser():
         return original_pred
 
     def predict_original(self, latents, timestep, sigma):
-        model_input = []
-        for i, (p, n) in enumerate(self.compositions):
-            model_input += [latents[i:i+1]]*(len(p) + len(n))
-        model_input = torch.cat(model_input)
-
+        model_input = self.get_model_inputs(latents)
         conditioning = self.conditioning
 
         if self.unet.prediction_type == "epsilon":
@@ -89,16 +95,7 @@ class GuidedDenoiser():
         elif self.unet.prediction_type == "v":
             original_pred = self.predict_original_v(model_input, timestep, sigma, conditioning)
 
-        composed_pred = []
-        i = 0
-        for p, n in self.compositions:
-            pl, nl = len(p), len(n)
-            neg = (original_pred[i+pl:i+pl+nl]*n).sum(dim=0, keepdims=True) / torch.sum(n)
-            pred = neg + ((original_pred[i:i+pl] - neg) * (p * self.scale)).sum(dim=0, keepdims=True)
-            i += pl + nl
-            composed_pred += [pred]
-
-        composed_pred = torch.cat(composed_pred)
+        composed_pred = self.compose_predictions(original_pred)
         masked_pred = self.mask_original(composed_pred)
         return masked_pred
 
@@ -106,9 +103,9 @@ class GuidedDenoiser():
         self.conditioning = self.conditioning_schedule.get_conditioning_at_step(step).to(self.dtype)
         nets = self.conditioning_schedule.get_networks_at_step(step)
         self.unet.additional.set_strength(nets)
-        self.compositions = self.conditioning_schedule.get_compositions(self.dtype, self.device)
         
     def reset(self):
         self.mask = None
         self.original = None
         self.conditioning = None
+        self.get_compositions()

@@ -259,8 +259,9 @@ class ConditioningSchedule():
         self.HR = False
         self.parse()
 
-    def switch_to_HR(self, hr_steps):
+    def switch_to_HR(self, hr_steps, areas):
         self.steps = hr_steps
+        self.areas = areas
         self.HR = True
         self.parse()
 
@@ -309,17 +310,21 @@ class ConditioningSchedule():
     
     def get_composition(self, dtype, device):
         if self.areas:
+            f = 0.8
+            weights = [f] * len(self.positives)
+            weights[0] = 1
+            weights = torch.tensor(weights, dtype=dtype, device=device).reshape(-1,1,1,1)
             shape = self.areas[0].shape
             pos = [torch.ones(shape, dtype=dtype, device=device)] * len(self.positives)
-            neg = [torch.ones(shape, dtype=dtype, device=device)] * len(self.negatives)
             for i in range(len(self.areas)):
                 if i + 1 < len(pos):
-                    pos[i + 1] = pos[i + 1] * self.areas[i]
-            return [torch.stack(pos), torch.stack(neg)]
+                    pos[i + 1] = self.areas[i].to(dtype=dtype, device=device)
+            neg = torch.tensor([1] * len(self.negatives), dtype=dtype, device=device).reshape(-1,1,1,1)
+            return [(torch.cat(pos), weights), neg]
         else:
             pos = torch.tensor([1] * len(self.positives), dtype=dtype, device=device).reshape(-1,1,1,1)
             neg = torch.tensor([1] * len(self.negatives), dtype=dtype, device=device).reshape(-1,1,1,1)
-            return [pos, neg]
+            return [(pos, pos), neg]
     
 class BatchedConditioningSchedules():
     def __init__(self, clip, prompts, steps, clip_skip, areas):
@@ -331,9 +336,12 @@ class BatchedConditioningSchedules():
         self.areas = areas
         self.parse()
 
-    def switch_to_HR(self, hr_steps):
-        for b in self.batches:
-            b.switch_to_HR(hr_steps)
+    def switch_to_HR(self, hr_steps, areas):
+        for i, b in enumerate(self.batches):
+            a = []
+            if i < len(areas):
+                a = areas[i]
+            b.switch_to_HR(hr_steps, a)
 
     def parse(self):
         self.batches = []

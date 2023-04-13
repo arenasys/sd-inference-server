@@ -449,13 +449,9 @@ class GenerationParameters():
 
         metadata = self.get_metadata("txt2img", self.width, self.height, batch_size, self.prompt, seeds, subseeds)
 
-        if self.area:
-            for i in range(len(self.area)):
-                self.area[i] = utils.preprocess_areas(self.area[i])
-        else:
-            self.area = []
+        area = utils.preprocess_areas(self.area, self.width, self.height)
 
-        conditioning = prompts.BatchedConditioningSchedules(self.clip, self.prompt, self.steps, self.clip_skip, self.area)
+        conditioning = prompts.BatchedConditioningSchedules(self.clip, self.prompt, self.steps, self.clip_skip, area)
         self.attach_networks(conditioning.get_all_networks())
         conditioning.encode()
 
@@ -476,7 +472,9 @@ class GenerationParameters():
         height = int(self.height * self.hr_factor)
 
         noise = utils.NoiseSchedule(seeds, subseeds, width // 8, height // 8, device, self.unet.dtype)
-        conditioning.switch_to_HR(hr_steps)
+
+        area = utils.preprocess_areas(self.area, width, height)
+        conditioning.switch_to_HR(hr_steps, area)
         self.attach_networks(conditioning.get_all_networks())
         conditioning.encode()
 
@@ -522,16 +520,12 @@ class GenerationParameters():
 
         metadata = self.get_metadata("img2img",  width, height, batch_size, self.prompt, seeds, subseeds)
 
-        if self.area:
-            for i in range(len(self.area)):
-                self.area[i] = utils.preprocess_areas(self.area[i])
-        else:
-            self.area = []
+        area = utils.preprocess_areas(self.area, width, height)
 
         self.current_step = 0
         self.total_steps = int(self.steps * self.strength) + 1
         
-        conditioning = prompts.BatchedConditioningSchedules(self.clip, self.prompt, self.steps, self.clip_skip, self.area)
+        conditioning = prompts.BatchedConditioningSchedules(self.clip, self.prompt, self.steps, self.clip_skip, area)
         self.attach_networks(conditioning.get_all_networks())
         conditioning.encode()
 
@@ -604,7 +598,6 @@ class GenerationParameters():
             images = upscalers.upscale_super_resolution(images, self.upscale_model, width, height)
 
         if self.mask:
-            images[0].save("RESULT.png")
             images = utils.apply_inpainting(images, original_images, masks, extents)
 
         self.on_complete(images, metadata)

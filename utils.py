@@ -17,14 +17,19 @@ def postprocess_images(images):
         return FROM_TENSOR(image)
     return [process(i) for i in images]
 
-def preprocess_areas(areas):
+def preprocess_areas(areas, width, height):
+    if not areas:
+        return []
     out = []
     for i in range(len(areas)):
-        w, h = areas[i].size
-        w, h = w - w % 8, h - h % 8
-        a = areas[i].resize((w // 8, h // 8), resample=PIL.Image.LANCZOS)
-        a = 1 - TO_TENSOR(a).to(torch.float32)
-        out += [torch.cat([a]*4)[None, :]]
+        o = []
+        for j in range(len(areas[i])):
+            w, h = width, height
+            w, h = w - w % 8, h - h % 8
+            a = areas[i][j].resize((w // 8, h // 8), resample=PIL.Image.LANCZOS)
+            a = TO_TENSOR(a).to(torch.float32)
+            o += [torch.cat([a]*4)[None, :]]
+        out += [o]
     return out
 
 def preprocess_masks(masks):
