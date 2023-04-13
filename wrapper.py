@@ -75,7 +75,12 @@ class GenerationParameters():
 
         self.device_names = []
         for i in range(torch.cuda.device_count()):
-            self.device_names += [torch.cuda.get_device_name(i)]
+            original = torch.cuda.get_device_name(i)
+            name = original
+            i = 2
+            while name in self.device_names:
+                name = original + f" ({i})"
+            self.device_names += [name]
         self.device_names += ["CPU"]
 
         self.callback = None
