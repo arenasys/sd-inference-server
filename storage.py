@@ -65,7 +65,7 @@ class ModelStorage():
 
     def move(self, model, name, comp, device):
         if model.device == device:
-            return model
+            return model.to(self.dtype)
 
         if comp in self.total_limits:
             if str(device) == "cpu":
@@ -74,7 +74,7 @@ class ModelStorage():
                 self.enforce_vram_limit(name, comp, self.vram_limits[comp]-1)
                 self.enforce_total_limit(name, comp, self.total_limits[comp]-1)
         
-        return model.to(device)
+        return model.to(device, self.dtype)
 
     def get_name(self, file):
         file = file.split(".")[0]

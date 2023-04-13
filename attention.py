@@ -3,19 +3,25 @@ import einops
 import math
 import diffusers
 
-def use_optimized_attention():
-    try:
-        use_xformers_attention()
-    except Exception:
-        use_split_attention()
-
+def use_optimized_attention(device):
+    if "cuda" in str(device):
+        try:
+            use_xformers_attention(device)
+        except Exception:
+            use_split_attention(device)
+    else:
+       use_split_attention_v1(device)
+    
 def exists(val):
     return val is not None
 
 def default(val, d):
     return val if exists(val) else d
 
-def use_split_attention():
+def use_split_attention(device):
+    if not "cuda" in str(device):
+       raise RuntimeError("Split v2 attention does not support CPU generation")
+
     def get_available_vram(device):
         stats = torch.cuda.memory_stats(device)
         mem_active = stats['active_bytes.all.current']
@@ -90,7 +96,7 @@ def use_split_attention():
 
     diffusers.models.attention.CrossAttention.forward = split_cross_attention_forward
 
-def use_split_attention_v1():
+def use_split_attention_v1(device):
     def split_cross_attention_forward_v1(self, x, encoder_hidden_states=None, attention_mask=None):
         h = self.heads
 
@@ -228,7 +234,7 @@ class FlashAttentionFunction(torch.autograd.Function):
 
     return o
 
-def use_flash_attention():
+def use_flash_attention(device):
   flash_func = FlashAttentionFunction
 
   def forward_flash_attn(self, x, encoder_hidden_states=None, attention_mask=None):
@@ -257,7 +263,9 @@ def use_flash_attention():
 
   diffusers.models.attention.CrossAttention.forward = forward_flash_attn
 
-def use_xformers_attention():
+def use_xformers_attention(device):
+    if not "cuda" in str(device):
+       raise RuntimeError("XFormers attention does not support CPU generation")
     import xformers
 
     def xformers_attention_forward(self, x, encoder_hidden_states=None, attention_mask=None):

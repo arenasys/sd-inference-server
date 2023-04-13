@@ -73,6 +73,11 @@ class GenerationParameters():
         self.storage = storage
         self.device = device
 
+        self.device_names = []
+        for i in range(torch.cuda.device_count()):
+            self.device_names += [torch.cuda.get_device_name(i)]
+        self.device_names += ["CPU"]
+
         self.callback = None
 
     def set_status(self, status):
@@ -110,7 +115,7 @@ class GenerationParameters():
             
     def reset(self):
         for attr in list(self.__dict__.keys()):
-            if not attr in ["storage", "device", "callback"]:
+            if not attr in ["storage", "device", "device_names", "callback"]:
                 delattr(self, attr)
 
     def __getattr__(self, item):
@@ -194,7 +199,19 @@ class GenerationParameters():
             raise ValueError("width and height must both be set")
         
         if self.attention and self.attention in CROSS_ATTENTION:
-            CROSS_ATTENTION[self.attention]()
+            CROSS_ATTENTION[self.attention](self.device)
+
+    def set_device(self):
+        device = torch.device("cuda")
+        if self.device_name in self.device_names:
+            idx = self.device_names.index(self.device_name)
+            if self.device_name == "CPU":
+                device = torch.device("cpu")
+                self.storage.dtype = torch.float32
+            else:
+                device = torch.device(idx)
+                self.storage.dtype = torch.float16
+        self.device = device
 
     def listify(self, *args):
         if args == None:
@@ -391,6 +408,7 @@ class GenerationParameters():
     @torch.inference_mode()
     def txt2img(self):
         self.set_status("Loading")
+        self.set_device()
         self.load_models()
 
         self.set_status("Configuring")
@@ -458,6 +476,7 @@ class GenerationParameters():
     @torch.inference_mode()
     def img2img(self):
         self.set_status("Loading")
+        self.set_device()
         self.load_models()
 
         self.set_status("Configuring")
@@ -522,6 +541,7 @@ class GenerationParameters():
     @torch.inference_mode()
     def upscale(self):
         self.set_status("Loading")
+        self.set_device()
         self.storage.clear_file_cache()
         if not self.img2img_upscaler in UPSCALERS_PIXEL and not self.img2img_upscaler in UPSCALERS_LATENT:
             self.set_status("Loading Upscaler")
@@ -575,6 +595,7 @@ class GenerationParameters():
         if not HAVE_XFORMERS:
             data["attention"].remove("xFormers")
         data["TI"] = list(self.storage.embeddings.keys())
+        data["device"] = self.device_names
 
         if self.callback:
             if not self.callback({"type": "options", "data": data}):

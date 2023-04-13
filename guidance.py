@@ -48,10 +48,10 @@ class GuidedDenoiser():
         i = 0
         for p, n in self.compositions:
             pl, nl = len(p), len(n)
-            pos = noise_pred[i:i+pl].sum(dim=0, keepdims=True)
-            neg = noise_pred[i+pl:i+pl+nl].sum(dim=0, keepdims=True)
+            neg = (noise_pred[i+pl:i+pl+nl]*n).sum(dim=0, keepdims=True) / torch.sum(n)
+            pred = neg + ((noise_pred[i:i+pl] - neg) * (p * self.scale)).sum(dim=0, keepdims=True)
             i += pl + nl
-            composed_pred += [(self.scale * pos) - ((self.scale - 1) * neg)]
+            composed_pred += [pred]
 
         composed_pred = torch.cat(composed_pred)
         return composed_pred
