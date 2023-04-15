@@ -27,7 +27,7 @@ class KScheduler():
         log_sigmas = sigmas.log()
         return sigmas, log_sigmas
 
-    def to(self, dtype, device):
+    def to(self, device, dtype):
         self.dtype = dtype
         self.sigmas = self.sigmas.to(device)
         self.log_sigmas = self.log_sigmas.to(device)
@@ -47,7 +47,7 @@ class KScheduler():
 class KSampler():
     def __init__(self, model, scheduler, eta):
         self.model = model
-        self.scheduler = scheduler or KScheduler().to(model.dtype, model.device)
+        self.scheduler = scheduler or KScheduler().to(model.device, model.dtype)
         self.eta = eta
 
     def predict(self, latents, sigma):

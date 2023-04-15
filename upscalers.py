@@ -32,9 +32,9 @@ def upscale_super_resolution(images, model, width, height):
         for i, image in enumerate(images):
             while image.size[0] < width or image.size[1] < height:
                 img = utils.TO_TENSOR(images[i]).unsqueeze(0)
-                img = img.to(model.device)
+                img = img.to(model.device, model.dtype)
                 out = model(img)
-                out = out.cpu().clamp_(0, 1)
+                out = out.clamp_(0, 1)
                 image = utils.FROM_TENSOR(out.squeeze(0))
             images[i] = upscale(image, transforms.InterpolationMode.LANCZOS, width, height)
     
@@ -89,4 +89,6 @@ class SR(RRDBNet):
     def __getattr__(self, name):
         if name == "device":
             return next(self.parameters()).device
+        if name == "dtype":
+            return next(self.parameters()).dtype
         return super().__getattr__(name)

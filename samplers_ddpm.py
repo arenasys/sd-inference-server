@@ -18,7 +18,7 @@ class DDPMScheduler():
         alphas = torch.cumprod(1.0 - betas, 0)
         return alphas
 
-    def to(self, dtype, device):
+    def to(self, device, dtype):
         # fp32 required for DDIM eta
         self.alphas = self.alphas.to(device)
         return self
@@ -26,7 +26,7 @@ class DDPMScheduler():
 class DDPMSampler():
     def __init__(self, model, scheduler, eta):
         self.model = model
-        self.scheduler = scheduler or DDPMScheduler().to(model.dtype, model.device)
+        self.scheduler = scheduler or DDPMScheduler().to(model.device, model.dtype)
         self.eta = eta
 
     def predict(self, latents, timestep, alpha):

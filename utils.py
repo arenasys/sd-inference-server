@@ -43,7 +43,7 @@ def preprocess_masks(masks):
     return torch.cat([process(m) for m in masks])
 
 def encode_images(vae, seeds, images):
-    images = preprocess_images(images).to(vae.device).to(vae.dtype)
+    images = preprocess_images(images).to(vae.device, vae.dtype)
     noise = singular_noise(seeds, images.shape[3] // 8, images.shape[2] // 8, vae.device).to(vae.dtype)
 
     dists = vae.encode(images)
@@ -61,7 +61,7 @@ def encode_images_disjointed(vae, seeds, images):
     return latents
     
 def decode_images(vae, latents):
-    latents = latents.clone().detach().to(vae.device).to(vae.dtype)
+    latents = latents.clone().detach().to(vae.device, vae.dtype)
     images = vae.decode(latents).sample
     return postprocess_images(images)
 
