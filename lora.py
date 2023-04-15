@@ -1,6 +1,7 @@
 import math
 import torch
 from functools import reduce
+import os
 
 # adapted from Kohyas LoRA code https://github.com/kohya-ss/sd-scripts/blob/main/networks/lora.py
 
@@ -35,7 +36,7 @@ class LoRAModule(torch.nn.Module):
 class LoRANetwork(torch.nn.Module):
     def __init__(self, name, state_dict) -> None:
         super().__init__()
-        self.net_name = name
+        self.net_name = "lora:" + name.rsplit(".",1)[0].rsplit(os.path.sep,1)[-1]
         self.build_modules(state_dict)
         self.load_state_dict(state_dict, strict=False)
 

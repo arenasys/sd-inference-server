@@ -165,7 +165,7 @@ def SDv2_convert(state_dict):
     return state_dict
 
 def convert_checkpoint(in_file):
-    print(f"CONVERTING {in_file}")
+    print(f"CONVERTING {in_file.rsplit(os.path.sep,1)[-1]}")
     
     if has_handle(os.path.abspath(in_file)):
         raise Exception("model is still being written")

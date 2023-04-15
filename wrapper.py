@@ -68,6 +68,9 @@ except Exception:
 def format_float(x):
     return f"{x:.4f}".rstrip('0').rstrip('.')
 
+def model_name(x):
+    return x.rsplit('.',1)[0].rsplit(os.path.sep,1)[-1]
+
 class GenerationParameters():
     def __init__(self, storage: storage.ModelStorage, device):
         self.storage = storage
@@ -339,11 +342,11 @@ class GenerationParameters():
 
             if mode in {"txt2img", "img2img"}:
                 if len({self.unet_name, self.clip_name,self.vae_name}) == 1:
-                    m["model"] = self.unet_name
+                    m["model"] = model_name(self.unet_name)
                 else:
-                    m["UNET"] = self.unet_name
-                    m["CLIP"] = self.clip_name
-                    m["VAE"] = self.vae_name
+                    m["UNET"] = model_name(self.unet_name)
+                    m["CLIP"] = model_name(self.clip_name)
+                    m["VAE"] = model_name(self.vae_name)
                 m["prompt"] = ' AND '.join(prompts[i][0])
                 m["negative_prompt"] = ' AND '.join(prompts[i][1])
                 m["seed"] = seeds[i]
@@ -354,7 +357,7 @@ class GenerationParameters():
 
             if mode == "img2img":
                 m["strength"] = format_float(self.strength)
-                m["img2img_upscaler"] = self.img2img_upscaler
+                m["img2img_upscaler"] = model_name(self.img2img_upscaler)
                 if self.padding:
                     m["padding"] = self.padding
                 m["mask_blur"] = self.mask_blur
@@ -362,7 +365,7 @@ class GenerationParameters():
             if mode == "txt2img":
                 if self.hr_factor and self.hr_factor != 1.0:
                     m["hr_factor"] = format_float(self.hr_factor)
-                    m["hr_upscaler"] = self.hr_upscaler
+                    m["hr_upscaler"] =  model_name(self.hr_upscaler)
                     m["hr_strength"] = format_float(self.hr_strength)
                     if self.hr_steps and self.hr_steps != self.steps:
                         m["hr_steps"] = self.hr_steps
@@ -372,7 +375,7 @@ class GenerationParameters():
                         m["hr_eta"] = format_float(self.hr_eta)
             
             if mode == "upscale":
-                m["img2img_upscaler"] = self.img2img_upscaler
+                m["img2img_upscaler"] = model_name(self.img2img_upscaler)
                 if self.padding:
                     m["padding"] = self.padding
                 m["mask_blur"] = self.mask_blur
@@ -614,7 +617,7 @@ class GenerationParameters():
         data["attention"] = list(CROSS_ATTENTION.keys())
         if not HAVE_XFORMERS:
             data["attention"].remove("xFormers")
-        data["TI"] = list(self.storage.embeddings.keys())
+        data["TI"] = list(self.storage.embeddings_files.keys())
         data["device"] = self.device_names
 
         if self.callback:

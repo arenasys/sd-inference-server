@@ -1,12 +1,13 @@
 import torch
 import inspect
+import os
 
 # adapted from AUTOs HN code https://github.com/AUTOMATIC1111/stable-diffusion-webui/blob/master/modules/hypernetworks/hypernetwork.py
 
 class HypernetworkModule(torch.nn.Module):
-    def __init__(self, net_name, dim, layer_structure, activation_func, add_layer_norm, activate_output, dropout_structure):
+    def __init__(self, name, dim, layer_structure, activation_func, add_layer_norm, activate_output, dropout_structure):
         super().__init__()
-        self.net_name = net_name
+        self.net_name = "hypernet:" + name.rsplit(".",1)[0].rsplit(os.path.sep,1)[-1]
         self.activation_dict = {
             "linear": torch.nn.Identity,
             "relu": torch.nn.ReLU,

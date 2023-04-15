@@ -9,9 +9,11 @@ import upscalers
 
 class ModelStorage():
     def __init__(self, path, dtype, vae_dtype=None):
-        self.path = path
         self.dtype = dtype
         self.vae_dtype = vae_dtype or dtype
+
+        self.path = None
+        self.set_folder(path)
 
         self.classes = {"UNET": models.UNET, "CLIP": models.CLIP, "VAE": models.VAE, "SR": upscalers.SR, "LoRA": models.LoRA, "HN": models.HN}
         self.vram_limits = {"UNET": 1, "CLIP": 1, "VAE": 1, "SR": 1}
@@ -21,12 +23,40 @@ class ModelStorage():
         self.loaded = {k:{} for k in self.classes}
         self.file_cache = {}
 
+        self.embeddings_files = {}
         self.embeddings = {}
 
         self.find_all()
 
+    def set_folder(self, path):
+        if path != self.path:
+            self.clear_file_cache()
+        self.path = path
+        self.folders = {"SD": ["SD", "Stable-diffusion"],
+                        "SR": ["SR", "ESRGAN", "RealESRGAN"], 
+                        "TI": ["TI", os.path.join("..", "embeddings")], 
+                        "LoRA": ["LoRA"], 
+                        "HN": ["HN", "hypernetworks"]}
+            
+    def get_models(self, folder, ext):
+        files = []
+        for f in self.folders[folder]:
+            for e in ext:
+                files += glob.glob(os.path.join(os.path.abspath(os.path.join(self.path, f)), e))
+        return files
+
     def clear_file_cache(self):
         self.file_cache = {}
+
+    def reset(self):
+        self.embeddings = {}
+        for c in self.loaded:
+            for m in list(self.loaded[c].keys()):
+                self.loaded[c][m].to("cpu")
+                del self.loaded[c][m]
+        torch.cuda.empty_cache()
+        self.file_cache = {}
+        self.find_all()
 
     def enforce_vram_limit(self, allowed, comp, limit):
         found = 0
@@ -81,17 +111,13 @@ class ModelStorage():
         return model.to(device, dtype)
 
     def get_name(self, file):
-        file = file.split(".")[0]
-        file = file.split(os.path.sep)[-1]
-        return file
+        return os.path.relpath(file, self.path)
 
     def find_all(self):
         self.files = {k:{} for k in self.classes}
 
         standalone = {k:{} for k in ["UNET", "CLIP", "VAE"]}
-        for model in sum([glob.glob(os.path.join(self.path, "SD", ext)) for ext in ["*.st", "*.safetensors", "*.ckpt", "*.pt"]], []):
-            file = os.path.relpath(model, self.path)
-
+        for file in self.get_models("SD", ["*.st", "*.safetensors", "*.ckpt", "*.pt"]):
             if ".unet." in file:
                 name = self.get_name(file)
                 standalone["UNET"][name] = file
@@ -110,16 +136,17 @@ class ModelStorage():
             for name, file in standalone[comp].items():
                 self.files[comp][name] = file
         
-        for model in glob.glob(os.path.join(self.path, "SR", "*.pth")):
-            file = os.path.relpath(model, self.path)
+        for file in self.get_models("SR", ["*.pth"]):
             name = self.get_name(file)
             self.files["SR"][name] = file
 
-        for model in sum([glob.glob(os.path.join(self.path, "TI", ext)) for ext in ["*.pt", "*.safetensors", "*.bin"]], []):
-            file = os.path.relpath(model, self.path)
+        for file in self.get_models("TI", ["*.pt", "*.safetensors", "*.bin"]):
             name = self.get_name(file)
-            if name in self.embeddings:
+            activation = name.rsplit(".", 1)[0].rsplit(os.path.sep,1)[-1]
+            if activation in self.embeddings:
                 continue
+
+            self.embeddings_files[name] = file
 
             ti = self.load_file(file, "TI")["TI"]
 
@@ -133,15 +160,13 @@ class ModelStorage():
                 raise Exception("Unknown TI format")
             
             vectors.requires_grad = False
-            self.embeddings[name] = vectors
+            self.embeddings[activation] = vectors
 
-        for model in glob.glob(os.path.join(self.path, "LoRA", "*.safetensors")):
-            file = os.path.relpath(model, self.path)
+        for file in self.get_models("LoRA", ["*.safetensors"]):
             name = self.get_name(file)
             self.files["LoRA"][name] = file
 
-        for model in glob.glob(os.path.join(self.path, "HN", "*.pt")):
-            file = os.path.relpath(model, self.path)
+        for file in self.get_models("HN", ["*.pt"]):
             name = self.get_name(file)
             self.files["HN"][name] = file
 
@@ -197,14 +222,21 @@ class ModelStorage():
         return self.embeddings
 
     def get_lora(self, name, device):
+        for lora in self.files["LoRA"]:
+            if os.path.sep + name + "." in lora:
+                name = lora
+                break
         return self.get_component(name, "LoRA", device)
 
     def get_hypernetwork(self, name, device):
+        for hn in self.files["HN"]:
+            if os.path.sep + name + "." in hn:
+                name = hn
+                break
         return self.get_component(name, "HN", device)
 
     def load_file(self, file, comp):
-        print(f"LOADING {file}...")
-        file = os.path.join(self.path, file)
+        print(f"LOADING {file.rsplit(os.path.sep, 1)[-1]}...")
 
         if comp in ["UNET", "CLIP", "VAE"] and file.rsplit(".",1)[-1] in {"safetensors", "ckpt", "pt"}:
             state_dict = convert.convert_checkpoint(file)
