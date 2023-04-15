@@ -368,8 +368,6 @@ if __name__ == "__main__":
 
     ip, port = args.bind.rsplit(":",1)
 
-    attention.use_optimized_attention()
-
     model_storage = storage.ModelStorage(args.models, torch.float16, torch.float32)
     params = wrapper.GenerationParameters(model_storage, torch.device("cuda"))
 

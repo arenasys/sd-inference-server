@@ -6,7 +6,7 @@ class DDPMScheduler():
         self.alphas = self.get_alphas()
 
     def get_schedule(self, steps):
-        timesteps = np.flip(np.arange(1, 1000, 1000//steps)).copy()
+        timesteps = torch.linspace(1001, 1, steps+1)[1:].to(torch.int32) 
         return timesteps
 
     def get_truncated_schedule(self, steps, scheduled_steps):
