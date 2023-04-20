@@ -72,4 +72,6 @@ class LoRANetwork(torch.nn.Module):
     def __getattr__(self, name):
         if name == "device":
             return next(self.parameters()).device
+        if name == "dtype":
+            return next(self.parameters()).dtype
         return super().__getattr__(name)

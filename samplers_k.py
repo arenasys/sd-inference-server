@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 
-from k_diffusion.sampling import get_ancestral_step, to_d, BrownianTreeNoiseSampler
+from k_diffusion.sampling import get_ancestral_step, to_d, BrownianTreeNoiseSampler, get_sigmas_karras
 
 class KScheduler():
     def __init__(self):
@@ -9,12 +9,18 @@ class KScheduler():
         self.dtype = torch.float32
 
     def get_schedule(self, steps):
+        return self.get_karras_schedule(steps)
         timesteps = torch.linspace(999, 0, steps, device=self.sigmas.device).float()
         low_idx, high_idx, w = timesteps.floor().long(), timesteps.ceil().long(), timesteps.frac()
         log_sigma = (1 - w) * self.log_sigmas[low_idx] + w * self.log_sigmas[high_idx]
         sigmas = log_sigma.exp()
         sigmas = torch.cat([sigmas, sigmas.new_zeros([1])])
         return sigmas.to(self.dtype)
+    
+    def get_karras_schedule(self, steps):
+        mn, mx = 0.0312652550637722, 14.611639022827148
+        sigmas = get_sigmas_karras(n=steps, sigma_min=mn, sigma_max=mx, device=self.sigmas.device).to(self.dtype)
+        return sigmas
 
     def get_truncated_schedule(self, steps, scheduled_steps):
         timesteps = self.get_schedule(scheduled_steps+1)

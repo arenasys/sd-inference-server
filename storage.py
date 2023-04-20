@@ -41,8 +41,9 @@ class ModelStorage():
     def get_models(self, folder, ext):
         files = []
         for f in self.folders[folder]:
+            path = os.path.abspath(os.path.join(self.path, f))
             for e in ext:
-                files += glob.glob(os.path.join(os.path.abspath(os.path.join(self.path, f)), e))
+                files += glob.glob(os.path.join(path, "**" + os.sep + e), recursive=True)
         return files
 
     def clear_file_cache(self):
