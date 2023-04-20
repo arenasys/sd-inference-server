@@ -30,9 +30,9 @@ TYPES = {
 SAMPLER_CLASSES = {
     "Euler": samplers_k.Euler,
     "Euler a": samplers_k.Euler_a,
-    "DPM++ 2M": samplers_k.DPM_2M,
-    "DPM++ 2S a": samplers_k.DPM_2S_a,
-    "DPM++ SDE": samplers_k.DPM_SDE,
+    "DPM++ 2M": samplers_k.DPM_2M_Karras,
+    "DPM++ 2S a": samplers_k.DPM_2S_a_Karras,
+    "DPM++ SDE": samplers_k.DPM_SDE_Karras,
     "DDIM": samplers_ddpm.DDIM,
     "PLMS": samplers_ddpm.PLMS
 }
