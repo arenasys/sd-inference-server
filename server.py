@@ -57,6 +57,28 @@ def get_scheme(password):
 def get_id():
     return random.SystemRandom().randint(1, 2**31 - 1)
 
+
+SEP = os.path.sep
+INV_SEP = {"\\": '/', '/':'\\'}[os.path.sep]
+
+def convert_path(p):
+    return p.replace(INV_SEP, SEP)
+
+def convert_all_paths(j):
+    if type(j) == list:
+        for i in range(len(j)):
+            v = j[i]
+            if type(v) == str and INV_SEP in v:
+                j[i] = convert_path(v)
+            if type(v) == list or type(v) == dict:
+                convert_all_paths(j[i])
+    elif type(j) == dict: 
+        for k, v in j.items():
+            if type(v) == str and INV_SEP in v:
+                j[k] = convert_path(v)
+            if type(v) == list or type(v) == dict:
+                convert_all_paths(j[k])
+
 class Inference(threading.Thread):
     def __init__(self, wrapper, callback):
         super().__init__()
@@ -79,6 +101,7 @@ class Inference(threading.Thread):
         while self.stay_alive:
             try:
                 self.current, request = self.requests.get(False)
+                convert_all_paths(request)
                 if request["type"] == "txt2img":
                     self.wrapper.reset()
                     self.wrapper.set(**request["data"])

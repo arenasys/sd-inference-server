@@ -47,7 +47,7 @@ class KScheduler():
 class KSampler():
     def __init__(self, model, scheduler, eta):
         self.model = model
-        self.scheduler = (scheduler or KScheduler()).to(model.device, model.dtype)
+        self.scheduler = scheduler or KScheduler().to(model.device, model.dtype)
         self.eta = eta
 
     def predict(self, latents, sigma):
@@ -242,15 +242,15 @@ class KSchedulerKarras(KScheduler):
     
 class DPM_2M_Karras(DPM_2M):
     def __init__(self, model, eta=1, scheduler=None):
-        scheduler = scheduler or KSchedulerKarras()
+        scheduler = scheduler or KSchedulerKarras().to(model.device, model.dtype)
         super().__init__(model, eta, scheduler)
 
 class DPM_2S_a_Karras(DPM_2S_a):
     def __init__(self, model, eta=1, scheduler=None):
-        scheduler = scheduler or KSchedulerKarras()
+        scheduler = scheduler or KSchedulerKarras().to(model.device, model.dtype)
         super().__init__(model, eta, scheduler)
 
 class DPM_SDE_Karras(DPM_SDE):
     def __init__(self, model, eta=1, scheduler=None):
-        scheduler = scheduler or KSchedulerKarras()
+        scheduler = scheduler or KSchedulerKarras().to(model.device, model.dtype)
         super().__init__(model, eta, scheduler)

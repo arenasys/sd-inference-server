@@ -155,6 +155,7 @@ class GenerationParameters():
                                 value[i][j] = value[i][j].split()[-1]
                             else:
                                 value[i][j] = value[i][j].convert("L")
+            
             setattr(self, key, value)
     
     def load_models(self):
@@ -623,13 +624,52 @@ class GenerationParameters():
         if self.callback:
             if not self.callback({"type": "options", "data": data}):
                 raise RuntimeError("Aborted")
-            
-    def convert(self):
-        self.set_status("Converting")
-        convert.autoconvert(self.model_folder, self.trash_folder)
+    
+    def manage(self):
+        self.set_status("Configuring")
+        self.check_parameters(["operation"], [])
+
+        if self.operation == "build":
+            self.build()
+        elif self.operation == "modify":
+            self.modify()
+        else:
+            raise ValueError(f"unknown operation: {self.operation}")
+        
         if not self.callback({"type": "done", "data": {}}):
             raise RuntimeError("Aborted")
+
+    def modify(self):
+        o = os.path.join(self.storage.path, self.old_file)
+        n = os.path.join(self.storage.path, self.new_file)
+        if o == n:
+            return
         
+        op, oe = o.rsplit(".",1)
+        np, ne = n.rsplit(".",1)
+
+        if op != np and oe == ne:
+            self.set_status("Moving")
+            os.rename(o, n)
+            return
+        
+        if oe != ne:
+            self.set_status("Converting")
+            if not ne in {"st", "safetensors"}:
+                raise ValueError(f"unsuported checkpoint type: {ne}. supported types are: safetensors, st")
+            if oe != "st":
+                state_dict = convert.convert_checkpoint(o)
+            else:
+                state_dict = safetensors.torch.load_file(o)
+
+            if ne == "safetensors":
+                model_type = ''.join([chr(c) for c in state_dict["metadata.model_type"]])
+                state_dict = convert.revert(model_type, state_dict)
+
+            safetensors.torch.save_file(state_dict, n)
+            os.remove(o)
+        
+
     def build(self):
         self.set_status("Building")
                 
@@ -701,6 +741,3 @@ class GenerationParameters():
         self.set_status(f"Saving")
         filename = os.path.join(self.storage.path, "SD", self.filename)
         safetensors.torch.save_file(model, filename)
-
-        if not self.callback({"type": "done", "data": {}}):
-            raise RuntimeError("Aborted")
