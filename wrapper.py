@@ -645,6 +645,10 @@ class GenerationParameters():
         if o == n:
             return
         
+        if not self.new_file:
+            os.remove(o)
+            return
+        
         op, oe = o.rsplit(".",1)
         np, ne = n.rsplit(".",1)
 
