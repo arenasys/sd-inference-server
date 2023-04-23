@@ -2,6 +2,13 @@ import torch
 import inspect
 import os
 
+def relative_file(file):
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), file)
+
+ATTACH_KEYS = set()
+with open(relative_file(os.path.join("mappings", "HN_attach.txt")), "r") as f:
+    ATTACH_KEYS = set([l.strip() for l in f.readlines()])
+
 # adapted from AUTOs HN code https://github.com/AUTOMATIC1111/stable-diffusion-webui/blob/master/modules/hypernetworks/hypernetwork.py
 
 class HypernetworkModule(torch.nn.Module):
@@ -112,6 +119,9 @@ class Hypernetwork(torch.nn.Module):
 
     def attach(self, model):
         for name, module in model.modules.items():
+            if not name in ATTACH_KEYS:
+                continue
+
             if name.endswith("to_k"):
                 suffix = "_0"
             elif name.endswith("to_v"):

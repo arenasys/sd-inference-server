@@ -350,11 +350,10 @@ class AdditionalNetworks():
     def hijack_model(self, model, prefix, targets):
         modules = {}
         for module_name, module in model.named_modules():
-            if module.__class__.__name__ in targets:
-                for child_name, child_module in module.named_modules():
-                    child_class = child_module.__class__.__name__
-                    if child_class == "Linear" or (child_class == "Conv2d" and child_module.kernel_size == (1, 1)):
-                        name = (prefix + '.' + module_name + '.' + child_name).replace('.', '_')
-                        modules[name] = AdditionalNetworks.AdditionalModule(self, name, child_module)
-                        child_module.forward = modules[name].forward
+            for child_name, child_module in module.named_modules():
+                child_class = child_module.__class__.__name__
+                if child_class == "Linear" or child_class == "Conv2d":
+                    name = (prefix + '.' + module_name + '.' + child_name).replace('.', '_')
+                    modules[name] = AdditionalNetworks.AdditionalModule(self, name, child_module)
+                    child_module.forward = modules[name].forward
         return modules

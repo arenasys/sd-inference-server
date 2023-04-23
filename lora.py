@@ -31,7 +31,10 @@ class LoRAModule(torch.nn.Module):
         self.register_buffer("dim", torch.tensor(lora_down.shape[0]), False)
 
     def forward(self, x):
-        return self.lora_up(self.lora_down(x)) * (self.alpha / self.dim)
+        if type(self.lora_up) == torch.nn.Linear:
+            return x @ self.lora_down.weight.T @ self.lora_up.weight.T * (self.alpha / self.dim)
+        else:
+            return self.lora_up(self.lora_down(x)) * (self.alpha / self.dim)
 
 class LoRANetwork(torch.nn.Module):
     def __init__(self, name, state_dict) -> None:
