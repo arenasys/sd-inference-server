@@ -27,13 +27,13 @@ def img2img(latents, denoiser, sampler, noise, steps, do_exact_steps, strength, 
     schedule = sampler.scheduler.get_truncated_schedule(steps, scheduled_steps)
 
     latents = latents.to(denoiser.unet.dtype) * 0.18215
-    latents = sampler.prepare_latents(latents, noise(), schedule)
 
-    iter = tqdm.trange(steps)
-    for i in iter:
+    if scheduled_steps != 0:
+        latents = sampler.prepare_latents(latents, noise(), schedule)
+        iter = tqdm.trange(steps)
+        for i in iter:
+            callback(iter.format_dict)
+            denoiser.set_step(i)
+            latents = sampler.step(latents, schedule, i, noise)
         callback(iter.format_dict)
-        denoiser.set_step(i)
-        latents = sampler.step(latents, schedule, i, noise)
-        
-    callback(iter.format_dict)
     return latents / 0.18215
