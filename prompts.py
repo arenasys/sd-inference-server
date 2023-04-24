@@ -1,4 +1,5 @@
 import lark
+import re
 import torch
 
 class WeightedTree(lark.Tree):
@@ -96,13 +97,16 @@ def parse_prompt(prompt, steps, HR=False):
 def tokenize_prompt(clip, parsed):
     tokenizer = clip.tokenizer
     comma_token = tokenizer.comma_token_id
+    break_token = tokenizer.break_token_id
 
     # chunking sizes
     chunk_size = 75
     leeway = 20 
 
+    # replace capitalized break with our break token
+    text = [re.sub(r'BREAK[\.,\s]', '~~~ ', text) for text, _ in parsed]
+
     # tokenize prompt and split it into chunks
-    text = [text for text, _ in parsed]
     if not text:
         text = ['']
     tokenized = tokenizer(text)["input_ids"]
@@ -130,13 +134,16 @@ def tokenize_prompt(clip, parsed):
     # split tokens into chunks
     chunks = []
     while tokenized:
-        if len(tokenized) <= chunk_size:
-            chunk = tokenized
-        else:
-            chunk = tokenized[:chunk_size]
+        chunk = tokenized[:min(len(tokenized), chunk_size)]
 
+        breaks = [i for i, (c, _) in enumerate(chunk) if type(c) == int and c == break_token]
+        commas = [i for i, (c, _) in enumerate(chunk) if type(c) == int and c == comma_token and i > chunk_size - leeway]
+        if breaks:
+            # split on the first break and remove it from the prompt
+            chunk = tokenized[:breaks[0]]
+            del tokenized[breaks[0]]
+        elif commas and len(tokenized) > chunk_size:
             # split on a comma if its close to the end of the chunk
-            commas = [i for i, (c, _) in enumerate(chunk) if type(c) == int and c == comma_token and i > chunk_size - leeway]
             if commas:
                 chunk = tokenized[:commas[-1]+1]
 

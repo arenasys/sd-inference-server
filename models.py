@@ -257,6 +257,7 @@ class Tokenizer():
         self.eos_token_id = 49407
         self.pad_token_id = self.eos_token_id if model_type == "SDv1" else 0
         self.comma_token_id = 267
+        self.break_token_id = 32472
 
     def __call__(self, texts):
         return self.tokenizer(texts)
