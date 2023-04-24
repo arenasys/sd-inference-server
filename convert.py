@@ -7,8 +7,13 @@ import torch
 import safetensors.torch
 
 import psutil
+import platform
+IS_WIN = platform.system() == 'Windows'
 
 def has_handle(fpath):
+    if IS_WIN:
+        return False
+    
     for proc in psutil.process_iter():
         try:
             for item in proc.open_files():
