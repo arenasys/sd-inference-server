@@ -55,15 +55,9 @@ CROSS_ATTENTION = {
     "Split v1": attention.use_split_attention_v1,
     "Split v2": attention.use_split_attention,
     "Flash": attention.use_flash_attention,
-    "xFormers": attention.use_xformers_attention
+    "Diffusers": attention.use_diffusers_attention,
+    "xFormers": attention.use_xformers_attention,
 }
-
-HAVE_XFORMERS = False
-try:
-    import xformers
-    HAVE_XFORMERS = True
-except Exception:
-    pass
 
 def format_float(x):
     return f"{x:.4f}".rstrip('0').rstrip('.')
@@ -615,9 +609,9 @@ class GenerationParameters():
 
         data["hr_upscaler"] = list(UPSCALERS_LATENT.keys()) + list(UPSCALERS_PIXEL.keys()) + data["SR"]
         data["img2img_upscaler"] = list(UPSCALERS_PIXEL.keys()) + list(UPSCALERS_LATENT.keys()) + data["SR"]
-        data["attention"] = list(CROSS_ATTENTION.keys())
-        if not HAVE_XFORMERS:
-            data["attention"].remove("xFormers")
+
+        available = attention.get_available()
+        data["attention"] = [k for k,v in CROSS_ATTENTION.items() if v in available]
         data["TI"] = list(self.storage.embeddings_files.keys())
         data["device"] = self.device_names
 

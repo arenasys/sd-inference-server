@@ -3,6 +3,48 @@ import einops
 import math
 import diffusers
 
+HAVE_XFORMERS = False
+try:
+    import xformers
+    HAVE_XFORMERS = True
+except Exception:
+    pass
+
+ORIGINAL_FORWARD = None
+try:
+    ORIGINAL_FORWARD = diffusers.models.attention_processor.Attention.forward
+except:
+    pass
+try:
+    ORIGINAL_FORWARD = diffusers.models.attention.CrossAttention.forward
+except:
+    pass
+
+def set_attention(forward):
+    try:
+        diffusers.models.attention_processor.Attention.forward = forward
+        return
+    except:
+        pass
+    try:
+        diffusers.models.attention.CrossAttention.forward = forward
+        return
+    except:
+        pass
+    raise ValueError("failed to find attention forward")
+
+def get_available():
+    available = [
+        use_optimized_attention,
+        use_split_attention_v1,
+        use_split_attention,
+        use_flash_attention,
+        use_diffusers_attention
+    ]
+    if HAVE_XFORMERS:
+        available += [use_xformers_attention]
+    return available
+
 def use_optimized_attention(device):
     if "cuda" in str(device):
         try:
@@ -11,6 +53,9 @@ def use_optimized_attention(device):
             use_split_attention(device)
     else:
        use_split_attention_v1(device)
+
+def use_diffusers_attention(device):
+    set_attention(ORIGINAL_FORWARD)
     
 def exists(val):
     return val is not None
@@ -94,7 +139,7 @@ def use_split_attention(device):
 
         return out
 
-    diffusers.models.attention.CrossAttention.forward = split_cross_attention_forward
+    set_attention(split_cross_attention_forward)
 
 def use_split_attention_v1(device):
     def split_cross_attention_forward_v1(self, x, encoder_hidden_states=None, attention_mask=None):
@@ -150,7 +195,7 @@ def use_split_attention_v1(device):
 
         return out
 
-    diffusers.models.attention.CrossAttention.forward = split_cross_attention_forward_v1
+    set_attention(split_cross_attention_forward_v1)
 
 EPSILON = 1e-6
 
@@ -260,12 +305,13 @@ def use_flash_attention(device):
         out = self.to_out[1](out)
         return out
 
-    diffusers.models.attention.CrossAttention.forward = forward_flash_attn
+    set_attention(forward_flash_attn)
 
 def use_xformers_attention(device):
     if not "cuda" in str(device):
         raise RuntimeError("XFormers attention does not support CPU generation")
-    import xformers
+    if not HAVE_XFORMERS:
+        raise RuntimeError("XFormers not installed")
 
     def xformers_attention_forward(self, x, encoder_hidden_states=None, attention_mask=None):
         h = self.heads
@@ -290,4 +336,4 @@ def use_xformers_attention(device):
         out = self.to_out[1](out)
         return out
     
-    diffusers.models.attention.CrossAttention.forward = xformers_attention_forward
+    set_attention(xformers_attention_forward)
