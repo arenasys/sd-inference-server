@@ -192,7 +192,7 @@ def convert_checkpoint(in_file):
         yaml_file = os.path.join(os.path.dirname(in_file), name + ".yaml")
         if os.path.exists(yaml_file):
             import yaml
-            with open(yaml_file, "r") as f:
+            with open(yaml_file, "r", encoding='utf-8') as f:
                 prediction_type = yaml.safe_load(f)["model"]["params"].get("parameterization", "epsilon")
         else:
             print("NO YAML FOUND, ASSUMING", prediction_type, "PREDICTION")
@@ -228,7 +228,7 @@ def convert_diffusers_folder(in_folder, out_folder):
     clip_path = os.path.join(in_folder, "text_encoder")
     scheduler_file = os.path.join(in_folder, "scheduler", "scheduler_config.json")
 
-    with open(scheduler_file, "r") as f:
+    with open(scheduler_file, "r", encoding='utf-8') as f:
         prediction_type = json.load(f)["prediction_type"]
 
     unet = UNet2DConditionModel.from_pretrained(unet_path)
