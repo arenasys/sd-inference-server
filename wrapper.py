@@ -16,6 +16,7 @@ import upscalers
 import inference
 import convert
 import attention
+import controlnet
 
 DEFAULTS = {
     "strength": 0.75, "sampler": "Euler a", "clip_skip": 1, "eta": 1,
@@ -125,7 +126,7 @@ class GenerationParameters():
 
     def set(self, **kwargs):
         for key, value in kwargs.items():
-            if key == "image":
+            if key == "image" or key == "cn_image":
                 for i in range(len(value)):
                     if type(value[i]) == bytes or type(value[i]) == bytearray:
                         value[i] = PIL.Image.open(io.BytesIO(value[i]))
@@ -168,8 +169,13 @@ class GenerationParameters():
             self.vae_name = self.vae or self.model
             self.set_status("Loading VAE")
             self.vae = self.storage.get_vae(self.vae_name, self.device)
-
+        
         self.storage.clear_file_cache()
+        
+        self.storage.enforce_network_limit(self.cn or [], "CN")
+        if self.cn:
+            self.set_status("Loading ControlNet")
+            self.cn = [self.storage.get_controlnet(cn, self.device) for cn in self.cn]
 
         if self.hr_upscaler:
             if not self.hr_upscaler in UPSCALERS_LATENT and not self.hr_upscaler in UPSCALERS_PIXEL:
@@ -432,6 +438,11 @@ class GenerationParameters():
         batch_size = self.get_batch_size()
 
         device = self.unet.device
+
+        if self.cn and self.cn_image and self.cn_proc and self.cn_scale:
+            self.unet = controlnet.ControlledUNET(self.unet, self.cn)
+            self.unet.set_controlnet_conditioning(self.cn_image, self.cn_proc, self.cn_scale)
+
         seeds, subseeds = self.get_seeds(batch_size)
         
         self.current_step = 0
@@ -504,6 +515,11 @@ class GenerationParameters():
         batch_size = self.get_batch_size()
 
         device = self.unet.device
+
+        if self.cn and self.cn_image and self.cn_proc and self.cn_scale:
+            self.unet = controlnet.ControlledUNET(self.unet, [self.cn])
+            self.unet.set_controlnet_conditioning(self.cn_image, self.cn_proc, self.cn_scale)
+
         seeds, subseeds = self.get_seeds(batch_size)
 
         (images,) = self.listify(self.image)

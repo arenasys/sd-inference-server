@@ -2,7 +2,7 @@ torch==2.0.0
 torchvision==0.15.1
 cryptography==38.0.1
 basicsr==1.4.2
-diffusers==0.12.1
+diffusers==0.15.1
 einops==0.6.0
 k_diffusion==0.0.12
 lark==1.1.5
@@ -14,3 +14,4 @@ transformers==4.26.0
 websockets==11.0
 bson==0.5.10
 mega.py==1.0.8
+pytorch-lightning==1.7.6

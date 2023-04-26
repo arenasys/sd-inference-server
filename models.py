@@ -6,6 +6,7 @@ from transformers import CLIPTextConfig, CLIPTokenizer
 from clip import CustomCLIP
 from diffusers import AutoencoderKL, UNet2DConditionModel
 from diffusers.models.vae import DiagonalGaussianDistribution
+from diffusers.models.controlnet import ControlNetModel
 from lora import LoRANetwork
 from hypernetwork import Hypernetwork
 from unet import UNET as SDUNET
@@ -58,9 +59,6 @@ class UNET(UNet2DConditionModel):
         super().__init__(**UNET.get_config(model_type))
         self.to(dtype)
         self.additional = None
-
-    def autocast(self):
-        return "cuda" if "cuda" in str(self.device) else "cpu"
         
     @staticmethod
     def from_model(name, state_dict, dtype=None):
@@ -117,9 +115,6 @@ class VAE(AutoencoderKL):
         super().__init__(**VAE.get_config(model_type))
         self.enable_slicing()
         self.to(dtype)
-    
-    def autocast(self):
-        return "cuda" if "cuda" in str(self.device) else "cpu"
 
     class LatentDistribution(DiagonalGaussianDistribution):
         def sample(self, noise):
@@ -172,9 +167,6 @@ class CLIP(CustomCLIP):
 
         self.tokenizer = Tokenizer(model_type)
         self.additional = None
-        
-    def autocast(self):
-        return "cuda" if "cuda" in str(self.device) else "cpu"
         
     @staticmethod
     def from_model(name, state_dict, dtype=None):
@@ -358,3 +350,31 @@ class AdditionalNetworks():
                     modules[name] = AdditionalNetworks.AdditionalModule(self, name, child_module)
                     child_module.forward = modules[name].forward
         return modules
+    
+class ControlNet(ControlNetModel):
+    def __init__(self, model_type, dtype):
+        self.preprocessor = lambda x: x
+        self.model_type = model_type
+        super().__init__(**ControlNet.get_config(model_type))
+        self.to(dtype)
+        
+    @staticmethod
+    def from_model(name, state_dict, dtype=None):
+        utils.cast_state_dict(state_dict, dtype)
+        
+        with utils.DisableInitialization():
+            cn = ControlNet("CN-v1-CANNY", dtype)
+            missing, _ = cn.load_state_dict(state_dict, strict=False)
+        if missing:
+            raise ValueError("missing keys: " + missing)
+        return cn
+
+    @staticmethod
+    def get_config(model_type):
+        if model_type == "CN-v1-CANNY":
+            config = dict(
+                cross_attention_dim=768
+            )
+        else:
+            raise ValueError(f"unknown type: {model_type}")
+        return config

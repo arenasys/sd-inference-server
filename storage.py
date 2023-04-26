@@ -15,7 +15,7 @@ class ModelStorage():
         self.path = None
         self.set_folder(path)
 
-        self.classes = {"UNET": models.UNET, "CLIP": models.CLIP, "VAE": models.VAE, "SR": upscalers.SR, "LoRA": models.LoRA, "HN": models.HN}
+        self.classes = {"UNET": models.UNET, "CLIP": models.CLIP, "VAE": models.VAE, "SR": upscalers.SR, "LoRA": models.LoRA, "HN": models.HN, "CN": models.ControlNet}
         self.vram_limits = {"UNET": 1, "CLIP": 1, "VAE": 1, "SR": 1}
         self.total_limits = {"UNET": 1, "CLIP": 1, "VAE": 1, "SR": 1}
 
@@ -36,7 +36,8 @@ class ModelStorage():
                         "SR": ["SR", "ESRGAN", "RealESRGAN"], 
                         "TI": ["TI", os.path.join("..", "embeddings")], 
                         "LoRA": ["LoRA"], 
-                        "HN": ["HN", "hypernetworks"]}
+                        "HN": ["HN", "hypernetworks"],
+                        "CN": ["CN"]}
             
     def get_models(self, folder, ext):
         files = []
@@ -171,6 +172,10 @@ class ModelStorage():
             name = self.get_name(file)
             self.files["HN"][name] = file
 
+        for file in self.get_models("CN", ["*.safetensors"]):
+            name = self.get_name(file)
+            self.files["CN"][name] = file
+
     def get_component(self, name, comp, device):
         if name in self.loaded[comp]:
             return self.move(self.loaded[comp][name], name, comp, device)
@@ -235,6 +240,13 @@ class ModelStorage():
                 name = hn
                 break
         return self.get_component(name, "HN", device)
+
+    def get_controlnet(self, name, device):
+        for cn in self.files["CN"]:
+            if os.path.sep + name + "." in cn:
+                name = cn
+                break
+        return self.get_component(name, "CN", device)
 
     def load_file(self, file, comp):
         print(f"LOADING {file.rsplit(os.path.sep, 1)[-1]}...")
