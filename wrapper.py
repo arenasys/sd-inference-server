@@ -315,7 +315,7 @@ class GenerationParameters():
                 batch_size = max(batch_size, len(i))
         return batch_size
     
-    def get_metadata(self, mode, width, height, batch_size, prompts, seeds=None, subseeds=None):
+    def get_metadata(self, mode, width, height, batch_size, prompts=None, seeds=None, subseeds=None):
         metadata = []
 
         for i in range(batch_size):
@@ -464,6 +464,10 @@ class GenerationParameters():
         self.attach_networks(conditioning.get_all_networks())
         conditioning.encode()
 
+        if self.vram_usage:
+            self.storage.unload(self.vae)
+            self.storage.unload(self.clip)
+
         denoiser = guidance.GuidedDenoiser(self.unet, conditioning, self.scale)
         noise = utils.NoiseSchedule(seeds, subseeds, self.width // 8, self.height // 8, device, self.unet.dtype)
         sampler = SAMPLER_CLASSES[self.sampler](denoiser, self.eta)
@@ -471,10 +475,16 @@ class GenerationParameters():
         self.set_status("Generating")
         latents = inference.txt2img(denoiser, sampler, noise, self.steps, self.on_step)
 
+        if self.vram_usage:
+            self.storage.unload(self.unet)
+            self.storage.load(self.vae, self.device)
+
         if not self.hr_factor:
             self.set_status("Decoding")
             images = utils.decode_images(self.vae, latents)
             self.on_complete(images, metadata)
+            if self.vram_usage:
+                self.storage.unload(self.vae)
             return images
 
         width = int(self.width * self.hr_factor)
@@ -482,10 +492,16 @@ class GenerationParameters():
 
         noise = utils.NoiseSchedule(seeds, subseeds, width // 8, height // 8, device, self.unet.dtype)
 
+        if self.vram_usage:
+            self.storage.load(self.clip, self.device)
+
         area = utils.preprocess_areas(self.area, width, height)
         conditioning.switch_to_HR(hr_steps, area)
         self.attach_networks(conditioning.get_all_networks())
         conditioning.encode()
+
+        if self.vram_usage:
+            self.storage.unload(self.clip, self.device)
 
         denoiser.reset()
         sampler = SAMPLER_CLASSES[self.hr_sampler](denoiser, self.hr_eta)
@@ -493,12 +509,23 @@ class GenerationParameters():
         self.set_status("Upscaling")
         latents = self.upscale_latents(latents, self.hr_upscaler, width, height, seeds)
 
+        if self.vram_usage:
+            self.storage.unload(self.vae, self.device)
+
         self.set_status("Generating")
         latents = inference.img2img(latents, denoiser, sampler, noise, hr_steps, True, self.hr_strength, self.on_step)
+
+        if self.vram_usage:
+            self.storage.unload(self.unet)
+            self.storage.load(self.vae, self.device)
 
         self.set_status("Decoding")
         images = utils.decode_images(self.vae, latents)
         self.on_complete(images, metadata)
+
+        if self.vram_usage:
+            self.storage.unload(self.vae)
+
         return images
 
     @torch.inference_mode()
@@ -517,7 +544,7 @@ class GenerationParameters():
         device = self.unet.device
 
         if self.cn and self.cn_image and self.cn_proc and self.cn_scale:
-            self.unet = controlnet.ControlledUNET(self.unet, [self.cn])
+            self.unet = controlnet.ControlledUNET(self.unet, self.cn)
             self.unet.set_controlnet_conditioning(self.cn_image, self.cn_proc, self.cn_scale)
 
         seeds, subseeds = self.get_seeds(batch_size)

@@ -95,6 +95,20 @@ class ModelStorage():
             else:
                 del self.loaded[comp][m]
 
+    def load(self, model, device):
+        model.to(device)
+
+    def unload(self, model):
+        model.to("cpu")
+        torch.cuda.empty_cache()
+
+    def load(self, model, device):
+        model.to(device)
+
+    def unload(self, model):
+        model.to("cpu")
+        torch.cuda.empty_cache()
+
     def move(self, model, name, comp, device):
         dtype = self.dtype
         if comp in {"VAE"}:
