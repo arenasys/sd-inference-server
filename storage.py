@@ -32,7 +32,7 @@ class ModelStorage():
         if path != self.path:
             self.clear_file_cache()
         self.path = path
-        self.folders = {"SD": ["SD", "Stable-diffusion"],
+        self.folders = {"SD": ["SD", "Stable-diffusion", "VAE"],
                         "SR": ["SR", "ESRGAN", "RealESRGAN"], 
                         "TI": ["TI", "embeddings", os.path.join("..", "embeddings")], 
                         "LoRA": ["LoRA"], 
