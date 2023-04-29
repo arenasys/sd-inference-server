@@ -5,6 +5,7 @@ import random
 import io
 import os
 import safetensors.torch
+import time
 
 import prompts
 import samplers_k
@@ -142,12 +143,15 @@ class GenerationParameters():
     def on_complete(self, images, metadata):
         if self.callback:
             self.set_status("Fetching")
+            print("A", time.time())
             images_data = []
             for i in images:
                 bytesio = io.BytesIO()
                 i.save(bytesio, format='PNG')
                 images_data += [bytesio.getvalue()]
+            print("B", time.time())
             self.callback({"type": "result", "data": {"images": images_data, "metadata": metadata}})
+            print("C", time.time())
             
     def reset(self):
         for attr in list(self.__dict__.keys()):
