@@ -106,7 +106,8 @@ class GenerationParameters():
         
         progress = {"current": step, "total": total, "rate": rate, "remaining": remaining}
         
-        if self.show_preview:
+        interval = int(self.preview_interval or 0)
+        if self.show_preview and step % interval == 0:
             if self.show_preview == "Full":
                 images = preview.full_preview(latents / 0.18215, self.vae)
             elif self.show_preview == "Medium":
