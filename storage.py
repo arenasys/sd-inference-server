@@ -34,7 +34,7 @@ class ModelStorage():
         self.path = path
         self.folders = {"SD": ["SD", "Stable-diffusion"],
                         "SR": ["SR", "ESRGAN", "RealESRGAN"], 
-                        "TI": ["TI", os.path.join("..", "embeddings")], 
+                        "TI": ["TI", "embeddings", os.path.join("..", "embeddings")], 
                         "LoRA": ["LoRA"], 
                         "HN": ["HN", "hypernetworks"],
                         "CN": ["CN"]}
