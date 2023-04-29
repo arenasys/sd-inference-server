@@ -306,17 +306,13 @@ class Server():
         try:
             while not self.stopping:
                 if not self.clients[client_id].empty():
-                    print("F", time.time())
                     id, response = self.clients[client_id].get()
-                    print("G", time.time())
                     if id in mapping: id = mapping[id]
                     response["id"] = id
                     data = bson.dumps(response)
                     data = base64.urlsafe_b64decode(self.scheme.encrypt(data))
                     data = [data[i:min(i+FRAGMENT_SIZE,len(data))] for i in range(0, len(data), FRAGMENT_SIZE)]
-                    print("H", time.time())
                     connection.send(data)
-                    print("I", time.time())
                 else:
                     data = None
                     try:
@@ -373,13 +369,11 @@ class Server():
         print(f"SERVER: client disconnected")
 
     def on_response(self, id, response):
-        print("D", time.time())
         if self.stopping:
             return False
         if id in self.requests:
             client = self.requests[id]
             if client in self.clients:
-                print("E", time.time())
                 self.clients[client].put((id, response))
                 return True
             else:
