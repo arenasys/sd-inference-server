@@ -82,6 +82,7 @@ def get_masks(device, masks):
 
 def apply_inpainting(images, originals, masks, extents):
     outputs = [None] * len(images)
+    masked = [None] * len(images)
     for i in range(len(images)):
         image = images[i]
         original = originals[i%len(originals)]
@@ -89,17 +90,22 @@ def apply_inpainting(images, originals, masks, extents):
         extent = extents[i%len(extents)]
         x1,y1,x2,y2 = extent
 
+        image = image.convert("RGBA")
+        mask = mask.convert("L")
+
+        masked[i] = image.copy()
+        masked[i].putalpha(mask)
+
         ew, eh = x2-x1, y2-y1
         if (ew, eh) != images[i].size:
             image = image.resize((ew, eh))
             mask = mask.resize((ew, eh))
-        
+
         outputs[i] = original.copy()
+        outputs[i].paste(image, extent, mask)
+    return outputs, masked
 
-        outputs[i].paste(image.convert("RGBA"), extent, mask.convert("L"))
-    return outputs
-
-def prepare_inpainting(originals, masks, padding, width, height):
+def get_extents(originals, masks, padding, width, height):
     def pad_extent(extent, p, src, wrk):
         wrk_w, wrk_h = wrk
         src_w, src_h = src
@@ -147,28 +153,24 @@ def prepare_inpainting(originals, masks, padding, width, height):
             y2 = src_h
 
         return int(x1), int(y1), int(x2), int(y2)
-
+    
     w, h = originals[0].size[0], originals[0].size[1]
-    if padding != None:
-        extents = [pad_extent(mask.getbbox(), padding, (w,h), (width, height)) for mask in masks]
-    else:
-        extents = [pad_extent(mask.getbbox(), 10240, (w,h), (width, height)) for mask in masks]
+    
+    if not masks:
+        return [(0,0,w,h) for o in originals]
+    
+    if not padding:
+        padding = 10240
+ 
+    extents = [pad_extent(mask.getbbox(), padding, (w,h), (width, height)) for mask in masks]
+    return extents
 
-    # crop masks according to their extent
-    masks = [m for m in masks]
-    for i in range(len(masks)):
+def apply_extents(inputs, extents):
+    outputs = [None for i in inputs]
+    for i in range(len(inputs)):
         extent = extents[i]
-        if extent != (0,0,w,h):
-            masks[i] = masks[i].crop(extent)
-
-    # crop images according to their extent
-    images = [i for i in originals]
-    for i in range(len(images)):
-        extent = extents[i%len(extents)]
-        if extent != (0,0,w,h):
-            images[i] = images[i].crop(extent)
-
-    return images, masks, extents
+        outputs[i] = inputs[i].crop(extent)
+    return outputs
 
 def cast_state_dict(state_dict, dtype):
     for k in state_dict:

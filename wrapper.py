@@ -105,7 +105,26 @@ class GenerationParameters():
         progress = {"current": step, "total": total, "rate": rate, "remaining": remaining}
 
         self.set_progress(progress)
-    
+
+    def on_artifact(self, name, images):
+        if self.callback:
+            if type(images[0]) == list:
+                for j in range(len(images[0])):
+                    images_set = [img[j] for img in images]
+                    images_data = []
+                    for i in images_set:
+                        bytesio = io.BytesIO()
+                        i.save(bytesio, format='PNG')
+                        images_data += [bytesio.getvalue()]
+                    self.callback({"type": "artifact", "data": {"name": f"{name} {j+1}", "images": images_data}})
+            else:
+                images_data = []
+                for i in images:
+                    bytesio = io.BytesIO()
+                    i.save(bytesio, format='PNG')
+                    images_data += [bytesio.getvalue()]
+                self.callback({"type": "artifact", "data": {"name": name, "images": images_data}})
+        
     def on_complete(self, images, metadata):
         if self.callback:
             self.set_status("Fetching")
@@ -258,9 +277,9 @@ class GenerationParameters():
             latents = upscalers.upscale(latents, UPSCALERS_LATENT[mode], width//8, height//8)
 
             if type(latents) == list:
-                return torch.stack(latents)
-            else:
-                return latents
+                latents = torch.stack(latents)
+
+            return latents, None
         
         if mode in UPSCALERS_PIXEL:
             images = upscalers.upscale(images, UPSCALERS_PIXEL[mode], width, height)
@@ -269,7 +288,7 @@ class GenerationParameters():
 
         self.set_status("Encoding")
         latents = utils.get_latents(vae, seeds, images)
-        return latents
+        return latents, images
 
     def get_seeds(self, batch_size):
         (seeds,) = self.listify(self.seed)
@@ -424,6 +443,13 @@ class GenerationParameters():
         self.unet.additional.clear()
         self.clip.additional.clear()
 
+    def prepare_images(self, inputs, extents, width, height):
+        if not inputs:
+            return inputs
+        outputs = utils.apply_extents(inputs, extents)
+        outputs = upscalers.upscale(outputs, transforms.InterpolationMode.NEAREST, width, height)
+        return outputs
+
     @torch.inference_mode()
     def txt2img(self):
         self.set_status("Loading")
@@ -436,12 +462,14 @@ class GenerationParameters():
         self.check_parameters(required, optional)
 
         batch_size = self.get_batch_size()
-
         device = self.unet.device
 
-        if self.cn and self.cn_image and self.cn_proc and self.cn_scale:
+        if self.cn:
             self.unet = controlnet.ControlledUNET(self.unet, self.cn)
-            self.unet.set_controlnet_conditioning(self.cn_image, self.cn_proc, self.cn_scale)
+            cn_cond, cn_outputs = controlnet.preprocess_control(self.cn_image, self.cn_proc, self.cn_scale)
+            if self.keep_artifacts:
+                self.on_artifact("Control", cn_outputs)
+            self.unet.set_controlnet_conditioning(cn_cond)
 
         seeds, subseeds = self.get_seeds(batch_size)
         
@@ -458,13 +486,18 @@ class GenerationParameters():
 
         metadata = self.get_metadata("txt2img", self.width, self.height, batch_size, self.prompt, seeds, subseeds)
 
-        area = utils.preprocess_areas(self.area, self.width, self.height)
+        if self.area:
+            if self.keep_artifacts:
+                self.on_artifact("Area", self.area)
+            area = utils.preprocess_areas(self.area, self.width, self.height)
+        else:
+            area = []
 
         conditioning = prompts.BatchedConditioningSchedules(self.clip, self.prompt, self.steps, self.clip_skip, area)
         self.attach_networks(conditioning.get_all_networks())
         conditioning.encode()
 
-        if self.vram_usage:
+        if self.minimal_vram:
             self.storage.unload(self.vae)
             self.storage.unload(self.clip)
 
@@ -475,7 +508,7 @@ class GenerationParameters():
         self.set_status("Generating")
         latents = inference.txt2img(denoiser, sampler, noise, self.steps, self.on_step)
 
-        if self.vram_usage:
+        if self.minimal_vram:
             self.storage.unload(self.unet)
             self.storage.load(self.vae, self.device)
 
@@ -483,39 +516,53 @@ class GenerationParameters():
             self.set_status("Decoding")
             images = utils.decode_images(self.vae, latents)
             self.on_complete(images, metadata)
-            if self.vram_usage:
+            if self.minimal_vram:
                 self.storage.unload(self.vae)
             return images
+        
+        if self.keep_artifacts:
+            images = utils.decode_images(self.vae, latents)
+            self.on_artifact("Base", images)
 
         width = int(self.width * self.hr_factor)
         height = int(self.height * self.hr_factor)
 
-        noise = utils.NoiseSchedule(seeds, subseeds, width // 8, height // 8, device, self.unet.dtype)
+        area = utils.preprocess_areas(self.area, width, height)
 
-        if self.vram_usage:
+        if self.minimal_vram:
             self.storage.load(self.clip, self.device)
 
-        area = utils.preprocess_areas(self.area, width, height)
         conditioning.switch_to_HR(hr_steps, area)
         self.attach_networks(conditioning.get_all_networks())
         conditioning.encode()
 
-        if self.vram_usage:
-            self.storage.unload(self.clip, self.device)
+        if self.minimal_vram:
+            self.storage.unload(self.clip)
 
         denoiser.reset()
         sampler = SAMPLER_CLASSES[self.hr_sampler](denoiser, self.hr_eta)
+        noise = utils.NoiseSchedule(seeds, subseeds, width // 8, height // 8, device, self.unet.dtype)
 
         self.set_status("Upscaling")
         latents = self.upscale_latents(latents, self.hr_upscaler, width, height, seeds)
 
-        if self.vram_usage:
-            self.storage.unload(self.vae, self.device)
+        if self.keep_artifacts:
+            images = utils.decode_images(self.vae, latents)
+            self.on_artifact("Upscaled", images)
+
+        if self.minimal_vram:
+            self.storage.unload(self.vae)
+            self.storage.load(self.unet, self.device)
+
+        if self.cn:
+            self.cn_image = upscalers.upscale(self.cn_image, transforms.InterpolationMode.NEAREST, width, height)
+            cn_cond, cn_outputs = controlnet.preprocess_control(self.cn_image, self.cn_proc, self.cn_scale)
+            self.unet.set_controlnet_conditioning(cn_cond)
 
         self.set_status("Generating")
         latents = inference.img2img(latents, denoiser, sampler, noise, hr_steps, True, self.hr_strength, self.on_step)
 
-        if self.vram_usage:
+        if self.minimal_vram:
             self.storage.unload(self.unet)
             self.storage.load(self.vae, self.device)
 
@@ -523,7 +570,7 @@ class GenerationParameters():
         images = utils.decode_images(self.vae, latents)
         self.on_complete(images, metadata)
 
-        if self.vram_usage:
+        if self.minimal_vram:
             self.storage.unload(self.vae)
 
         return images
@@ -540,62 +587,85 @@ class GenerationParameters():
         self.check_parameters(required, optional)
 
         batch_size = self.get_batch_size()
-
         device = self.unet.device
+        images = self.image
+        masks = self.mask
+        width, height = self.width, self.height
 
-        if self.cn and self.cn_image and self.cn_proc and self.cn_scale:
-            self.unet = controlnet.ControlledUNET(self.unet, self.cn)
-            self.unet.set_controlnet_conditioning(self.cn_image, self.cn_proc, self.cn_scale)
-
-        seeds, subseeds = self.get_seeds(batch_size)
-
-        (images,) = self.listify(self.image)
+        extents = utils.get_extents(images, masks, self.padding, width, height)
         original_images = images
-
-        if self.mask:
-            (masks,) = self.listify(self.mask)
-
-        width, height = images[0].size
-        if self.width and self.height:
-            width, height = self.width, self.height
-
+        images = utils.apply_extents(images, extents)
+        masks = self.prepare_images(masks, extents, width, height)
+        seeds, subseeds = self.get_seeds(batch_size)
         metadata = self.get_metadata("img2img",  width, height, batch_size, self.prompt, seeds, subseeds)
 
-        area = utils.preprocess_areas(self.area, width, height)
+        if self.cn:
+            cn_images = self.prepare_images(self.cn_image, extents, width, height)
+            self.unet = controlnet.ControlledUNET(self.unet, self.cn)
+            cn_cond, cn_outputs = controlnet.preprocess_control(cn_images, self.cn_proc, self.cn_scale)
+            if self.keep_artifacts:
+                self.on_artifact("Control", cn_outputs)
+            self.unet.set_controlnet_conditioning(cn_cond)
+
+        if self.area:
+            self.area = [self.prepare_images(a, extents, width, height) for a in self.area]
+            if self.keep_artifacts:
+                self.on_artifact("Area", self.area)
+            self.area = utils.preprocess_areas(self.area, width, height)
+        else:
+            self.area = []
 
         self.current_step = 0
         self.total_steps = int(self.steps * self.strength) + 1
         
-        conditioning = prompts.BatchedConditioningSchedules(self.clip, self.prompt, self.steps, self.clip_skip, area)
+        conditioning = prompts.BatchedConditioningSchedules(self.clip, self.prompt, self.steps, self.clip_skip, self.area)
         self.attach_networks(conditioning.get_all_networks())
         conditioning.encode()
+
+        if self.minimal_vram:
+            self.storage.unload(self.clip)
 
         denoiser = guidance.GuidedDenoiser(self.unet, conditioning, self.scale)
         noise = utils.NoiseSchedule(seeds, subseeds, width // 8, height // 8, device, self.unet.dtype)
         sampler = SAMPLER_CLASSES[self.sampler](denoiser, self.eta)
 
-        if self.mask:
-            self.set_status("Preparing")
-            images, masks, extents = utils.prepare_inpainting(images, masks, self.padding, width, height)
-            masks = upscalers.upscale(masks, transforms.InterpolationMode.NEAREST, width, height)
-            masks = [mask.filter(PIL.ImageFilter.GaussianBlur(self.mask_blur)) for mask in masks]
-            mask_latents = utils.get_masks(device, masks)
-
         self.set_status("Upscaling")
-        latents = self.upscale_images(self.vae, images, self.img2img_upscaler, width, height, seeds)
+        latents, upscaled_images = self.upscale_images(self.vae, images, self.img2img_upscaler, width, height, seeds)
         original_latents = latents
 
+        if self.keep_artifacts:
+            if not upscaled_images:
+                upscaled_images = utils.decode_images(self.vae, latents)
+            self.on_artifact("Input", upscaled_images)
+
         if self.mask:
+            self.set_status("Preparing")
+            masks = [mask.filter(PIL.ImageFilter.GaussianBlur(self.mask_blur)) for mask in masks]
+            mask_latents = utils.get_masks(device, masks)
             denoiser.set_mask(mask_latents, original_latents)
+            if self.keep_artifacts:
+                self.on_artifact("Mask", masks)
+
+        if self.minimal_vram:
+            self.storage.unload(self.vae)
 
         self.set_status("Generating")
         latents = inference.img2img(latents, denoiser, sampler, noise, self.steps, False, self.strength, self.on_step)
 
+        if self.minimal_vram:
+            self.storage.unload(self.unet)
+            self.storage.load(self.vae, self.device)
+
         self.set_status("Decoding")
         images = utils.decode_images(self.vae, latents)
 
+        if self.minimal_vram:
+            self.storage.unload(self.vae)
+
         if self.mask:
-            images = utils.apply_inpainting(images, original_images, masks, extents)
+            images, masked = utils.apply_inpainting(images, original_images, masks, extents)
+            if self.keep_artifacts:
+                self.on_artifact("Output", masked)
 
         self.on_complete(images, metadata)
         return images
@@ -616,11 +686,11 @@ class GenerationParameters():
 
         batch_size = self.get_batch_size()
 
-        (images,) = self.listify(self.image)
+        images = self.image
         original_images = images
 
         if self.mask:
-            (masks,)= self.listify(self.mask)
+            masks = self.mask
 
         width, height = self.width, self.height
 
