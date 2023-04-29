@@ -13,6 +13,8 @@ class GuidedDenoiser():
         self.device = unet.device
         self.dtype = unet.dtype
 
+        self.predictions = None
+
         self.get_compositions()
 
     def get_compositions(self):
@@ -34,6 +36,7 @@ class GuidedDenoiser():
         if self.mask != None:
             noised_original = alpha.sqrt() * self.original + (1-alpha).sqrt() * noise()
             latents = (noised_original * self.mask) + (latents * (1 - self.mask))
+            self.predictions = latents
         return latents
     
     def get_model_inputs(self, latents):
@@ -83,6 +86,7 @@ class GuidedDenoiser():
     def mask_original(self, original_pred):
         if self.mask != None:
             original_pred = (self.original * self.mask) + (original_pred * (1 - self.mask))
+        self.predictions = original_pred
         return original_pred
 
     def predict_original(self, latents, timestep, sigma):

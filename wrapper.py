@@ -17,6 +17,7 @@ import inference
 import convert
 import attention
 import controlnet
+import preview
 
 DEFAULTS = {
     "strength": 0.75, "sampler": "Euler a", "clip_skip": 1, "eta": 1,
@@ -93,7 +94,7 @@ class GenerationParameters():
             if not self.callback({"type": "progress", "data": progress}):
                 raise RuntimeError("Aborted")
 
-    def on_step(self, progress):
+    def on_step(self, progress, latents):
         step = self.current_step
         total = self.total_steps
         rate = progress["rate"]
@@ -101,8 +102,21 @@ class GenerationParameters():
 
         if "n" in progress:
             self.current_step += 1
-
+        
         progress = {"current": step, "total": total, "rate": rate, "remaining": remaining}
+        
+        if self.show_preview:
+            if self.show_preview == "Full":
+                images = preview.full_preview(latents / 0.18215, self.vae)
+            elif self.show_preview == "Medium":
+                images = preview.model_preview(latents)
+            else:
+                images = preview.cheap_preview(latents)
+            for i in range(len(images)):
+                bytesio = io.BytesIO()
+                images[i].save(bytesio, format='PNG')
+                images[i] = bytesio.getvalue()
+            progress["previews"] = images
 
         self.set_progress(progress)
 

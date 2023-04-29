@@ -5,6 +5,7 @@ import torchvision.transforms as transforms
 TO_TENSOR = transforms.ToTensor()
 FROM_TENSOR = transforms.ToPILImage()
 
+
 def preprocess_images(images):
     def process(image):
         image = TO_TENSOR(image).to(torch.float32)
