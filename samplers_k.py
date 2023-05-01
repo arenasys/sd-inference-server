@@ -52,7 +52,9 @@ class KSampler():
 
     def predict(self, latents, sigma):
         timestep = self.scheduler.sigma_to_timestep(sigma)
-        return self.model.predict_original(latents, timestep, sigma)
+        original = self.model.predict_original(latents, timestep, sigma)
+        self.model.set_predictions(original)
+        return original
 
     def prepare_noise(self, noise, sigmas):
         return noise * sigmas[0]

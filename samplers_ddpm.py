@@ -64,6 +64,7 @@ class DDIM(DDPMSampler):
             sigma_t = self.eta * ((1 - a_prev) / (1 - a_t) * (1 - a_t / a_prev)).sqrt()
 
         pred_x0 = (x - (1-a_t).sqrt() * e_t) / a_t.sqrt()
+        self.model.set_predictions(pred_x0)
         dir_xt = (1.0 - a_prev - sigma_t**2).sqrt() * e_t
         x_prev = a_prev.sqrt() * pred_x0 + dir_xt + sigma_t * noise()
         return x_prev
@@ -110,7 +111,8 @@ class PLMS(DDPMSampler):
         elif len(self.old_eps) >= 3:
             e_t_prime = (55 * e_t - 59 * self.old_eps[-1] + 37 * self.old_eps[-2] - 9 * self.old_eps[-3]) / 24
 
-        x_prev, _ = get_x_prev_and_pred_x0(e_t_prime)
+        x_prev, pred_x0 = get_x_prev_and_pred_x0(e_t_prime)
+        self.model.set_predictions(pred_x0)
 
         self.old_eps.append(e_t)
         if len(self.old_eps) >= 4:
