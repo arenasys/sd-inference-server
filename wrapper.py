@@ -33,9 +33,12 @@ TYPES = {
 SAMPLER_CLASSES = {
     "Euler": samplers_k.Euler,
     "Euler a": samplers_k.Euler_a,
-    "DPM++ 2M": samplers_k.DPM_2M_Karras,
-    "DPM++ 2S a": samplers_k.DPM_2S_a_Karras,
-    "DPM++ SDE": samplers_k.DPM_SDE_Karras,
+    "DPM++ 2M": samplers_k.DPM_2M,
+    "DPM++ 2S a": samplers_k.DPM_2S_a,
+    "DPM++ SDE": samplers_k.DPM_SDE,
+    "DPM++ 2M Karras": samplers_k.DPM_2M_Karras,
+    "DPM++ 2S a Karras": samplers_k.DPM_2S_a_Karras,
+    "DPM++ SDE Karras": samplers_k.DPM_SDE_Karras,
     "DDIM": samplers_ddpm.DDIM,
     "PLMS": samplers_ddpm.PLMS
 }
@@ -420,10 +423,8 @@ class GenerationParameters():
 
         return metadata
 
-    def attach_networks(self, networks):
+    def attach_networks(self, networks, device):
         self.detach_networks()
-
-        device = self.unet.device
 
         lora_names = []
         hn_names = []
@@ -510,7 +511,7 @@ class GenerationParameters():
             area = []
 
         conditioning = prompts.BatchedConditioningSchedules(self.clip, self.prompt, self.steps, self.clip_skip, area)
-        self.attach_networks(conditioning.get_all_networks())
+        self.attach_networks(conditioning.get_all_networks(), device)
         conditioning.encode()
 
         if self.minimal_vram:
@@ -549,7 +550,7 @@ class GenerationParameters():
             self.storage.load(self.clip, self.device)
 
         conditioning.switch_to_HR(hr_steps, area)
-        self.attach_networks(conditioning.get_all_networks())
+        self.attach_networks(conditioning.get_all_networks(), device)
         conditioning.encode()
 
         if self.minimal_vram:
@@ -635,7 +636,7 @@ class GenerationParameters():
         self.total_steps = int(self.steps * self.strength) + 1
         
         conditioning = prompts.BatchedConditioningSchedules(self.clip, self.prompt, self.steps, self.clip_skip, self.area)
-        self.attach_networks(conditioning.get_all_networks())
+        self.attach_networks(conditioning.get_all_networks(), device)
         conditioning.encode()
 
         if self.minimal_vram:
