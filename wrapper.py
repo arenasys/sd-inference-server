@@ -225,6 +225,22 @@ class GenerationParameters():
                 self.set_status("Loading Upscaler")
                 self.upscale_model = self.storage.get_upscaler(self.img2img_upscaler, self.device)
 
+    def move_models(self, unet, vae, clip):
+        if unet:
+            self.storage.load(self.unet, self.device)
+        else:
+            self.storage.unload(self.unet)
+        
+        if vae:
+            self.storage.load(self.vae, self.device)
+        else:
+            self.storage.unload(self.vae)
+        
+        if clip:
+            self.storage.load(self.clip, self.device)
+        else:
+            self.storage.unload(self.clip)
+
     def check_parameters(self, required, optional):
         missing, unused = list(required), []
         other = "storage, device, model".split(", ")
@@ -254,6 +270,9 @@ class GenerationParameters():
 
         if (self.width or self.height) and not (self.width and self.height):
             raise ValueError("width and height must both be set")
+        
+        if self.minimal_vram and self.show_preview == "Full":
+            raise ValueError("Full preview is incompatible with minimal VRAM")
         
         if self.attention and self.attention in CROSS_ATTENTION:
             CROSS_ATTENTION[self.attention](self.device)
@@ -515,8 +534,7 @@ class GenerationParameters():
         conditioning.encode()
 
         if self.minimal_vram:
-            self.storage.unload(self.vae)
-            self.storage.unload(self.clip)
+            self.move_models(unet=True, vae=False, clip=False)
 
         denoiser = guidance.GuidedDenoiser(self.unet, conditioning, self.scale)
         noise = utils.NoiseSchedule(seeds, subseeds, self.width // 8, self.height // 8, device, self.unet.dtype)
@@ -526,8 +544,7 @@ class GenerationParameters():
         latents = inference.txt2img(denoiser, sampler, noise, self.steps, self.on_step)
 
         if self.minimal_vram:
-            self.storage.unload(self.unet)
-            self.storage.load(self.vae, self.device)
+            self.move_models(unet=False, vae=True, clip=False)
 
         if not self.hr_factor:
             self.set_status("Decoding")
@@ -547,14 +564,14 @@ class GenerationParameters():
         area = utils.preprocess_areas(self.area, width, height)
 
         if self.minimal_vram:
-            self.storage.load(self.clip, self.device)
+            self.move_models(unet=False, vae=True, clip=True)
 
         conditioning.switch_to_HR(hr_steps, area)
         self.attach_networks(conditioning.get_all_networks(), device)
         conditioning.encode()
 
         if self.minimal_vram:
-            self.storage.unload(self.clip)
+            self.move_models(unet=False, vae=True, clip=False)
 
         denoiser.reset()
         sampler = SAMPLER_CLASSES[self.hr_sampler](denoiser, self.hr_eta)
@@ -568,8 +585,7 @@ class GenerationParameters():
             self.on_artifact("Upscaled", images)
 
         if self.minimal_vram:
-            self.storage.unload(self.vae)
-            self.storage.load(self.unet, self.device)
+            self.move_models(unet=True, vae=False, clip=False)
 
         if self.cn:
             self.cn_image = upscalers.upscale(self.cn_image, transforms.InterpolationMode.NEAREST, width, height)
@@ -580,15 +596,14 @@ class GenerationParameters():
         latents = inference.img2img(latents, denoiser, sampler, noise, hr_steps, True, self.hr_strength, self.on_step)
 
         if self.minimal_vram:
-            self.storage.unload(self.unet)
-            self.storage.load(self.vae, self.device)
+            self.move_models(unet=False, vae=True, clip=False)
 
         self.set_status("Decoding")
         images = utils.decode_images(self.vae, latents)
         self.on_complete(images, metadata)
 
         if self.minimal_vram:
-            self.storage.unload(self.vae)
+            self.move_models(unet=False, vae=False, clip=False)
 
         return images
 
@@ -640,7 +655,7 @@ class GenerationParameters():
         conditioning.encode()
 
         if self.minimal_vram:
-            self.storage.unload(self.clip)
+            self.move_models(unet=True, vae=True, clip=False)
 
         denoiser = guidance.GuidedDenoiser(self.unet, conditioning, self.scale)
         noise = utils.NoiseSchedule(seeds, subseeds, width // 8, height // 8, device, self.unet.dtype)
@@ -664,20 +679,19 @@ class GenerationParameters():
                 self.on_artifact("Mask", masks)
 
         if self.minimal_vram:
-            self.storage.unload(self.vae)
+            self.move_models(unet=True, vae=False, clip=False)
 
         self.set_status("Generating")
         latents = inference.img2img(latents, denoiser, sampler, noise, self.steps, False, self.strength, self.on_step)
 
         if self.minimal_vram:
-            self.storage.unload(self.unet)
-            self.storage.load(self.vae, self.device)
+            self.move_models(unet=False, vae=True, clip=False)
 
         self.set_status("Decoding")
         images = utils.decode_images(self.vae, latents)
 
         if self.minimal_vram:
-            self.storage.unload(self.vae)
+            self.move_models(unet=False, vae=False, clip=False)
 
         if self.mask:
             images, masked = utils.apply_inpainting(images, original_images, masks, extents)

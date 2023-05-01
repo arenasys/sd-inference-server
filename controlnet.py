@@ -63,5 +63,10 @@ class ControlledUNET:
             
         return self.unet(latents, timestep, encoder_hidden_states=encoder_hidden_states, down_block_additional_residuals=down_samples, mid_block_additional_residual=mid_sample)
     
+    def to(self, *args):
+        self.unet.to(*args)
+        for c in self.controlnets:
+            c.to(*args)
+
     def __getattr__(self, name):
         return getattr(self.unet, name)
