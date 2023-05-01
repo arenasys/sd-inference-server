@@ -109,6 +109,7 @@ def tokenize_prompt(clip, parsed):
     # tokenize prompt and split it into chunks
     if not text:
         text = ['']
+    text = [t.replace("\\", "") for t in text]
     tokenized = tokenizer(text)["input_ids"]
     tokenized = [tokens[1:-1] for tokens in tokenized] # strip special tokens
 
