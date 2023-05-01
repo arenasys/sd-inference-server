@@ -112,7 +112,7 @@ def tokenize_prompt(clip, parsed):
     text = [t.replace("\\", "") for t in text]
     tokenized = tokenizer(text)["input_ids"]
     tokenized = [tokens[1:-1] for tokens in tokenized] # strip special tokens
-
+    
     # weight the individual tokens
     weighted = []
     for tokens, (_, weight) in zip(tokenized, parsed):
