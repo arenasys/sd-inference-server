@@ -101,18 +101,29 @@ def tokenize_prompt(clip, parsed):
 
     # chunking sizes
     chunk_size = 75
-    leeway = 20 
+    leeway = 20
 
-    # replace capitalized break with our break token
-    text = [re.sub(r'BREAK[\.,\s]', '~~~ ', text) for text, _ in parsed]
+    def replace_keyword(k, v, t):
+        t = re.sub(fr'{k}[,\.]?[^\S\r\n]?', f'{v} ', t)
+        return t
 
-    # tokenize prompt and split it into chunks
+    # replace BREAK with our break token
+    text = [replace_keyword("BREAK", "~~~", t) for t, _ in parsed]
+
+    # replace START and END keywords with their tokens
+    text = [replace_keyword("START", "<|startoftext|>", t) for t in text]
+    text = [replace_keyword("END", "<|endoftext|>", t) for t in text]
+
+    # remove escape backslashes
+    text = [re.sub(r'\\(.)', r'\g<1>', t) for t in text]
+
     if not text:
         text = ['']
-    text = [t.replace("\\", "") for t in text]
+
+    # tokenize prompt and split it into chunks
     tokenized = tokenizer(text)["input_ids"]
     tokenized = [tokens[1:-1] for tokens in tokenized] # strip special tokens
-    
+
     # weight the individual tokens
     weighted = []
     for tokens, (_, weight) in zip(tokenized, parsed):
