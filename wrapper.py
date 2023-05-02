@@ -520,6 +520,7 @@ class GenerationParameters():
         if not self.hr_eta:
             self.hr_eta = self.eta
 
+        self.set_status("Configuring 2")
         metadata = self.get_metadata("txt2img", self.width, self.height, batch_size, self.prompt, seeds, subseeds)
 
         if self.area:
@@ -528,13 +529,16 @@ class GenerationParameters():
             area = utils.preprocess_areas(self.area, self.width, self.height)
         else:
             area = []
-
+        
+        self.set_status("Encoding")
         conditioning = prompts.BatchedConditioningSchedules(self.clip, self.prompt, self.steps, self.clip_skip, area)
         self.attach_networks(conditioning.get_all_networks(), device)
         conditioning.encode()
 
         if self.minimal_vram:
             self.move_models(unet=True, vae=False, clip=False)
+
+        self.set_status("Configuring 3")
 
         denoiser = guidance.GuidedDenoiser(self.unet, conditioning, self.scale)
         noise = utils.NoiseSchedule(seeds, subseeds, self.width // 8, self.height // 8, device, self.unet.dtype)

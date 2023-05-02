@@ -186,7 +186,7 @@ class ModelStorage():
             name = self.get_name(file)
             self.files["HN"][name] = file
 
-        for file in self.get_models("CN", ["*.safetensors"]):
+        for file in self.get_models("CN", ["*.safetensors", "*.pth"]):
             name = self.get_name(file)
             self.files["CN"][name] = file
 
@@ -268,15 +268,22 @@ class ModelStorage():
         if comp in ["UNET", "CLIP", "VAE"] and file.rsplit(".",1)[-1] in {"safetensors", "ckpt", "pt"}:
             state_dict = convert.convert_checkpoint(file)
             return self.parse_model(state_dict)
-
+        
+        out = {}
         if file.endswith(".st") or file.endswith(".safetensors"):
             state_dict = safetensors.torch.load_file(file)
             if "metadata.model_type" in state_dict:
-                return self.parse_model(state_dict)
+                out = self.parse_model(state_dict)
             else:
-                return {comp: state_dict}
+                out = {comp: state_dict}
         else:
-            return {comp: torch.load(file, map_location="cpu")}
+            out = {comp: torch.load(file, map_location="cpu")}
+
+        if comp in out and comp == "CN":
+            out[comp] = convert.CN_convert(out[comp])
+            
+        return out
+
 
     def parse_model(self, state_dict):
         metadata = {}

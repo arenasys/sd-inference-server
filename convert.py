@@ -90,6 +90,28 @@ def SDv1_revert(state_dict):
 
     return state_dict
 
+def CN_convert(state_dict):
+    mapping = {}
+    with open(relative_file(os.path.join("mappings", "CN_mapping.txt"))) as file:
+        for line in file:
+            src, dst = line.strip().split(" TO ")
+            mapping[src] = dst
+
+    for k in list(state_dict.keys()):
+        if not k in mapping:
+            del state_dict[k]
+
+    for k in state_dict:
+        if state_dict[k].dtype == torch.float32 or state_dict[k].dtype == torch.float64:
+            state_dict[k] = state_dict[k].to(torch.float16)
+
+    for src, dst in mapping.items():
+        if src in state_dict:
+            state_dict[dst] = state_dict[src]
+            del state_dict[src]
+    
+    return state_dict
+
 def SDv2_revert(state_dict):
     mapping = {}
     with open(relative_file(os.path.join("mappings", "SDv2_mapping.txt"))) as file:
