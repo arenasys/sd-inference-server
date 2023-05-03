@@ -60,6 +60,7 @@ def get_id():
 
 SEP = os.path.sep
 INV_SEP = {"\\": '/', '/':'\\'}[os.path.sep]
+NO_CONV = {"prompt", "negative_prompt", "url"}
 
 def convert_path(p):
     return p.replace(INV_SEP, SEP)
@@ -74,7 +75,7 @@ def convert_all_paths(j):
                 convert_all_paths(j[i])
     elif type(j) == dict: 
         for k, v in j.items():
-            if 'prompt' in k: continue
+            if k in NO_CONV: continue
             if type(v) == str and INV_SEP in v:
                 j[k] = convert_path(v)
             if type(v) == list or type(v) == dict:
