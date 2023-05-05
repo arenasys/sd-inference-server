@@ -593,8 +593,10 @@ class GenerationParameters():
 
         if self.cn:
             self.cn_image = upscalers.upscale(self.cn_image, transforms.InterpolationMode.NEAREST, width, height)
-            cn_cond, cn_outputs = controlnet.preprocess_control(self.cn_image, self.cn_proc, self.cn_scale)
+            cn_cond, cn_outputs = controlnet.preprocess_control(self.cn_image, annotators, self.cn_args, self.cn_scale)
             self.unet.set_controlnet_conditioning(cn_cond)
+            if self.keep_artifacts:
+                self.on_artifact("Control 2", cn_outputs)
 
         self.set_status("Generating")
         latents = inference.img2img(latents, denoiser, sampler, noise, hr_steps, True, self.hr_strength, self.on_step)
