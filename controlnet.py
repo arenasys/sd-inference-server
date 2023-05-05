@@ -13,23 +13,24 @@ def cv2_to_pil(img):
 def pil_to_cv2(img):
     return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
 
-def preprocessor_canny(img):
+def annotate(img, annotator, arg):
     img = pil_to_cv2(img)
-    img = cv2.Canny(img, 100, 200)
+    img = annotator(img, *arg)
     c = torch.from_numpy(img).to(torch.float32) / 255.0
-    c = torch.stack([c]*3).unsqueeze(0)
+    if len(c.shape) == 2:
+        c = torch.stack([c]*3)
+    if c.shape[-1] == 3:
+        c = einops.rearrange(c, "h w c -> c h w")    
+    if len(c.shape) == 3:
+        c = c.unsqueeze(0)
     return c, cv2_to_pil(img)
 
-PREPROCESSORS = {
-    "canny": preprocessor_canny
-}
-
-def preprocess_control(images, preprocessors, scales):
+def preprocess_control(images, annotators, args, scales):
     conditioning = []
     outputs = []
     for i in range(len(images)):
-        s, p, im = scales[i], preprocessors[i], images[i]
-        cond, out = PREPROCESSORS[p](im)
+        s, a, arg, im = scales[i], annotators[i], args[i], images[i]
+        cond, out = annotate(im, a, arg)
         outputs += [out]
         conditioning += [(s,cond)]
     return conditioning, outputs
@@ -43,7 +44,7 @@ class ControlledUNET:
     def set_controlnet_conditioning(self, conditioning):
         self.controlnet_cond = [(s,cond.to(self.device, self.dtype)) for s,cond in conditioning]
 
-    def __call__(self, latents, timestep, encoder_hidden_states, ):
+    def __call__(self, latents, timestep, encoder_hidden_states):
         down_samples, mid_sample = None, None
         for i in range(len(self.controlnets)):
             cn_scale, cn_cond = self.controlnet_cond[i]

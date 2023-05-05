@@ -502,7 +502,9 @@ class GenerationParameters():
 
         if self.cn:
             self.unet = controlnet.ControlledUNET(self.unet, self.cn)
-            cn_cond, cn_outputs = controlnet.preprocess_control(self.cn_image, self.cn_proc, self.cn_scale)
+            dtype = self.unet.dtype
+            annotators = [self.storage.get_controlnet_annotator(name, device, dtype) for name in self.cn_annotator]
+            cn_cond, cn_outputs = controlnet.preprocess_control(self.cn_image, annotators, self.cn_args, self.cn_scale)
             if self.keep_artifacts:
                 self.on_artifact("Control", cn_outputs)
             self.unet.set_controlnet_conditioning(cn_cond)
@@ -520,7 +522,6 @@ class GenerationParameters():
         if not self.hr_eta:
             self.hr_eta = self.eta
 
-        self.set_status("Configuring 2")
         metadata = self.get_metadata("txt2img", self.width, self.height, batch_size, self.prompt, seeds, subseeds)
 
         if self.area:
@@ -534,11 +535,10 @@ class GenerationParameters():
         conditioning = prompts.BatchedConditioningSchedules(self.clip, self.prompt, self.steps, self.clip_skip, area)
         self.attach_networks(conditioning.get_all_networks(), device)
         conditioning.encode()
+        self.set_status("Configuring")
 
         if self.minimal_vram:
             self.move_models(unet=True, vae=False, clip=False)
-
-        self.set_status("Configuring 3")
 
         denoiser = guidance.GuidedDenoiser(self.unet, conditioning, self.scale)
         noise = utils.NoiseSchedule(seeds, subseeds, self.width // 8, self.height // 8, device, self.unet.dtype)
@@ -638,7 +638,9 @@ class GenerationParameters():
         if self.cn:
             cn_images = self.prepare_images(self.cn_image, extents, width, height)
             self.unet = controlnet.ControlledUNET(self.unet, self.cn)
-            cn_cond, cn_outputs = controlnet.preprocess_control(cn_images, self.cn_proc, self.cn_scale)
+            dtype = self.unet.dtype
+            annotators = [self.storage.get_controlnet_annotator(name, device, dtype) for name in self.cn_annotator]
+            cn_cond, cn_outputs = controlnet.preprocess_control(cn_images, annotators, self.cn_args, self.cn_scale)
             if self.keep_artifacts:
                 self.on_artifact("Control", cn_outputs)
             self.unet.set_controlnet_conditioning(cn_cond)
@@ -737,7 +739,6 @@ class GenerationParameters():
             masks = [mask.filter(PIL.ImageFilter.GaussianBlur(self.mask_blur)) for mask in masks]
 
         self.set_status("Upscaling")
-        
         if not self.upscale_model:
             images = upscalers.upscale(images, UPSCALERS_PIXEL[self.img2img_upscaler], width, height)
         else:
@@ -748,6 +749,27 @@ class GenerationParameters():
 
         self.on_complete(images, metadata)
         return images
+    
+    @torch.inference_mode()
+    def annotate(self):
+        self.set_status("Loading")
+        self.set_device()
+        self.storage.clear_file_cache()
+
+        device = self.device
+        dtype = torch.float16
+
+        self.set_status("Annotating")
+        annotator = self.storage.get_controlnet_annotator(self.cn_annotator[0], device, dtype)
+        _, img = controlnet.annotate(self.cn_image[0], annotator, self.cn_args[0])
+
+        self.set_status("Fetching")
+        bytesio = io.BytesIO()
+        img.save(bytesio, format='PNG')
+        data = bytesio.getvalue()
+        if self.callback:
+            if not self.callback({"type": "annotate", "data": {"images": [data]}}):
+                raise RuntimeError("Aborted")
     
     def options(self):
         self.storage.find_all()
@@ -762,7 +784,7 @@ class GenerationParameters():
         data["attention"] = [k for k,v in CROSS_ATTENTION.items() if v in available]
         data["TI"] = list(self.storage.embeddings_files.keys())
         data["device"] = self.device_names
-
+        
         if self.callback:
             if not self.callback({"type": "options", "data": data}):
                 raise RuntimeError("Aborted")

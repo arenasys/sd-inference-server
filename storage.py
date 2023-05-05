@@ -6,6 +6,7 @@ import safetensors.torch
 import models
 import convert
 import upscalers
+import annotator
 
 MODEL_FOLDERS = {
     "SD": ["SD", "Stable-diffusion", "VAE"],
@@ -27,6 +28,7 @@ class ModelStorage():
         self.classes = {"UNET": models.UNET, "CLIP": models.CLIP, "VAE": models.VAE, "SR": upscalers.SR, "LoRA": models.LoRA, "HN": models.HN, "CN": models.ControlNet}
         self.vram_limits = {"UNET": 1, "CLIP": 1, "VAE": 1, "SR": 1}
         self.total_limits = {"UNET": 1, "CLIP": 1, "VAE": 1, "SR": 1}
+        self.annotators = {}
 
         self.files = {k:{} for k in self.classes}
         self.loaded = {k:{} for k in self.classes}
@@ -42,12 +44,16 @@ class ModelStorage():
             self.clear_file_cache()
         self.path = path
             
-    def get_models(self, folder, ext):
+    def get_models(self, folder, ext, recursive=True):
         files = []
         for f in MODEL_FOLDERS[folder]:
             path = os.path.abspath(os.path.join(self.path, f))
-            for e in ext:
-                files += glob.glob(os.path.join(path, "**" + os.sep + e), recursive=True)
+            if recursive:
+                for e in ext:
+                    files += glob.glob(os.path.join(path, "**" + os.sep + e), recursive=True)
+            else:
+                for e in ext:
+                    files += glob.glob(os.path.join(path, e))
         return files
 
     def clear_file_cache(self):
@@ -189,7 +195,7 @@ class ModelStorage():
             name = self.get_name(file)
             self.files["HN"][name] = file
 
-        for file in self.get_models("CN", ["*.safetensors", "*.pth"]):
+        for file in self.get_models("CN", ["*.safetensors", "*.pth"], False):
             name = self.get_name(file)
             self.files["CN"][name] = file
 
@@ -264,7 +270,12 @@ class ModelStorage():
                 name = cn
                 break
         return self.get_component(name, "CN", device)
-
+    
+    def get_controlnet_annotator(self, name, device, dtype):
+        if not name in self.annotators:
+            self.annotators[name] = annotator.annotators[name](os.path.join(self.path, "CN", "annotators"))
+        return self.annotators[name].to(device, dtype)
+    
     def load_file(self, file, comp):
         print(f"LOADING {file.rsplit(os.path.sep, 1)[-1]}...")
 

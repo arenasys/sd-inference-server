@@ -44,7 +44,14 @@ class LoRANetwork(torch.nn.Module):
         self.load_state_dict(state_dict, strict=False)
 
     def build_modules(self, state_dict):
+
         names = set([k.split(".")[0] for k in state_dict])
+        if any([".hada_" in k for k in state_dict]):
+            raise RuntimeError("LoHA models are not supported")
+        if any([".lokr_" in k for k in state_dict]):
+            raise RuntimeError("LoKR models are not supported")
+        if any([".mid_" in k for k in state_dict]):
+            raise RuntimeError("CP-Decomposition is not supported")
 
         for name in names:
             up = state_dict[name+".lora_up.weight"]
