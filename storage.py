@@ -7,6 +7,15 @@ import models
 import convert
 import upscalers
 
+MODEL_FOLDERS = {
+    "SD": ["SD", "Stable-diffusion", "VAE"],
+    "SR": ["SR", "ESRGAN", "RealESRGAN"], 
+    "TI": ["TI", "embeddings", os.path.join("..", "embeddings")], 
+    "LoRA": ["LoRA"], 
+    "HN": ["HN", "hypernetworks"],
+    "CN": ["CN"]
+}
+
 class ModelStorage():
     def __init__(self, path, dtype, vae_dtype=None):
         self.dtype = dtype
@@ -32,16 +41,10 @@ class ModelStorage():
         if path != self.path:
             self.clear_file_cache()
         self.path = path
-        self.folders = {"SD": ["SD", "Stable-diffusion", "VAE"],
-                        "SR": ["SR", "ESRGAN", "RealESRGAN"], 
-                        "TI": ["TI", "embeddings", os.path.join("..", "embeddings")], 
-                        "LoRA": ["LoRA"], 
-                        "HN": ["HN", "hypernetworks"],
-                        "CN": ["CN"]}
             
     def get_models(self, folder, ext):
         files = []
-        for f in self.folders[folder]:
+        for f in MODEL_FOLDERS[folder]:
             path = os.path.abspath(os.path.join(self.path, f))
             for e in ext:
                 files += glob.glob(os.path.join(path, "**" + os.sep + e), recursive=True)
@@ -178,7 +181,7 @@ class ModelStorage():
             vectors.requires_grad = False
             self.embeddings[activation] = vectors
 
-        for file in self.get_models("LoRA", ["*.safetensors"]):
+        for file in self.get_models("LoRA", ["*.safetensors", "*.pt"]):
             name = self.get_name(file)
             self.files["LoRA"][name] = file
 
