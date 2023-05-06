@@ -1,6 +1,5 @@
 import math
 import numpy as np
-import matplotlib
 import cv2
 
 
@@ -110,6 +109,29 @@ def draw_bodypose(canvas, candidate, subset):
 
     return canvas
 
+def hsv_to_rgb(hsv):
+    input_shape = hsv.shape
+    hsv = hsv.reshape(-1, 3)
+    h, s, v = hsv[:, 0], hsv[:, 1], hsv[:, 2]
+
+    i = np.int32(h * 6.0)
+    f = (h * 6.0) - i
+    p = v * (1.0 - s)
+    q = v * (1.0 - s * f)
+    t = v * (1.0 - s * (1.0 - f))
+    i = i % 6
+
+    rgb = np.zeros_like(hsv)
+    v, t, p, q = v.reshape(-1, 1), t.reshape(-1, 1), p.reshape(-1, 1), q.reshape(-1, 1)
+    rgb[i == 0] = np.hstack([v, t, p])[i == 0]
+    rgb[i == 1] = np.hstack([q, v, p])[i == 1]
+    rgb[i == 2] = np.hstack([p, v, t])[i == 2]
+    rgb[i == 3] = np.hstack([p, q, v])[i == 3]
+    rgb[i == 4] = np.hstack([t, p, v])[i == 4]
+    rgb[i == 5] = np.hstack([v, p, q])[i == 5]
+    rgb[s == 0.0] = np.hstack([v, v, v])[s == 0.0]
+
+    return rgb.reshape(input_shape)
 
 def draw_handpose(canvas, all_hand_peaks):
     H, W, C = canvas.shape
@@ -128,7 +150,7 @@ def draw_handpose(canvas, all_hand_peaks):
             x2 = int(x2 * W)
             y2 = int(y2 * H)
             if x1 > eps and y1 > eps and x2 > eps and y2 > eps:
-                cv2.line(canvas, (x1, y1), (x2, y2), matplotlib.colors.hsv_to_rgb([ie / float(len(edges)), 1.0, 1.0]) * 255, thickness=2)
+                cv2.line(canvas, (x1, y1), (x2, y2), hsv_to_rgb([ie / float(len(edges)), 1.0, 1.0]), thickness=2)
 
         for i, keyponit in enumerate(peaks):
             x, y = keyponit
