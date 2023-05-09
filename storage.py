@@ -54,7 +54,7 @@ class ModelStorage():
             else:
                 for e in ext:
                     files += glob.glob(os.path.join(path, e))
-        return files
+        return [f for f in files if not os.path.sep + "_" in f]
 
     def clear_file_cache(self):
         self.file_cache = {}

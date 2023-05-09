@@ -54,7 +54,7 @@ def SDv1_convert(state_dict):
 
     # cast to fp16
     for k in state_dict:
-        if state_dict[k].dtype == torch.float32 or state_dict[k].dtype == torch.float64:
+        if state_dict[k].dtype in {torch.float32, torch.float64, torch.bfloat16}:
             state_dict[k] = state_dict[k].to(torch.float16)
 
     # most keys are just renamed
@@ -102,7 +102,7 @@ def CN_convert(state_dict):
             del state_dict[k]
 
     for k in state_dict:
-        if state_dict[k].dtype == torch.float32 or state_dict[k].dtype == torch.float64:
+        if state_dict[k].dtype in {torch.float32, torch.float64, torch.bfloat16}:
             state_dict[k] = state_dict[k].to(torch.float16)
 
     for src, dst in mapping.items():
@@ -171,7 +171,7 @@ def SDv2_convert(state_dict):
 
     # cast to fp16
     for k in state_dict:
-        if state_dict[k].dtype == torch.float32 or state_dict[k].dtype == torch.float64:
+        if state_dict[k].dtype in {torch.float32, torch.float64, torch.bfloat16}:
             state_dict[k] = state_dict[k].to(torch.float16)
 
     # most keys are just renamed

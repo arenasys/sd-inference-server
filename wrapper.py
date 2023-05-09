@@ -810,20 +810,16 @@ class GenerationParameters():
         n = os.path.join(self.storage.path, self.new_file)
         if o == n:
             return
-        
-        if not self.new_file:
+
+        if not self.new_file or self.new_file[-1] == os.path.sep:
+            self.set_status("Deleting")
             os.remove(o)
             return
         
-        op, oe = o.rsplit(".",1)
-        np, ne = n.rsplit(".",1)
+        oe, ne = o.rsplit(".",1)[-1], n.rsplit(".",1)[-1]   
+        ot, nt = o.split(os.path.sep, 1)[0], n.split(os.path.sep, 1)[0]
 
-        if op != np and oe == ne:
-            self.set_status("Moving")
-            os.rename(o, n)
-            return
-        
-        if oe != ne:
+        if ot in storage.MODEL_FOLDERS["SD"]:
             self.set_status("Converting")
             if not ne in {"st", "safetensors"}:
                 raise ValueError(f"unsuported checkpoint type: {ne}. supported types are: safetensors, st")
@@ -832,13 +828,38 @@ class GenerationParameters():
             else:
                 state_dict = safetensors.torch.load_file(o)
 
-            if ne == "safetensors":
+            if ne != "st":
                 model_type = ''.join([chr(c) for c in state_dict["metadata.model_type"]])
                 state_dict = convert.revert(model_type, state_dict)
-
+            
             safetensors.torch.save_file(state_dict, n)
             os.remove(o)
-        
+        else:
+            self.set_status("Converting")
+            if not ne in {"safetensors", "st"}:
+                raise ValueError(f"unsuported model type: {ne}. supported types are: safetensors, st")
+            if oe in {"pt", "pth", "ckpt"}:
+                state_dict = torch.load(o, map_location="cpu")
+                if "state_dict" in state_dict:
+                    state_dict = state_dict["state_dict"]
+            elif oe in {"st", "safetensors"}:
+                state_dict = safetensors.torch.load_file(o)
+            else:
+                raise ValueError(f"unknown model type: {oe}")
+            for k in list(state_dict.keys()):
+                if ne in {"safetensors", "st"} and type(state_dict[k]) != torch.Tensor:
+                    del state_dict[k]
+                    continue
+                if state_dict[k].dtype in {torch.float32, torch.float64, torch.bfloat16}:
+                    state_dict[k] = state_dict[k].to(torch.float16)
+            if len(state_dict) == 0:
+                raise ValueError(f"conversion failed, empty model after pruning")
+            safetensors.torch.save_file(state_dict, n)
+
+            tp = os.path.join(self.storage.path, "TRASH")
+            on = o.rsplit(os.path.sep)[-1]
+            os.makedirs(tp, exist_ok=True)
+            os.rename(o, os.path.join(tp, on))
 
     def build(self):
         self.set_status("Building")
