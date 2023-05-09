@@ -23,10 +23,7 @@ password = ''.join(random.SystemRandom().choice(string.ascii_letters + string.di
 server = Server(params, "127.0.0.1", "28888", password)
 server.start()
 
-#from pycloudflared import try_cloudflare
-#tunnel_url = try_cloudflare(port=28888, verbose=False)
-#print("ENDPOINT: ", tunnel_url.tunnel.replace("https", "wss"))
-#print("PASSWORD: ", password)
+print("PASSWORD: ", password)
 
 try:
     while True:
