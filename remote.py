@@ -2,8 +2,8 @@ import os
 import sys
 
 venv = os.path.abspath(os.path.join(os.getcwd(), "venv/lib/python3.10/site-packages"))
-if not sys.path[0] == venv:
-    sys.path.insert(0,venv)
+if not sys.path[-1] == venv:
+    sys.path = [p for p in sys.path if not "conda" in p] + [venv]
 
 import random
 import torch
