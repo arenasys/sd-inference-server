@@ -6,6 +6,7 @@ import io
 import os
 import safetensors.torch
 import time
+import shutil
 
 import prompts
 import samplers_k
@@ -170,6 +171,8 @@ class GenerationParameters():
                         value[i] = PIL.Image.open(io.BytesIO(value[i]))
                         if value[i].mode == 'RGBA':
                             value[i] = PIL.Image.alpha_composite(PIL.Image.new('RGBA',value[i].size,(0,0,0)), value[i])
+                            value[i] = value[i].convert("RGB")
+                        if value[i].mode != 'RGB':
                             value[i] = value[i].convert("RGB")
             if key == "mask":
                 for i in range(len(value)):
@@ -543,6 +546,11 @@ class GenerationParameters():
         denoiser = guidance.GuidedDenoiser(self.unet, conditioning, self.scale)
         noise = utils.NoiseSchedule(seeds, subseeds, self.width // 8, self.height // 8, device, self.unet.dtype)
         sampler = SAMPLER_CLASSES[self.sampler](denoiser, self.eta)
+
+        if self.unet.inpainting:
+            images = torch.zeros((batch_size, 3, self.width, self.height))
+            inpainting_masked, inpainting_masks = utils.encode_inpainting(images, None, self.vae, seeds)
+            denoiser.set_inpainting(inpainting_masked, inpainting_masks)
         
         self.set_status("Generating")
         latents = inference.txt2img(denoiser, sampler, noise, self.steps, self.on_step)
@@ -685,6 +693,14 @@ class GenerationParameters():
             denoiser.set_mask(mask_latents, original_latents)
             if self.keep_artifacts:
                 self.on_artifact("Mask", masks)
+        else:
+            denoiser.set_mask(None, original_latents)
+
+        if self.unet.inpainting: #SDv1-Inpainting, SDv2-Inpainting
+            if not self.mask:
+                masks = None
+            inpainting_masked, inpainting_masks = utils.encode_inpainting(upscaled_images, masks, self.vae, seeds)
+            denoiser.set_inpainting(inpainting_masked, inpainting_masks)
 
         if self.minimal_vram:
             self.move_models(unet=True, vae=False, clip=False)
@@ -796,30 +812,46 @@ class GenerationParameters():
         self.check_parameters(["operation"], [])
 
         if self.operation == "build":
-            self.build()
+            self.build(self.file)
         elif self.operation == "modify":
-            self.modify()
+            self.modify(self.old_file, self.new_file)
+        elif self.operation == "prune":
+            self.prune(self.file)
         else:
             raise ValueError(f"unknown operation: {self.operation}")
         
         if not self.callback({"type": "done", "data": {}}):
             raise RuntimeError("Aborted")
+        
+    def prune(self, file):
+        old_file = file
+        new_file = file
 
-    def modify(self):
-        o = os.path.join(self.storage.path, self.old_file)
-        n = os.path.join(self.storage.path, self.new_file)
-        if o == n:
+        on, oe = old_file.rsplit(".",1)
+        if oe == "st":
             return
+        if not oe == "safetensors":
+            new_file = on + ".safetensors"
 
-        if not self.new_file or self.new_file[-1] == os.path.sep:
+        print(old_file, new_file)
+
+        self.modify(old_file, new_file)
+
+
+    def modify(self, old, new):
+        o = os.path.join(self.storage.path, old)
+        n = os.path.join(self.storage.path, new)
+
+        if not new:
             self.set_status("Deleting")
             os.remove(o)
             return
         
-        oe, ne = o.rsplit(".",1)[-1], n.rsplit(".",1)[-1]   
-        ot, nt = o.split(os.path.sep, 1)[0], n.split(os.path.sep, 1)[0]
+        oe, ne = old.rsplit(".",1)[-1], new.rsplit(".",1)[-1]   
+        ot, nt = old.split(os.path.sep, 1)[0], new.split(os.path.sep, 1)[0]
 
-        if ot in storage.MODEL_FOLDERS["SD"]:
+        component = ot in storage.MODEL_FOLDERS["SD"] and any([e in old for e in {".vae.",".clip.",".unet."}])
+        if ot in storage.MODEL_FOLDERS["SD"] and not component:
             self.set_status("Converting")
             if not ne in {"st", "safetensors"}:
                 raise ValueError(f"unsuported checkpoint type: {ne}. supported types are: safetensors, st")
@@ -833,7 +865,8 @@ class GenerationParameters():
                 state_dict = convert.revert(model_type, state_dict)
             
             safetensors.torch.save_file(state_dict, n)
-            os.remove(o)
+            if n != o:
+                os.remove(o)
         else:
             self.set_status("Converting")
             if not ne in {"safetensors", "st"}:
@@ -846,25 +879,44 @@ class GenerationParameters():
                 state_dict = safetensors.torch.load_file(o)
             else:
                 raise ValueError(f"unknown model type: {oe}")
+            
+            caution = False
+            if component:
+                caution = convert.clean_component(state_dict)
+            else:
+                for k in list(state_dict.keys()):
+                    if ne in {"safetensors", "st"} and type(state_dict[k]) != torch.Tensor:
+                        del state_dict[k]
+                        caution = True
+                        continue   
+
             for k in list(state_dict.keys()):
-                if ne in {"safetensors", "st"} and type(state_dict[k]) != torch.Tensor:
-                    del state_dict[k]
-                    continue
                 if state_dict[k].dtype in {torch.float32, torch.float64, torch.bfloat16}:
                     state_dict[k] = state_dict[k].to(torch.float16)
+            
             if len(state_dict) == 0:
                 raise ValueError(f"conversion failed, empty model after pruning")
+            
+            if caution:
+                trash_path = os.path.join(self.storage.path, "TRASH")
+                trash = os.path.join(trash_path, o.rsplit(os.path.sep)[-1])
+                os.makedirs(trash_path, exist_ok=True)
+                if n == o:
+                    shutil.copy(o, trash)
+                else:
+                    os.rename(o, trash)
+
             safetensors.torch.save_file(state_dict, n)
 
-            tp = os.path.join(self.storage.path, "TRASH")
-            on = o.rsplit(os.path.sep)[-1]
-            os.makedirs(tp, exist_ok=True)
-            os.rename(o, os.path.join(tp, on))
+            if not caution and n != o:
+                os.remove(o)
 
-    def build(self):
+    def build(self, filename):
         self.set_status("Building")
+
+        print(filename)
                 
-        file_type = self.filename.rsplit(".",1)[-1]
+        file_type = filename.rsplit(".",1)[-1]
         if not file_type  in {"st", "safetensors"}:
             raise ValueError(f"unsuported checkpoint type: {file_type}. supported types are: safetensors, st")
 
@@ -905,7 +957,7 @@ class GenerationParameters():
                 elif metadata[k] != source_metadata[k]:
                     raise ValueError(f"metadata mismatch: {k}, {metadata[k]} != {source_metadata[k]}")
 
-            model_type = metadata["model_type"]
+            model_type = metadata["model_type"].split("-")[0]
             for comp in source[file]:
                 prefix = f"{model_type}.{comp}."
                 found = False
@@ -930,5 +982,7 @@ class GenerationParameters():
             model["metadata.prediction_type"] = torch.as_tensor([ord(c) for c in metadata['prediction_type']])
 
         self.set_status(f"Saving")
-        filename = os.path.join(self.storage.path, "SD", self.filename)
+        filename = os.path.join(self.storage.path, "SD", filename)
+
+        print(filename)
         safetensors.torch.save_file(model, filename)

@@ -40,8 +40,36 @@ def preprocess_masks(masks):
         mask = mask.resize((w // 8, h // 8), resample=PIL.Image.LANCZOS)
         mask.save("MASK.png")
         mask = 1 - TO_TENSOR(mask).to(torch.float32)
-        return torch.cat([mask]*4)[None, :]
+        return mask[None, :]
     return torch.cat([process(m) for m in masks])
+
+def encode_inpainting(images, masks, vae, seeds):
+    if type(images) != torch.Tensor:
+        images = preprocess_images(images)
+    images = images.to(vae.device, vae.dtype)
+    if masks != None:
+        if type(masks) != torch.Tensor:
+            masks = torch.cat([TO_TENSOR(m)[None,:] for m in masks])
+        masks = masks.to(vae.device, vae.dtype)
+        masks = torch.round(masks)
+        images = torch.lerp(images, images * (1.0 - masks), 1.0)
+    else:
+        masks_shape = (images.shape[0], 1, images.shape[2], images.shape[3])
+        masks = torch.ones(masks_shape).to(vae.device, vae.dtype)
+        images = torch.zeros(images.shape).to(vae.device, vae.dtype)
+
+    noise = singular_noise(seeds, images.shape[3] // 8, images.shape[2] // 8, vae.device).to(vae.dtype)
+
+    dists = vae.encode(images)
+    mean = torch.stack([dists.mean[i%len(images)] for i in range(len(seeds))])
+    std = torch.stack([dists.std[i%len(images)] for i in range(len(seeds))])
+
+    latents = (mean + std * noise) * 0.18215
+
+    masks = torch.nn.functional.interpolate(masks, size=(masks.shape[2]//8,masks.shape[3]//8))
+
+    return latents, masks
+
 
 def encode_images(vae, seeds, images):
     images = preprocess_images(images).to(vae.device, vae.dtype)

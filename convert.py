@@ -191,6 +191,20 @@ def SDv2_convert(state_dict):
 
     return state_dict
 
+def clean_component(state_dict):
+    valid = set()
+    with open(relative_file(os.path.join("mappings", "COMP_valid.txt"))) as file:
+        for line in file:
+            valid.add(line.strip())
+    
+    deleted = False
+    for k in list(state_dict.keys()):
+        if not k in valid:
+            print("DEL", k)
+            del state_dict[k]
+            deleted = True
+    return deleted
+
 def convert_checkpoint(in_file):
     print(f"CONVERTING {in_file.rsplit(os.path.sep,1)[-1]}")
     
@@ -207,6 +221,9 @@ def convert_checkpoint(in_file):
 
     # only in the SDv2 CLIP
     v2 = "cond_stage_model.model.transformer.resblocks.0.attn.in_proj_bias" in state_dict
+    inpainting = False
+    if "model.diffusion_model.input_blocks.0.0.weight" in state_dict:
+        inpainting = state_dict["model.diffusion_model.input_blocks.0.0.weight"].shape[1] == 9
     prediction_type = "epsilon"
 
     if v2:
@@ -224,9 +241,12 @@ def convert_checkpoint(in_file):
         print("CONVERTING FROM SDv1")
         SDv1_convert(state_dict)
 
-    model_type = "SDv2" if v2 else "SDv1"
+    model_type = ("SDv2" if v2 else "SDv1")
+
     state_dict["metadata.model_type"] = torch.as_tensor([ord(c) for c in model_type])
     state_dict["metadata.prediction_type"] = torch.as_tensor([ord(c) for c in prediction_type])
+    if inpainting:
+        state_dict["metadata.model_variant"] = torch.as_tensor([ord(c) for c in "Inpainting"])
     
     return state_dict
 

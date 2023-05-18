@@ -15,14 +15,20 @@ class GuidedDenoiser():
 
         self.predictions = None
 
+        self.inpainting_input = None
+
         self.get_compositions()
 
     def get_compositions(self):
         self.compositions = self.conditioning_schedule.get_compositions(self.dtype, self.device)
 
     def set_mask(self, mask, original):
-        self.mask = mask.to(self.dtype)
-        self.original = original.to(self.dtype) * 0.18215
+        if mask != None:
+            self.mask = mask.to(self.dtype)
+            self.original = original.to(self.dtype) * 0.18215
+
+    def set_inpainting(self, masked, masks):
+        self.inpainting_input = torch.cat([masks, masked], dim=1).to(self.device, self.dtype)
 
     def set_predictions(self, predictions):
         self.predictions = predictions
@@ -45,7 +51,15 @@ class GuidedDenoiser():
         model_input = []
         for i, ((m, p), n) in enumerate(self.compositions):
             model_input += [latents[i:i+1]]*(len(p) + len(n))
-        return torch.cat(model_input)
+        model_input = torch.cat(model_input)
+
+        return model_input
+    
+    def get_additional_inputs(self, latents):
+        if self.inpainting_input != None:
+            inpainting_inputs = torch.cat([self.inpainting_input]*latents.shape[0])
+            latents = torch.cat([latents, inpainting_inputs], dim=1)
+        return latents
 
     def compose_predictions(self, pred):
         composed_pred = []
@@ -72,7 +86,8 @@ class GuidedDenoiser():
 
     def predict_original_epsilon(self, latents, timestep, sigma, conditioning):
         c_in = 1 / (sigma ** 2 + 1) ** 0.5
-        noise_pred = self.unet(latents * c_in, timestep, encoder_hidden_states=conditioning).sample
+        inputs = self.get_additional_inputs(latents * c_in)
+        noise_pred = self.unet(inputs, timestep, encoder_hidden_states=conditioning).sample
         original_pred = latents - sigma * noise_pred
         return original_pred
 

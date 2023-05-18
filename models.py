@@ -9,54 +9,13 @@ from diffusers.models.vae import DiagonalGaussianDistribution
 from diffusers.models.controlnet import ControlNetModel
 from lora import LoRANetwork
 from hypernetwork import Hypernetwork
-from unet import UNET as SDUNET
-
-class SDUNET(SDUNET):
-    def __init__(self, model_type, prediction_type, dtype):
-        self.model_type = model_type
-        self.prediction_type = prediction_type
-        super().__init__(**SDUNET.get_config(model_type))
-        self.to(dtype)
-        self.additional = None
-
-    def __getattr__(self, name):
-        if name == "device":
-            return next(self.parameters()).device
-        if name == "dtype":
-            return next(self.parameters()).dtype
-        return super().__getattr__(name)
-        
-    @staticmethod
-    def from_model(name, state_dict, dtype=None):
-        if not dtype:
-            dtype = state_dict['metadata']['dtype']
-        model_type = state_dict['metadata']['model_type']
-        prediction_type = state_dict['metadata']['prediction_type']
-
-        utils.cast_state_dict(state_dict, dtype)
-        
-        with utils.DisableInitialization():
-            unet = SDUNET(model_type, prediction_type, dtype)
-            missing, _ = unet.load_state_dict(state_dict, strict=False)
-        if missing:
-            raise ValueError("ERROR missing keys: " + ", ".join(missing))
-
-        unet.additional = AdditionalNetworks(unet)
-        return unet
-
-    @staticmethod
-    def get_config(model_type):
-        if model_type == "SDv1":
-            config = dict(cross_attention_dim=768, attention_head_dim=[8,8,8,8])
-        else:
-            config = dict(cross_attention_dim=1024, attention_head_dim=[5,10,20,20])
-        return config
 
 class UNET(UNet2DConditionModel):
-    def __init__(self, model_type, prediction_type, dtype):
+    def __init__(self, model_type, model_variant, prediction_type, dtype):
         self.model_type = model_type
+        self.inpainting = model_variant == "Inpainting"
         self.prediction_type = prediction_type
-        super().__init__(**UNET.get_config(model_type))
+        super().__init__(**UNET.get_config(model_type, model_variant))
         self.to(dtype)
         self.additional = None
         
@@ -66,11 +25,12 @@ class UNET(UNet2DConditionModel):
             dtype = state_dict['metadata']['dtype']
         model_type = state_dict['metadata']['model_type']
         prediction_type = state_dict['metadata']['prediction_type']
+        model_variant = state_dict['metadata'].get('model_variant', "")
 
         utils.cast_state_dict(state_dict, dtype)
         
         with utils.DisableInitialization():
-            unet = UNET(model_type, prediction_type, dtype)
+            unet = UNET(model_type, model_variant, prediction_type, dtype)
             missing, _ = unet.load_state_dict(state_dict, strict=False)
         if missing:
             raise ValueError("missing keys: " + ", ".join(missing))
@@ -79,11 +39,11 @@ class UNET(UNet2DConditionModel):
         return unet
 
     @staticmethod
-    def get_config(model_type):
+    def get_config(model_type, model_variant):
         if model_type == "SDv1":
             config = dict(
                 sample_size=32,
-                in_channels=4,
+                in_channels=9 if model_variant == "Inpainting" else 4,
                 out_channels=4,
                 down_block_types=('CrossAttnDownBlock2D', 'CrossAttnDownBlock2D', 'CrossAttnDownBlock2D', 'DownBlock2D'),
                 up_block_types=('UpBlock2D', 'CrossAttnUpBlock2D', 'CrossAttnUpBlock2D', 'CrossAttnUpBlock2D'),
@@ -95,7 +55,7 @@ class UNET(UNet2DConditionModel):
         elif model_type == "SDv2":
             config = dict(
                 sample_size=32,
-                in_channels=4,
+                in_channels=9 if model_variant == "Inpainting" else 4,
                 out_channels=4,
                 down_block_types=('CrossAttnDownBlock2D', 'CrossAttnDownBlock2D', 'CrossAttnDownBlock2D', 'DownBlock2D'),
                 up_block_types=('UpBlock2D', 'CrossAttnUpBlock2D', 'CrossAttnUpBlock2D', 'CrossAttnUpBlock2D'),
@@ -144,7 +104,7 @@ class VAE(AutoencoderKL):
 
     @staticmethod
     def get_config(model_type):
-        if model_type in ["SDv1", "SDv2"]:
+        if model_type in {"SDv1", "SDv2"}:
             config = dict(
                 sample_size=256,
                 in_channels=3,

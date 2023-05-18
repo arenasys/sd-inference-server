@@ -306,7 +306,7 @@ class ModelStorage():
                 kk = k.split(".", 1)[1]
                 metadata[kk] = ''.join([chr(c) for c in state_dict[k]])
 
-        model_type = metadata["model_type"]
+        model_type = metadata["model_type"].split("-",1)[0]
 
         sub_state_dicts = {}
         for k in list(state_dict.keys()):
