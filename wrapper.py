@@ -547,7 +547,7 @@ class GenerationParameters():
         noise = utils.NoiseSchedule(seeds, subseeds, self.width // 8, self.height // 8, device, self.unet.dtype)
         sampler = SAMPLER_CLASSES[self.sampler](denoiser, self.eta)
 
-        if self.unet.inpainting:
+        if self.unet.inpainting: #SDv1-Inpainting, SDv2-Inpainting
             images = torch.zeros((batch_size, 3, self.width, self.height))
             inpainting_masked, inpainting_masks = utils.encode_inpainting(images, None, self.vae, seeds)
             denoiser.set_inpainting(inpainting_masked, inpainting_masks)
@@ -693,8 +693,6 @@ class GenerationParameters():
             denoiser.set_mask(mask_latents, original_latents)
             if self.keep_artifacts:
                 self.on_artifact("Mask", masks)
-        else:
-            denoiser.set_mask(None, original_latents)
 
         if self.unet.inpainting: #SDv1-Inpainting, SDv2-Inpainting
             if not self.mask:

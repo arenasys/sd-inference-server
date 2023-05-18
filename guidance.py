@@ -23,9 +23,8 @@ class GuidedDenoiser():
         self.compositions = self.conditioning_schedule.get_compositions(self.dtype, self.device)
 
     def set_mask(self, mask, original):
-        if mask != None:
-            self.mask = mask.to(self.dtype)
-            self.original = original.to(self.dtype) * 0.18215
+        self.mask = mask.to(self.dtype)
+        self.original = original.to(self.dtype) * 0.18215
 
     def set_inpainting(self, masked, masks):
         self.inpainting_input = torch.cat([masks, masked], dim=1).to(self.device, self.dtype)
