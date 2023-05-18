@@ -34,11 +34,13 @@ class GuidedDenoiser():
         self.predictions = predictions
 
     def predict_noise_epsilon(self, latents, timestep, conditioning, alpha):
-        noise_pred = self.unet(latents, timestep, encoder_hidden_states=conditioning).sample
+        inputs = self.get_additional_inputs(latents)
+        noise_pred = self.unet(inputs, timestep, encoder_hidden_states=conditioning).sample
         return noise_pred
 
     def predict_noise_v(self, latents, timestep, conditioning, alpha):
-        v_pred = self.unet(latents, timestep, encoder_hidden_states=conditioning).sample
+        inputs = self.get_additional_inputs(latents)
+        v_pred = self.unet(inputs, timestep, encoder_hidden_states=conditioning).sample
         return alpha.sqrt() * v_pred + (1-alpha).sqrt() * latents
 
     def mask_noise(self, latents, alpha, noise):
@@ -96,7 +98,8 @@ class GuidedDenoiser():
         c_skip = 1 / (sigma ** 2 + 1)
         c_out = -sigma * 1 / (sigma ** 2 + 1) ** 0.5
 
-        v_pred = self.unet(latents * c_in, timestep, encoder_hidden_states=conditioning).sample
+        inputs = self.get_additional_inputs(latents * c_in)
+        v_pred = self.unet(inputs, timestep, encoder_hidden_states=conditioning).sample
         original_pred = v_pred * c_out + latents * c_skip
         return original_pred
 
