@@ -129,20 +129,25 @@ class GenerationParameters():
     def on_artifact(self, name, images):
         if self.callback:
             if type(images[0]) == list:
-                for j in range(len(images[0])):
-                    images_set = [img[j] for img in images]
+                for j in range(max([len(i) for i in images])):
                     images_data = []
-                    for i in images_set:
-                        bytesio = io.BytesIO()
-                        i.save(bytesio, format='PNG')
-                        images_data += [bytesio.getvalue()]
+                    for i in range(len(images)):
+                        if j < len(images[i]):
+                            bytesio = io.BytesIO()
+                            images[i][j].save(bytesio, format='PNG')
+                            images_data += [bytesio.getvalue()]
+                        else:
+                            images_data += [None]
                     self.callback({"type": "artifact", "data": {"name": f"{name} {j+1}", "images": images_data}})
             else:
                 images_data = []
                 for i in images:
-                    bytesio = io.BytesIO()
-                    i.save(bytesio, format='PNG')
-                    images_data += [bytesio.getvalue()]
+                    if i != None:
+                        bytesio = io.BytesIO()
+                        i.save(bytesio, format='PNG')
+                        images_data += [bytesio.getvalue()]
+                    else:
+                        images_data += [None]
                 self.callback({"type": "artifact", "data": {"name": name, "images": images_data}})
         
     def on_complete(self, images, metadata):
@@ -312,10 +317,10 @@ class GenerationParameters():
         self.set_status("Encoding")
         return utils.encode_images(self.vae, seeds, images)
 
-    def upscale_images(self, vae, images, mode, width, height, seeds):
+    def upscale_images(self, vae, images, mode, width, height, offsets, seeds):
         if mode in UPSCALERS_LATENT:
             latents = utils.get_latents(vae, seeds, images)
-            latents = upscalers.upscale(latents, UPSCALERS_LATENT[mode], width//8, height//8)
+            latents = upscalers.upscale(latents, UPSCALERS_LATENT[mode], width//8, height//8, offsets)
 
             if type(latents) == list:
                 latents = torch.stack(latents)
@@ -323,9 +328,9 @@ class GenerationParameters():
             return latents, None
         
         if mode in UPSCALERS_PIXEL:
-            images = upscalers.upscale(images, UPSCALERS_PIXEL[mode], width, height)
+            images = upscalers.upscale(images, UPSCALERS_PIXEL[mode], width, height, offsets)
         else:
-            images = upscalers.upscale_super_resolution(images, self.upscale_model, width, height)
+            images = upscalers.upscale_super_resolution(images, self.upscale_model, width, height, offsets)
 
         self.set_status("Encoding")
         latents = utils.get_latents(vae, seeds, images)
@@ -635,10 +640,15 @@ class GenerationParameters():
         batch_size = self.get_batch_size()
         device = self.unet.device
         images = self.image
-        masks = self.mask
+        masks = (self.mask or []).copy()
         width, height = self.width, self.height
+        offsets = self.offsets or [0.5] * len(images)
 
         extents = utils.get_extents(images, masks, self.padding, width, height)
+        for i in range(len(masks)):
+            if masks[i] == None:
+                masks[i] = PIL.Image.new("L", (images[i].width, images[i].height), color=255)
+
         original_images = images
         images = utils.apply_extents(images, extents)
         masks = self.prepare_images(masks, extents, width, height)
@@ -656,7 +666,9 @@ class GenerationParameters():
             self.unet.set_controlnet_conditioning(cn_cond)
 
         if self.area:
-            self.area = [self.prepare_images(a, extents, width, height) for a in self.area]
+            for i in range(len(self.area)):
+                if self.mask and self.mask[i] != None:
+                    self.area[i] = self.prepare_images(self.area[i], [extents[i]]*len(self.area[i]), width, height)
             if self.keep_artifacts:
                 self.on_artifact("Area", self.area)
             self.area = utils.preprocess_areas(self.area, width, height)
@@ -678,7 +690,7 @@ class GenerationParameters():
         sampler = SAMPLER_CLASSES[self.sampler](denoiser, self.eta)
 
         self.set_status("Upscaling")
-        latents, upscaled_images = self.upscale_images(self.vae, images, self.img2img_upscaler, width, height, seeds)
+        latents, upscaled_images = self.upscale_images(self.vae, images, self.img2img_upscaler, width, height, offsets, seeds)
         original_latents = latents
 
         if self.keep_artifacts:
@@ -688,11 +700,11 @@ class GenerationParameters():
 
         if self.mask:
             self.set_status("Preparing")
-            masks = [mask.filter(PIL.ImageFilter.GaussianBlur(self.mask_blur)) for mask in masks]
+            masks = [None if mask == None else mask.filter(PIL.ImageFilter.GaussianBlur(self.mask_blur)) for mask in masks]
             mask_latents = utils.get_masks(device, masks)
             denoiser.set_mask(mask_latents, original_latents)
             if self.keep_artifacts:
-                self.on_artifact("Mask", masks)
+                self.on_artifact("Mask", [masks[i] if self.mask[i] else None for i in range(len(masks))])
 
         if self.unet.inpainting: #SDv1-Inpainting, SDv2-Inpainting
             if not self.mask:
@@ -716,9 +728,10 @@ class GenerationParameters():
             self.move_models(unet=False, vae=False, clip=False)
 
         if self.mask:
-            images, masked = utils.apply_inpainting(images, original_images, masks, extents)
+            outputs, masked = utils.apply_inpainting(images, original_images, masks, extents)
             if self.keep_artifacts:
-                self.on_artifact("Output", masked)
+                self.on_artifact("Output", [masked[i] if self.mask[i] else None for i in range(len(masked))])
+            images = [outputs[i] if self.mask[i] else images[i] for i in range(len(images))]
 
         self.on_complete(images, metadata)
         return images
@@ -831,8 +844,6 @@ class GenerationParameters():
         if not oe == "safetensors":
             new_file = on + ".safetensors"
 
-        print(old_file, new_file)
-
         self.modify(old_file, new_file)
 
 
@@ -912,8 +923,6 @@ class GenerationParameters():
     def build(self, filename):
         self.set_status("Building")
 
-        print(filename)
-                
         file_type = filename.rsplit(".",1)[-1]
         if not file_type  in {"st", "safetensors"}:
             raise ValueError(f"unsuported checkpoint type: {file_type}. supported types are: safetensors, st")
@@ -982,5 +991,4 @@ class GenerationParameters():
         self.set_status(f"Saving")
         filename = os.path.join(self.storage.path, "SD", filename)
 
-        print(filename)
         safetensors.torch.save_file(model, filename)

@@ -183,15 +183,19 @@ def get_extents(originals, masks, padding, width, height):
 
         return int(x1), int(y1), int(x2), int(y2)
     
-    w, h = originals[0].size[0], originals[0].size[1]
-    
     if not masks:
-        return [(0,0,w,h) for o in originals]
+        return [(0,0,o.size[0],o.size[1]) for o in originals]
     
     if not padding:
         padding = 10240
- 
-    extents = [pad_extent(mask.getbbox(), padding, (w,h), (width, height)) for mask in masks]
+
+    extents = []
+    for i in range(len(masks)):
+        if masks[i] != None:
+            extents += [pad_extent(masks[i].getbbox(), padding, originals[i].size, (width, height))]
+        else:
+            extents += [(0,0,originals[i].size[0],originals[i].size[1])]
+
     return extents
 
 def apply_extents(inputs, extents):

@@ -2,30 +2,37 @@ import torch
 import utils
 
 import torchvision.transforms as transforms
+import torchvision.transforms.functional
  
 from basicsr.archs.rrdbnet_arch import RRDBNet
 
-def upscale(inputs, mode, width, height):
-    def _upscale(input):
-        if type(input) == torch.Tensor:
-            ar = input.shape[-1] / input.shape[-2]
-        else:
-            ar = input.size[0] / input.size[1]
-        
-        z = max(width, height)
-        if abs(ar-(width/height)) < 0.01:
-            z = min(width, height)
-        
-        resize = transforms.transforms.Resize(z, mode)
-        crop = transforms.CenterCrop((height, width))
-        return crop(resize(input))
-
-    if type(inputs) == list:
-        return [_upscale(i) for i in inputs]
+def upscale_single(input, mode, width, height, offset):
+    if type(input) == torch.Tensor:
+        ar = input.shape[-1] / input.shape[-2]
     else:
-        return _upscale(inputs)
+        ar = input.size[0] / input.size[1]
+    
+    z = max(width, height)
+    if abs(ar-(width/height)) < 0.01:
+        z = min(width, height)
+    
+    resize = transforms.transforms.Resize(z, mode)
+    input = resize(input)
 
-def upscale_super_resolution(images, model, width, height):
+    dx = int((input.size[0]-width)*offset)
+    dy = int((input.size[1]-height)*offset)
+
+    input = torchvision.transforms.functional.crop(input, dy, dx, height, width)
+    return input
+
+def upscale(inputs, mode, width, height, offsets=None):
+    if not offsets:
+        offsets = [0.5] * len(inputs)
+    return [upscale_single(inputs[i], mode, width, height, offsets[i]) for i in range(len(inputs))]
+
+def upscale_super_resolution(images, model, width, height, offsets=None):
+    if not offsets:
+        offsets = [0.5] * len(images)
     images = [i for i in images]
 
     with torch.inference_mode():
@@ -36,7 +43,7 @@ def upscale_super_resolution(images, model, width, height):
                 out = model(img)
                 out = out.clamp_(0, 1)
                 image = utils.FROM_TENSOR(out.squeeze(0))
-            images[i] = upscale(image, transforms.InterpolationMode.LANCZOS, width, height)
+            images[i] = upscale_single(image, transforms.InterpolationMode.LANCZOS, width, height, offsets[i])
     
     return images
 
