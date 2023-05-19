@@ -65,12 +65,20 @@ class GuidedDenoiser():
     def compose_predictions(self, pred):
         composed_pred = []
         i = 0
-        for (m, p), n in self.compositions:
-            pl, nl = len(p), len(n)
-            neg = (pred[i+pl:i+pl+nl]*n).sum(dim=0, keepdims=True) / torch.sum(n)
-            pred[i:i+pl] = pred[i:i+pl] * m + (neg * (1 - m))
-            composed_pred += [neg + ((pred[i:i+pl] - neg) * (p * self.scale)).sum(dim=0, keepdims=True)]
-            i += pl + nl
+        for (masks, pos_weights), neg_weights in self.compositions:
+            pos_len, neg_len = len(pos_weights), len(neg_weights)
+            pos = pred[i:i+pos_len]
+            neg = pred[i+pos_len:i+pos_len+neg_len]
+
+            # Apply composition
+            neg = (neg*neg_weights).sum(dim=0, keepdims=True) / torch.sum(neg_weights)
+            pos = pos * masks + (neg * (1 - masks))
+
+            # Apply CFG
+            cfg = neg + ((pos - neg) * (pos_weights * self.scale)).sum(dim=0, keepdims=True)
+            
+            composed_pred += [cfg]
+            i += pos_len + neg_len
         return torch.cat(composed_pred)
 
     def predict_noise(self, latents, timestep, alpha):
