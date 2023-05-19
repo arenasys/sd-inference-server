@@ -226,12 +226,23 @@ class PromptSchedule():
     def __init__(self, parent, index, prompt, steps, clip, HR):
         self.parent = parent
         self.index = index
+        self.weight = None
+        prompt, self.weight = self.get_weight(prompt)
         self.schedule = parse_prompt(prompt, steps, HR)
         self.schedule, self.network_schedule = seperate_schedule(self.schedule)
         self.tokenized = [(steps, tokenize_prompt(clip, prompt)) for steps, prompt in self.schedule]
         self.chunks = max(len(p) for _, p in self.tokenized)
         self.encoded = None
         self.all_networks = {}
+
+    def get_weight(self, prompt):
+        parts = prompt.rsplit(":", 1)
+        if len(parts) < 2:
+            return prompt, None
+        try:
+            return parts[0].strip(), float(parts[-1].strip())
+        except:
+            return prompt, None
     
     def pad_to_length(self, max_chunks):
         self.tokenized = [(steps, chunks + [chunks[-1]] * (max_chunks-len(chunks))) for steps, chunks in self.tokenized]
@@ -328,22 +339,26 @@ class ConditioningSchedule():
                [n.get_encoding_at_step(step) for n in self.negatives]
     
     def get_composition(self, dtype, device):
+        pos_w = [p.weight for p in self.positives]
+        pos_w[0] = pos_w[0] or 1
+        pos_w = [w or 0.8 for w in pos_w]
+
+        neg_w = [n.weight or 1.0 for n in self.negatives]
+
         if self.areas:
-            f = 0.8
-            weights = [f] * len(self.positives)
-            weights[0] = 1
-            weights = torch.tensor(weights, dtype=dtype, device=device).reshape(-1,1,1,1)
+            weights = torch.tensor(pos_w, dtype=dtype, device=device).reshape(-1,1,1,1)
             shape = self.areas[0].shape
             pos = [torch.ones(shape, dtype=dtype, device=device)] * len(self.positives)
             for i in range(len(self.areas)):
                 if i + 1 < len(pos):
                     pos[i + 1] = self.areas[i].to(dtype=dtype, device=device)
-            neg = torch.tensor([1] * len(self.negatives), dtype=dtype, device=device).reshape(-1,1,1,1)
+            neg = torch.tensor(neg_w, dtype=dtype, device=device).reshape(-1,1,1,1)
             return [(torch.cat(pos), weights), neg]
         else:
-            pos = torch.tensor([1] * len(self.positives), dtype=dtype, device=device).reshape(-1,1,1,1)
-            neg = torch.tensor([1] * len(self.negatives), dtype=dtype, device=device).reshape(-1,1,1,1)
-            return [(pos, pos), neg]
+            pos = torch.tensor(pos_w, dtype=dtype, device=device).reshape(-1,1,1,1)
+            neg = torch.tensor(neg_w, dtype=dtype, device=device).reshape(-1,1,1,1)
+            mask = torch.tensor([1] * len(self.positives), dtype=dtype, device=device).reshape(-1,1,1,1)
+            return [(pos, mask), neg]
     
 class BatchedConditioningSchedules():
     def __init__(self, clip, prompts, steps, clip_skip, areas):
