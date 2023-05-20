@@ -6,7 +6,7 @@ import torchvision.transforms.functional
  
 from basicsr.archs.rrdbnet_arch import RRDBNet
 
-def upscale_single(input, mode, width, height, offset):
+def upscale_single(input, mode, width, height, offset=0.5):
     if type(input) == torch.Tensor:
         rw = width / input.shape[-1]
         rh = height / input.shape[-2]
@@ -14,7 +14,9 @@ def upscale_single(input, mode, width, height, offset):
         rw = width / input.size[0]
         rh = height / input.size[1]
 
-    if rw > rh:
+    if rw == rh:
+        z = min(width, height)
+    elif rw > rh:
         z = width
     else:
         z = height
@@ -22,8 +24,12 @@ def upscale_single(input, mode, width, height, offset):
     resize = transforms.transforms.Resize(z, mode)
     input = resize(input)
 
-    dx = int((input.size[0]-width)*offset)
-    dy = int((input.size[1]-height)*offset)
+    if type(input) == torch.Tensor:
+        dx = int((input.shape[-1]-width)*offset)
+        dy = int((input.shape[-2]-height)*offset)
+    else:
+        dx = int((input.size[0]-width)*offset)
+        dy = int((input.size[1]-height)*offset)
 
     input = torchvision.transforms.functional.crop(input, dy, dx, height, width)
     return input

@@ -306,7 +306,7 @@ class GenerationParameters():
     @torch.inference_mode()
     def upscale_latents(self, latents, mode, width, height, seeds):
         if mode in UPSCALERS_LATENT:
-            return upscalers.upscale(latents, UPSCALERS_LATENT[mode], width//8, height//8)
+            return upscalers.upscale_single(latents, UPSCALERS_LATENT[mode], width//8, height//8)
 
         images = utils.decode_images(self.vae, latents)
         if mode in UPSCALERS_PIXEL:
@@ -320,7 +320,7 @@ class GenerationParameters():
     def upscale_images(self, vae, images, mode, width, height, offsets, seeds):
         if mode in UPSCALERS_LATENT:
             latents = utils.get_latents(vae, seeds, images)
-            latents = upscalers.upscale(latents, UPSCALERS_LATENT[mode], width//8, height//8, offsets)
+            latents = upscalers.upscale_single(latents, UPSCALERS_LATENT[mode], width//8, height//8, offsets)
 
             if type(latents) == list:
                 latents = torch.stack(latents)
