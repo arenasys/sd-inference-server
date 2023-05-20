@@ -8,13 +8,16 @@ from basicsr.archs.rrdbnet_arch import RRDBNet
 
 def upscale_single(input, mode, width, height, offset):
     if type(input) == torch.Tensor:
-        ar = input.shape[-1] / input.shape[-2]
+        rw = width / input.shape[-1]
+        rh = height / input.shape[-2]
     else:
-        ar = input.size[0] / input.size[1]
-    
-    z = max(width, height)
-    if abs(ar-(width/height)) < 0.01:
-        z = min(width, height)
+        rw = width / input.size[0]
+        rh = height / input.size[1]
+
+    if rw > rh:
+        z = width
+    else:
+        z = height
     
     resize = transforms.transforms.Resize(z, mode)
     input = resize(input)

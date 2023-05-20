@@ -514,7 +514,7 @@ class GenerationParameters():
             annotators = [self.storage.get_controlnet_annotator(name, device, dtype) for name in self.cn_annotator]
             cn_cond, cn_outputs = controlnet.preprocess_control(self.cn_image, annotators, self.cn_args, self.cn_scale)
             if self.keep_artifacts:
-                self.on_artifact("Control", cn_outputs)
+                self.on_artifact("Control", [cn_outputs]*batch_size)
             self.unet.set_controlnet_conditioning(cn_cond)
 
         seeds, subseeds = self.get_seeds(batch_size)
@@ -609,7 +609,7 @@ class GenerationParameters():
             cn_cond, cn_outputs = controlnet.preprocess_control(self.cn_image, annotators, self.cn_args, self.cn_scale)
             self.unet.set_controlnet_conditioning(cn_cond)
             if self.keep_artifacts:
-                self.on_artifact("Control 2", cn_outputs)
+                self.on_artifact("Control 2", [cn_outputs]*batch_size)
 
         self.set_status("Generating")
         latents = inference.img2img(latents, denoiser, sampler, noise, hr_steps, True, self.hr_strength, self.on_step)
@@ -656,13 +656,15 @@ class GenerationParameters():
         metadata = self.get_metadata("img2img",  width, height, batch_size, self.prompt, seeds, subseeds)
 
         if self.cn:
-            cn_images = self.prepare_images(self.cn_image, extents, width, height)
+            for i in range(len(self.cn_image)):
+                if self.mask and self.mask[i] != None:
+                    self.cn_image[i] = self.prepare_images([self.cn_image[i]], [extents[i]], width, height)[0]
             self.unet = controlnet.ControlledUNET(self.unet, self.cn)
             dtype = self.unet.dtype
             annotators = [self.storage.get_controlnet_annotator(name, device, dtype) for name in self.cn_annotator]
-            cn_cond, cn_outputs = controlnet.preprocess_control(cn_images, annotators, self.cn_args, self.cn_scale)
+            cn_cond, cn_outputs = controlnet.preprocess_control(self.cn_image, annotators, self.cn_args, self.cn_scale)
             if self.keep_artifacts:
-                self.on_artifact("Control", cn_outputs)
+                self.on_artifact("Control", [cn_outputs]*batch_size)
             self.unet.set_controlnet_conditioning(cn_cond)
 
         if self.area:
