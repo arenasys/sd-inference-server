@@ -244,13 +244,13 @@ class NoiseSchedule():
             noises += [[]]
 
             for _ in range(self.steps+1):
-                noise = torch.randn(self.shape, generator=generator, device=self.device).to(self.device, self.dtype)
+                noise = torch.randn(self.shape, generator=generator).to(self.device, self.dtype)
                 noises[i] += [noise]
 
         for i in range(len(self.subseeds)):
             seed, strength = self.subseeds[i]
             generator.manual_seed(seed)
-            subnoise = torch.randn(self.shape, generator=generator, device=self.device).to(self.device, self.dtype)
+            subnoise = torch.randn(self.shape, generator=generator).to(self.device, self.dtype)
             noises[i][0] = slerp_noise(strength, noises[i][0], subnoise)
 
         self.noise = [torch.stack(n) for n in zip(*noises)]
@@ -274,7 +274,7 @@ def singular_noise(seeds, width, height, device):
     for i in range(len(seeds)):
         generator.manual_seed(seeds[i])
         noises += [[]]
-        noises[i] = torch.randn(shape, generator=generator, device=device).to(device)
+        noises[i] = torch.randn(shape, generator=generator).to(device)
         
     combined = torch.stack(noises)
     return combined
