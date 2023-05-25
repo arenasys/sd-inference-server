@@ -8,6 +8,13 @@ import safetensors.torch
 import time
 import shutil
 
+DIRECTML_AVAILABLE = False
+try:
+    import torch_directml
+    DIRECTML_AVAILABLE = True
+except:
+    pass
+
 import prompts
 import samplers_k
 import samplers_ddpm
@@ -85,6 +92,10 @@ class GenerationParameters():
             while name in self.device_names:
                 name = original + f" ({i})"
             self.device_names += [name]
+        
+        if DIRECTML_AVAILABLE:
+            self.device_names += ["DirectML"]
+
         self.device_names += ["CPU"]
 
         self.callback = None
@@ -292,6 +303,9 @@ class GenerationParameters():
             if self.device_name == "CPU":
                 device = torch.device("cpu")
                 self.storage.dtype = torch.float32
+            elif self.device_name == "DirectML":
+                device = torch_directml.device()
+                self.storage.dtype = torch.float16
             else:
                 device = torch.device(idx)
                 self.storage.dtype = torch.float16

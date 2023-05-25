@@ -6,24 +6,6 @@ import shutil
 import torch
 import safetensors.torch
 
-import psutil
-import platform
-IS_WIN = platform.system() == 'Windows'
-
-def has_handle(fpath):
-    if IS_WIN:
-        return False
-    
-    for proc in psutil.process_iter():
-        try:
-            for item in proc.open_files():
-                if fpath == item.path:
-                    return True
-        except Exception:
-            pass
-
-    return False
-
 def relative_file(file):
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), file)
 
@@ -207,9 +189,6 @@ def clean_component(state_dict):
 
 def convert_checkpoint(in_file):
     print(f"CONVERTING {in_file.rsplit(os.path.sep,1)[-1]}")
-    
-    if has_handle(os.path.abspath(in_file)):
-        raise Exception("model is still being written")
 
     name = in_file.split(os.path.sep)[-1].split(".")[0]
     if in_file.endswith(".ckpt") or in_file.endswith(".pt"):

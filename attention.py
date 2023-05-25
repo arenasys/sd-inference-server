@@ -65,7 +65,7 @@ def default(val, d):
 
 def use_split_attention(device):
     if not "cuda" in str(device):
-       raise RuntimeError("Split v2 attention does not support CPU generation")
+       raise RuntimeError("Split v2 attention does not support this platform/device")
 
     def get_available_vram(device):
         stats = torch.cuda.memory_stats(device)
