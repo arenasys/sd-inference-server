@@ -223,15 +223,13 @@ def seperate_schedule(schedule):
     return prompt_schedule, networks_schedule
 
 class PromptSchedule():
-    def __init__(self, parent, index, prompt, steps, clip, HR):
+    def __init__(self, parent, index, prompt, steps, HR):
         self.parent = parent
         self.index = index
         self.weight = None
         prompt, self.weight = self.get_weight(prompt)
         self.schedule = parse_prompt(prompt, steps, HR)
         self.schedule, self.network_schedule = seperate_schedule(self.schedule)
-        self.tokenized = [(steps, tokenize_prompt(clip, prompt)) for steps, prompt in self.schedule]
-        self.chunks = max(len(p) for _, p in self.tokenized)
         self.encoded = None
         self.all_networks = {}
 
@@ -247,6 +245,10 @@ class PromptSchedule():
     def pad_to_length(self, max_chunks):
         self.tokenized = [(steps, chunks + [chunks[-1]] * (max_chunks-len(chunks))) for steps, chunks in self.tokenized]
         
+    def tokenize(self, clip):
+        self.tokenized = [(steps, tokenize_prompt(clip, prompt)) for steps, prompt in self.schedule]
+        self.chunks = max(len(p) for _, p in self.tokenized)
+
     def encode(self, clip, clip_skip):
         clip_networks = [self.parent.get_networks_at_step(0,1)[self.index]]
         clip.additional.set_strength(clip_networks)
@@ -279,34 +281,35 @@ class PromptSchedule():
         return step_networks
     
 class ConditioningSchedule():
-    def __init__(self, clip, prompt, negative_prompt, steps, clip_skip, areas):
-        self.clip = clip
+    def __init__(self, prompt, negative_prompt, steps, clip_skip):
         self.prompt = prompt
         self.negative_prompt = negative_prompt
         self.steps = steps
         self.clip_skip = clip_skip
-        self.areas = areas
+        self.areas = None
         self.HR = False
         self.parse()
 
-    def switch_to_HR(self, hr_steps, areas):
+    def switch_to_HR(self, hr_steps):
         self.steps = hr_steps
-        self.areas = areas
         self.HR = True
         self.parse()
 
     def parse(self):
-        self.positives = [PromptSchedule(self, i, p, self.steps, self.clip, self.HR) for i, p in enumerate(self.prompt)]
-        self.negatives = [PromptSchedule(self, i + len(self.positives), p, self.steps, self.clip, self.HR) for i, p in enumerate(self.negative_prompt)]
+        self.positives = [PromptSchedule(self, i, p, self.steps, self.HR) for i, p in enumerate(self.prompt)]
+        self.negatives = [PromptSchedule(self, i + len(self.positives), p, self.steps, self.HR) for i, p in enumerate(self.negative_prompt)]
+
+    def encode(self, clip, areas):
+        self.areas = areas
+
+        for p in self.positives + self.negatives:
+            p.tokenize(clip)
 
         max_chunks = max([p.chunks for p in self.positives + self.negatives])
 
         for p in self.positives + self.negatives:
             p.pad_to_length(max_chunks)
-
-    def encode(self):
-        for p in self.positives + self.negatives:
-            p.encode(self.clip, self.clip_skip)
+            p.encode(clip, self.clip_skip)
 
     def get_all_networks(self):
         networks = self.get_networks_at_step(0)
@@ -361,33 +364,26 @@ class ConditioningSchedule():
             return [(pos, mask), neg]
     
 class BatchedConditioningSchedules():
-    def __init__(self, clip, prompts, steps, clip_skip, areas):
-        self.clip = clip
+    def __init__(self, prompts, steps, clip_skip):
         self.prompts = prompts
         self.steps = steps
         self.clip_skip = clip_skip
         self.batch_size = len(prompts)
-        self.areas = areas
         self.parse()
 
-    def switch_to_HR(self, hr_steps, areas):
+    def switch_to_HR(self, hr_steps):
         for i, b in enumerate(self.batches):
-            a = []
-            if i < len(areas):
-                a = areas[i]
-            b.switch_to_HR(hr_steps, a)
+            b.switch_to_HR(hr_steps)
 
     def parse(self):
         self.batches = []
         for i, (positive, negative) in enumerate(self.prompts):
-            areas = []
-            if i < len(self.areas):
-                areas = self.areas[i]
-            self.batches += [ConditioningSchedule(self.clip, positive, negative, self.steps, self.clip_skip, areas)]
+            self.batches += [ConditioningSchedule(positive, negative, self.steps, self.clip_skip)]
     
-    def encode(self):
-        for b in self.batches:
-            b.encode()        
+    def encode(self, clip, areas):
+        for i, b in enumerate(self.batches):
+            a = areas[i] if i < len(areas) else []
+            b.encode(clip, a)
 
     def get_all_networks(self):
         all_networks = set()
@@ -400,6 +396,19 @@ class BatchedConditioningSchedules():
         for b in self.batches:
             networks += b.get_networks_at_step(step, idx)
         return networks
+    
+    def get_initial_networks(self, comparable=False):
+        unet = self.get_networks_at_step(0,0)[0]
+        clip = self.get_networks_at_step(0,1)[0]
+        all = list(set(unet.keys()).union(set(clip.keys())))
+
+        if comparable:
+            unet_t = tuple([tuple([k,unet[k]]) for k in sorted(unet.keys())])
+            clip_t = tuple([tuple([k,clip[k]]) for k in sorted(clip.keys())])
+            all_t = tuple(sorted(all))
+            return tuple([all_t, unet_t, clip_t])
+        else:
+            return all, unet, clip
     
     def get_conditioning_at_step(self, step):
         conditioning = []

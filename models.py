@@ -246,7 +246,8 @@ class AdditionalNetworks():
             super().__init__()
             self.parent = parent
             self.name = name
-            self.original = module.forward
+            self.original_module = module
+            self.original_forward = module.forward
             self.dim = module.in_features if hasattr(module, "in_features") else None
 
             self.hns = []
@@ -260,7 +261,7 @@ class AdditionalNetworks():
                 for i in range(len(self.parent.strength)):
                     if hn.net_name in self.parent.strength[i]:
                         x[i] += ((v[i] * self.parent.strength[i][hn.net_name])).clone()
-            out = self.original(x)
+            out = self.original_forward(x)
             for lora in self.loras:
                 v = None
                 for i in range(len(self.parent.strength)):
@@ -270,8 +271,12 @@ class AdditionalNetworks():
                         out[i] += v[i] * self.parent.strength[i][lora.net_name]
             return out
 
-        def attach_lora(self, module):
-            self.loras.append(module)
+        def attach_lora(self, module, static):
+            if static:
+                weight = module.get_weight()
+                self.original_module.weight += weight * self.parent.strength[0][module.net_name]
+            else:
+                self.loras.append(module)
         
         def attach_hn(self, module):
             self.hns.append(module)

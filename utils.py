@@ -2,9 +2,15 @@ import PIL
 import torch
 import torchvision.transforms as transforms
 
+DIRECTML_AVAILABLE = False
+try:
+    import torch_directml
+    DIRECTML_AVAILABLE = True
+except:
+    pass
+
 TO_TENSOR = transforms.ToTensor()
 FROM_TENSOR = transforms.ToPILImage()
-
 
 def preprocess_images(images):
     def process(image):
@@ -236,7 +242,11 @@ class NoiseSchedule():
         self.generate()
 
     def generate(self):
-        generator = torch.Generator()
+        rng_device = self.device
+        if DIRECTML_AVAILABLE and rng_device == torch_directml.device():
+            rng_device = torch.device("cpu")
+
+        generator = torch.Generator(rng_device)
         noises = []
         for i in range(len(self.seeds)):
             seed = self.seeds[i]
@@ -244,13 +254,13 @@ class NoiseSchedule():
             noises += [[]]
 
             for _ in range(self.steps+1):
-                noise = torch.randn(self.shape, generator=generator).to(self.device, self.dtype)
+                noise = torch.randn(self.shape, generator=generator, device=rng_device).to(self.device, self.dtype)
                 noises[i] += [noise]
 
         for i in range(len(self.subseeds)):
             seed, strength = self.subseeds[i]
             generator.manual_seed(seed)
-            subnoise = torch.randn(self.shape, generator=generator).to(self.device, self.dtype)
+            subnoise = torch.randn(self.shape, generator=generator, device=rng_device).to(self.device, self.dtype)
             noises[i][0] = slerp_noise(strength, noises[i][0], subnoise)
 
         self.noise = [torch.stack(n) for n in zip(*noises)]
@@ -268,13 +278,17 @@ class NoiseSchedule():
         return noise
 
 def singular_noise(seeds, width, height, device):
+    rng_device = device
+    if DIRECTML_AVAILABLE and rng_device == torch_directml.device():
+        rng_device = torch.device("cpu")
+
     shape = (4, int(height), int(width))
-    generator = torch.Generator()
+    generator = torch.Generator(rng_device)
     noises = []
     for i in range(len(seeds)):
         generator.manual_seed(seeds[i])
         noises += [[]]
-        noises[i] = torch.randn(shape, generator=generator).to(device)
+        noises[i] = torch.randn(shape, generator=generator, device=rng_device).to(device)
         
     combined = torch.stack(noises)
     return combined

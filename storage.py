@@ -97,12 +97,21 @@ class ModelStorage():
         # networks cant have a hard limit since you can use an arbitrary number of them
         # so they are "decayed" from gpu -> cpu -> disk as they are left unused
         for m in list(self.loaded[comp].keys()):
-            if m in used:
+            if any([os.path.sep+u+"." in m for u in used]):
                 continue
             if str(self.loaded[comp][m].device) != "cpu":
                 self.loaded[comp][m].to("cpu")
             else:
                 del self.loaded[comp][m]
+
+    def clear_modified(self):
+        # static network mode will merge models into the UNET/CLIP
+        # so reload from disk
+        for comp in {"UNET", "CLIP"}:
+            for model in self.loaded[comp]:
+                self.loaded[comp][model].to("cpu")
+            self.loaded[comp] = {}
+        self.clear_file_cache()
 
     def load(self, model, device):
         model.to(device)
@@ -277,7 +286,8 @@ class ModelStorage():
         return self.annotators[name].to(device, dtype)
     
     def load_file(self, file, comp):
-        print(f"LOADING {file.rsplit(os.path.sep, 1)[-1]}...")
+        if not comp == "TI":
+            print(f"LOADING {file.rsplit(os.path.sep, 1)[-1]}...")
 
         if comp in ["UNET", "CLIP", "VAE"] and file.rsplit(".",1)[-1] in {"safetensors", "ckpt", "pt"}:
             state_dict = convert.convert_checkpoint(file)

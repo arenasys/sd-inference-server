@@ -98,6 +98,9 @@ class GenerationParameters():
 
         self.device_names += ["CPU"]
 
+        self.last_models_modified = False
+        self.last_models_config = None
+
         self.callback = None
 
     def set_status(self, status):
@@ -173,7 +176,7 @@ class GenerationParameters():
             
     def reset(self):
         for attr in list(self.__dict__.keys()):
-            if not attr in ["storage", "device", "device_names", "callback"]:
+            if not attr in ["storage", "device", "device_names", "callback", "last_models_modified", "last_models_config"]:
                 delattr(self, attr)
 
     def __getattr__(self, item):
@@ -210,6 +213,14 @@ class GenerationParameters():
             
             setattr(self, key, value)
     
+    def check_modified(self, nets):
+        current = tuple([self.network_mode, self.unet, self.clip, *nets])
+        self.reattach_networks = current != self.last_models_config
+        if self.reattach_networks and self.last_models_modified:
+            self.storage.clear_modified()
+            self.last_models_modified = False
+        self.last_models_config = current
+
     def load_models(self):
         if not self.unet or type(self.unet) == str:
             self.unet_name = self.unet or self.model
@@ -244,7 +255,10 @@ class GenerationParameters():
                 self.set_status("Loading Upscaler")
                 self.upscale_model = self.storage.get_upscaler(self.img2img_upscaler, self.device)
 
-    def move_models(self, unet, vae, clip):
+    def need_models(self, unet, vae, clip):
+        if not self.minimal_vram:
+            return
+
         if unet:
             self.storage.load(self.unet, self.device)
         else:
@@ -421,7 +435,7 @@ class GenerationParameters():
                 m["eta"] = format_float(self.eta)
 
             if mode in {"txt2img", "img2img"}:
-                if len({self.unet_name, self.clip_name,self.vae_name}) == 1:
+                if len({self.unet_name, self.clip_name, self.vae_name}) == 1:
                     m["model"] = model_name(self.unet_name)
                 else:
                     m["UNET"] = model_name(self.unet_name)
@@ -463,14 +477,20 @@ class GenerationParameters():
             metadata += [m]
 
         return metadata
-
-    def attach_networks(self, networks, device):
+    
+    def attach_networks(self, all_nets, unet_nets, clip_nets, device):
         self.detach_networks()
+
+        static = self.network_mode == "Static"
+
+        if static:
+            self.unet.additional.set_strength([unet_nets])
+            self.clip.additional.set_strength([clip_nets])
 
         lora_names = []
         hn_names = []
 
-        for n in networks:
+        for n in all_nets:
             prefix, n = n.split(":",1)
             if prefix == "lora":
                 lora_names += [n]
@@ -478,12 +498,16 @@ class GenerationParameters():
                 hn_names += [n]
 
         if lora_names:
-            self.set_status("Loading LoRAs")
-            self.storage.enforce_network_limit(lora_names, "LoRA")
-            self.loras = [self.storage.get_lora(name, device) for name in lora_names]
+            if self.reattach_networks:
+                self.set_status("Loading LoRAs")
+                self.storage.enforce_network_limit(lora_names, "LoRA")
+                self.loras = [self.storage.get_lora(name, device) for name in lora_names]
 
-            for lora in self.loras:
-                lora.attach(self.unet.additional, self.clip.additional)
+                for lora in self.loras:
+                    lora.attach([self.unet.additional, self.clip.additional], static)
+                    if static:
+                        self.last_models_modified = True
+                        lora.to("cpu")
         else:
             self.storage.enforce_network_limit([], "LoRA")
 
@@ -510,15 +534,20 @@ class GenerationParameters():
 
     @torch.inference_mode()
     def txt2img(self):
+        self.set_status("Configuring")
+        required = "unet, clip, vae, sampler, prompt, width, height, seed, scale, steps".split(", ")
+        optional = "clip_skip, eta, batch_size, hr_steps, hr_factor, hr_upscaler, hr_strength, hr_sampler, hr_eta, area".split(", ")
+        self.check_parameters(required, optional)
+    
+        self.set_status("Parsing")
+        conditioning = prompts.BatchedConditioningSchedules(self.prompt, self.steps, self.clip_skip)
+        self.check_modified(conditioning.get_initial_networks(True))
+
         self.set_status("Loading")
         self.set_device()
         self.load_models()
 
         self.set_status("Configuring")
-        required = "unet, clip, vae, sampler, prompt, width, height, seed, scale, steps".split(", ")
-        optional = "clip_skip, eta, batch_size, hr_steps, hr_factor, hr_upscaler, hr_strength, hr_sampler, hr_eta, area".split(", ")
-        self.check_parameters(required, optional)
-
         batch_size = self.get_batch_size()
         device = self.unet.device
 
@@ -553,15 +582,14 @@ class GenerationParameters():
         else:
             area = []
         
+        self.set_status("Attaching")
+        self.attach_networks(*conditioning.get_initial_networks(), device)
+
         self.set_status("Encoding")
-        conditioning = prompts.BatchedConditioningSchedules(self.clip, self.prompt, self.steps, self.clip_skip, area)
-        self.attach_networks(conditioning.get_all_networks(), device)
-        conditioning.encode()
-        self.set_status("Configuring")
+        conditioning.encode(self.clip, area)
 
-        if self.minimal_vram:
-            self.move_models(unet=True, vae=False, clip=False)
-
+        self.set_status("Preparing")
+        self.need_models(unet=True, vae=False, clip=False)
         denoiser = guidance.GuidedDenoiser(self.unet, conditioning, self.scale)
         noise = utils.NoiseSchedule(seeds, subseeds, self.width // 8, self.height // 8, device, self.unet.dtype)
         sampler = SAMPLER_CLASSES[self.sampler](denoiser, self.eta)
@@ -574,17 +602,16 @@ class GenerationParameters():
         self.set_status("Generating")
         latents = inference.txt2img(denoiser, sampler, noise, self.steps, self.on_step)
 
-        if self.minimal_vram:
-            self.move_models(unet=False, vae=True, clip=False)
+        self.need_models(unet=False, vae=True, clip=False)
 
         if not self.hr_factor:
             self.set_status("Decoding")
             images = utils.decode_images(self.vae, latents)
             self.on_complete(images, metadata)
-            if self.minimal_vram:
-                self.storage.unload(self.vae)
+            self.need_models(unet=False, vae=False, clip=False)
             return images
-        
+
+        self.set_status("Preparing")
         if self.keep_artifacts:
             images = utils.decode_images(self.vae, latents)
             self.on_artifact("Base", images)
@@ -594,19 +621,22 @@ class GenerationParameters():
 
         area = utils.preprocess_areas(self.area, width, height)
 
-        if self.minimal_vram:
-            self.move_models(unet=False, vae=True, clip=True)
-
-        conditioning.switch_to_HR(hr_steps, area)
-        self.attach_networks(conditioning.get_all_networks(), device)
-        conditioning.encode()
-
-        if self.minimal_vram:
-            self.move_models(unet=False, vae=True, clip=False)
+        self.need_models(unet=False, vae=True, clip=True)
 
         denoiser.reset()
         sampler = SAMPLER_CLASSES[self.hr_sampler](denoiser, self.hr_eta)
         noise = utils.NoiseSchedule(seeds, subseeds, width // 8, height // 8, device, self.unet.dtype)
+
+        conditioning.switch_to_HR(hr_steps)
+
+        if self.network_mode == "Dynamic":
+            self.set_status("Attaching")
+            self.attach_networks(*conditioning.get_initial_networks(), device)
+
+        self.set_status("Encoding")
+        conditioning.encode(self.clip, area)
+
+        self.need_models(unet=False, vae=True, clip=False)
 
         self.set_status("Upscaling")
         latents = self.upscale_latents(latents, self.hr_upscaler, width, height, seeds)
@@ -615,8 +645,7 @@ class GenerationParameters():
             images = utils.decode_images(self.vae, latents)
             self.on_artifact("Upscaled", images)
 
-        if self.minimal_vram:
-            self.move_models(unet=True, vae=False, clip=False)
+        self.need_models(unet=True, vae=False, clip=False)
 
         if self.cn:
             self.cn_image = upscalers.upscale(self.cn_image, transforms.InterpolationMode.NEAREST, width, height)
@@ -628,29 +657,31 @@ class GenerationParameters():
         self.set_status("Generating")
         latents = inference.img2img(latents, denoiser, sampler, noise, hr_steps, True, self.hr_strength, self.on_step)
 
-        if self.minimal_vram:
-            self.move_models(unet=False, vae=True, clip=False)
-
         self.set_status("Decoding")
+        self.need_models(unet=False, vae=True, clip=False)
         images = utils.decode_images(self.vae, latents)
+
         self.on_complete(images, metadata)
 
-        if self.minimal_vram:
-            self.move_models(unet=False, vae=False, clip=False)
-
+        self.need_models(unet=False, vae=False, clip=False)
         return images
 
     @torch.inference_mode()
     def img2img(self):
-        self.set_status("Loading")
-        self.set_device()
-        self.load_models()
-
         self.set_status("Configuring")
         required = "unet, clip, vae, sampler, image, prompt, seed, scale, steps, strength".split(", ")
         optional = "img2img_upscaler, mask, mask_blur, clip_skip, eta, batch_size, padding, width, height".split(", ")
         self.check_parameters(required, optional)
 
+        self.set_status("Parsing")
+        conditioning = prompts.BatchedConditioningSchedules(self.prompt, self.steps, self.clip_skip)
+        self.check_modified(conditioning.get_initial_networks(True))
+
+        self.set_status("Loading")
+        self.set_device()
+        self.load_models()
+
+        self.set_status("Preparing")
         batch_size = self.get_batch_size()
         device = self.unet.device
         images = self.image
@@ -693,13 +724,14 @@ class GenerationParameters():
 
         self.current_step = 0
         self.total_steps = int(self.steps * self.strength) + 1
-        
-        conditioning = prompts.BatchedConditioningSchedules(self.clip, self.prompt, self.steps, self.clip_skip, self.area)
-        self.attach_networks(conditioning.get_all_networks(), device)
-        conditioning.encode()
 
-        if self.minimal_vram:
-            self.move_models(unet=True, vae=True, clip=False)
+        self.set_status("Attaching")
+        self.attach_networks(*conditioning.get_initial_networks(), device)
+
+        self.set_status("Encoding")
+        conditioning.encode(self.clip, self.area)
+
+        self.need_models(unet=True, vae=True, clip=False)
 
         denoiser = guidance.GuidedDenoiser(self.unet, conditioning, self.scale)
         noise = utils.NoiseSchedule(seeds, subseeds, width // 8, height // 8, device, self.unet.dtype)
@@ -723,25 +755,23 @@ class GenerationParameters():
                 self.on_artifact("Mask", [masks[i] if self.mask[i] else None for i in range(len(masks))])
 
         if self.unet.inpainting: #SDv1-Inpainting, SDv2-Inpainting
+            self.set_status("Preparing")
             if not self.mask:
                 masks = None
             inpainting_masked, inpainting_masks = utils.encode_inpainting(upscaled_images, masks, self.vae, seeds)
             denoiser.set_inpainting(inpainting_masked, inpainting_masks)
 
-        if self.minimal_vram:
-            self.move_models(unet=True, vae=False, clip=False)
+        self.need_models(unet=True, vae=False, clip=False)
 
         self.set_status("Generating")
         latents = inference.img2img(latents, denoiser, sampler, noise, self.steps, False, self.strength, self.on_step)
 
-        if self.minimal_vram:
-            self.move_models(unet=False, vae=True, clip=False)
+        self.need_models(unet=False, vae=True, clip=False)
 
         self.set_status("Decoding")
         images = utils.decode_images(self.vae, latents)
 
-        if self.minimal_vram:
-            self.move_models(unet=False, vae=False, clip=False)
+        self.need_models(unet=False, vae=False, clip=False)
 
         if self.mask:
             outputs, masked = utils.apply_inpainting(images, original_images, masks, extents)

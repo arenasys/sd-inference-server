@@ -27,8 +27,24 @@ class LoRAModule(torch.nn.Module):
             self.lora_down = torch.nn.Linear(lora_down.shape[1], lora_down.shape[0], bias=False)
             self.lora_up = torch.nn.Linear(lora_up.shape[1], lora_up.shape[0], bias=False)
         
+        
         self.register_buffer("alpha", torch.tensor(alpha or lora_down.shape[0]))
         self.register_buffer("dim", torch.tensor(lora_down.shape[0]), False)
+
+    def get_weight(self):
+        f = (self.alpha / self.dim)
+        if type(self.lora_up) == torch.nn.Linear:
+            return self.lora_up.weight @ self.lora_down.weight * f
+        else:
+            down = self.lora_down.weight
+            up = self.lora_up.weight
+            rank, in_ch, kernel_size, _ = down.shape
+            out_ch, _, _, _ = up.shape
+
+            merged = up.reshape(out_ch, -1) @ down.reshape(rank, -1)
+            weight = merged.reshape(out_ch, in_ch, kernel_size, kernel_size)
+
+            return weight * f
 
     def forward(self, x):
         if type(self.lora_up) == torch.nn.Linear:
@@ -64,7 +80,7 @@ class LoRANetwork(torch.nn.Module):
             lora = LoRAModule(self.net_name, name, up, down, alpha)
             self.add_module(name, lora)
 
-    def attach(self, *models):
+    def attach(self, models, static):
         for _, module in self.named_modules():
             if not hasattr(module, "name"):
                 continue
@@ -72,7 +88,7 @@ class LoRANetwork(torch.nn.Module):
 
             for model in models:
                 if name in model.modules:
-                    model.modules[name].attach_lora(module)
+                    model.modules[name].attach_lora(module, static)
 
     def set_strength(self, strength):
         for _, module in self.named_modules():
