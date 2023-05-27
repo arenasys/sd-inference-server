@@ -874,6 +874,10 @@ class GenerationParameters():
             self.modify(self.old_file, self.new_file)
         elif self.operation == "prune":
             self.prune(self.file)
+        elif self.operation == "move":
+            self.set_status("Moving")
+            os.makedirs(self.new_file.rsplit(os.path.sep,1)[0], exist_ok=True)
+            shutil.move(self.old_file, self.new_file)
         else:
             raise ValueError(f"unknown operation: {self.operation}")
         
