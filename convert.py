@@ -220,6 +220,8 @@ def convert_checkpoint(in_file):
         print("CONVERTING FROM SDv1")
         SDv1_convert(state_dict)
 
+    print("DONE")
+
     model_type = ("SDv2" if v2 else "SDv1")
 
     state_dict["metadata.model_type"] = torch.as_tensor([ord(c) for c in model_type])

@@ -143,6 +143,7 @@ def use_split_attention(device):
 
 def use_split_attention_v1(device):
     def split_cross_attention_forward_v1(self, x, encoder_hidden_states=None, attention_mask=None):
+
         h = self.heads
 
         q_in = self.to_q(x)
