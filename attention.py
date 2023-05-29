@@ -338,3 +338,55 @@ def use_xformers_attention(device):
         return out
     
     set_attention(xformers_attention_forward)
+
+def use_flash_attention_test(device):
+    def forward_flash_attn_test(self, x, encoder_hidden_states=None, attention_mask=None):
+        query = self.to_q(x)
+        context = encoder_hidden_states if encoder_hidden_states is not None else x
+        key = self.to_k(context)
+        value = self.to_v(context)
+
+        batch_size = query.shape[0]
+
+        #flsh = FlashAttention(self.scale)
+
+        query_dim, inner_dim = self.to_q.weight.shape
+        head_dim = inner_dim // self.heads
+        context_dim = self.to_k.weight.shape[1]
+
+        if (head_dim > 128 or (head_dim % 8) != 0):
+            query = self.head_to_batch_dim(query)
+            key = self.head_to_batch_dim(key)
+            value = self.head_to_batch_dim(value)
+
+            attention_probs = self.get_attention_scores(query, key, attention_mask)
+            hidden_states = torch.bmm(attention_probs, value)
+            out = self.batch_to_head_dim(hidden_states)
+        elif context_dim == query_dim:
+            qkv = torch.stack([
+                query, key, value
+            ], dim=2)
+            qkv = einops.rearrange(qkv, 'b s t (h d) -> b s t h d', h=self.heads)
+            #out, _ = flsh(qkv)
+            out = einops.rearrange(out, 'b s h d -> b s (h d)', h=self.heads)
+        else:
+            h = self.heads
+            kv = torch.stack([key, value], dim=2)
+
+            q_seqlen = query.shape[1]
+            kv_seqlen = kv.shape[1]
+
+            q = einops.rearrange(query, 'b s (h d) -> (b s) h d', h=h)
+            kv = einops.rearrange(kv, 'b s t (h d) -> (b s) t h d', h=h)
+
+            cu_seqlens_q = torch.arange(0, (batch_size + 1) * q_seqlen, step=q_seqlen, dtype=torch.int32, device=q.device)
+            cu_seqlens_k = torch.arange(0, (batch_size + 1) * kv_seqlen, step=kv_seqlen, dtype=torch.int32, device=kv.device)
+            
+            #out = flash_attn_unpadded_kvpacked_func(q, kv, cu_seqlens_q, cu_seqlens_k, q_seqlen, kv_seqlen, 0.0, self.scale)
+
+            out = einops.rearrange(out, '(b s) h d -> b s (h d)', b = batch_size, h = h)
+
+        out = self.to_out[0](out)
+        out = self.to_out[1](out)
+        return out
+    set_attention(forward_flash_attn_test)
