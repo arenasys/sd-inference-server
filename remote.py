@@ -2,7 +2,7 @@ import os
 import sys
 
 venv = os.path.abspath(os.path.join(os.getcwd(), "venv/lib/python3.10/site-packages"))
-sys.path = [venv] + [p for p in sys.path if not "conda" in p]
+sys.path = [os.cwd(), venv] + [p for p in sys.path if not "conda" in p]
 
 import random
 import torch
@@ -28,7 +28,11 @@ print("ENDPOINT:", endpoint)
 print("PASSWORD:", password)
 
 try:
-    while True:
-        time.sleep(1)
+    try:
+        while True:
+            time.sleep(1)
+    except:
+        server.stop()
+    time.sleep(1)
 except:
-    server.stop()
+    pass
