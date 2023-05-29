@@ -150,7 +150,7 @@ def draw_handpose(canvas, all_hand_peaks):
             x2 = int(x2 * W)
             y2 = int(y2 * H)
             if x1 > eps and y1 > eps and x2 > eps and y2 > eps:
-                cv2.line(canvas, (x1, y1), (x2, y2), hsv_to_rgb([ie / float(len(edges)), 1.0, 1.0]), thickness=2)
+                cv2.line(canvas, (x1, y1), (x2, y2), hsv_to_rgb(np.array([ie / float(len(edges)), 1.0, 1.0])), thickness=2)
 
         for i, keyponit in enumerate(peaks):
             x, y = keyponit

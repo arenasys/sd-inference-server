@@ -554,8 +554,12 @@ class GenerationParameters():
         if self.cn:
             self.unet = controlnet.ControlledUNET(self.unet, self.cn)
             dtype = self.unet.dtype
-            annotators = [self.storage.get_controlnet_annotator(name, device, dtype) for name in self.cn_annotator]
-            cn_cond, cn_outputs = controlnet.preprocess_control(self.cn_image, annotators, self.cn_args, self.cn_scale)
+
+            annotators = [self.storage.get_controlnet_annotator(o["annotator"], device, dtype) for o in self.cn_opts]
+            scales = [o["scale"] for o in self.cn_opts]
+            args = [o["args"] for o in self.cn_opts]
+
+            cn_cond, cn_outputs = controlnet.preprocess_control(self.cn_image, annotators, args, scales)
             if self.keep_artifacts:
                 self.on_artifact("Control", [cn_outputs]*batch_size)
             self.unet.set_controlnet_conditioning(cn_cond)
