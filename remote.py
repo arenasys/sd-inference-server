@@ -1,6 +1,9 @@
 import os
 import sys
 
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning) 
+
 venv = os.path.abspath(os.path.join(os.getcwd(), "venv/lib/python3.10/site-packages"))
 sys.path = [os.getcwd(), venv] + [p for p in sys.path if not "conda" in p]
 
