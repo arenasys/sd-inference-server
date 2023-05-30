@@ -4,9 +4,19 @@ from torch import nn
 import PIL.Image
 import PIL.ImageEnhance
 import utils
+import safetensors.torch
 
 def relative_file(file):
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), file)
+
+class VAEApproxCheap(nn.Module):
+    def __init__(self):
+        super(VAEApproxCheap, self).__init__()
+        self.conv = nn.Conv2d(4, 3, kernel_size=5, padding='same')
+        self.loaded = False
+    
+    def forward(self, x):
+        return self.conv(x)
 
 class VAEApprox(nn.Module):
     def __init__(self):
@@ -36,21 +46,18 @@ class VAEApprox(nn.Module):
         super().load_state_dict(state_dict)
         self.loaded = True
 
+CHEAP_MODEL = VAEApproxCheap()
+CHEAP_MODEL_PATH = os.path.join("approx", "VAE-cheap.safetensors")
+
 APPROX_MODEL = VAEApprox()
 APPROX_MODEL_PATH = os.path.join("approx", "VAE-approx.pt")
 
 def cheap_preview(latents):
-    coefs = torch.tensor([
-        [0.298, 0.207, 0.208],
-        [0.187, 0.286, 0.173],
-        [-0.158, 0.189, 0.264],
-        [-0.184, -0.271, -0.473],
-    ]).to(latents.device).to(latents.dtype)
-    outputs = torch.zeros([latents.shape[0], 3, latents.shape[2], latents.shape[3]])
-    for i in range(latents.shape[0]):
-        outputs[i] = torch.einsum("lxy,lr -> rxy", latents[i], coefs).to("cpu")
-    outputs = utils.postprocess_images(outputs)
-    outputs = [PIL.ImageEnhance.Color(o).enhance(1.5) for o in outputs]
+    if not CHEAP_MODEL.loaded:
+        CHEAP_MODEL.conv.load_state_dict(safetensors.torch.load_file(relative_file(CHEAP_MODEL_PATH)))
+    CHEAP_MODEL.to(latents.device).to(latents.dtype)
+    outputs = CHEAP_MODEL(latents) / 0.18215
+    outputs = [utils.FROM_TENSOR(((o + 1)/2).clamp(0,1)) for o in outputs]
     return outputs
 
 def model_preview(latents):
@@ -58,7 +65,6 @@ def model_preview(latents):
         APPROX_MODEL.load_state_dict(torch.load(relative_file(APPROX_MODEL_PATH), map_location='cpu'))
     APPROX_MODEL.to(latents.device).to(latents.dtype)
     outputs = utils.postprocess_images(APPROX_MODEL(latents))
-    outputs = [PIL.ImageEnhance.Color(o).enhance(1.5) for o in outputs]
     return outputs
 
 def full_preview(latents, vae):
