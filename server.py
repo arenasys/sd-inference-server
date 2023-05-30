@@ -60,7 +60,7 @@ def get_id():
 
 SEP = os.path.sep
 INV_SEP = {"\\": '/', '/':'\\'}[os.path.sep]
-NO_CONV = {"prompt", "negative_prompt", "url"}
+NO_CONV = {"prompt", "negative_prompt", "url", "trace"}
 
 def convert_path(p):
     return p.replace(INV_SEP, SEP)
@@ -137,9 +137,9 @@ class Inference(threading.Thread):
                     self.got_response({"type":"aborted", "data":{}})
                     continue
                 additional = ""
-                tb = ""
+                trace = ""
                 try:
-                    tb = log_traceback("SERVER")
+                    trace = log_traceback("SERVER")
                     s = traceback.extract_tb(e.__traceback__).format()
                     s = [e for e in s if not "venv" in e][-1]
                     s = s.split(", ")
@@ -147,11 +147,11 @@ class Inference(threading.Thread):
                     line = s[1].split(" ")[1]
                     additional = f" ({file}:{line})"
                 except Exception as a:
-                    tb = log_traceback("LOGGING")
+                    trace = log_traceback("LOGGING")
                     additional = " THEN " + str(a)
                     pass
 
-                self.got_response({"type":"error", "data":{"message":str(e) + additional, "traceback": tb}})
+                self.got_response({"type":"error", "data":{"message":str(e) + additional, "trace": trace}})
         
     def download(self, type, url):
         import gdown
