@@ -2,6 +2,7 @@ import torch
 import os
 import glob
 import safetensors.torch
+import gc
 
 import models
 import convert
@@ -56,17 +57,21 @@ class ModelStorage():
                     files += glob.glob(os.path.join(path, e))
         return [f for f in files if not os.path.sep + "_" in f]
 
+    def do_gc(self):
+        torch.cuda.empty_cache()
+        gc.collect()
+
     def clear_file_cache(self):
         self.file_cache = {}
+        self.do_gc()
 
     def reset(self):
         self.embeddings = {}
         for c in self.loaded:
             for m in list(self.loaded[c].keys()):
-                self.loaded[c][m].to("cpu")
                 del self.loaded[c][m]
-        torch.cuda.empty_cache()
         self.file_cache = {}
+        self.do_gc()
         self.find_all()
 
     def enforce_vram_limit(self, allowed, comp, limit):
@@ -76,10 +81,10 @@ class ModelStorage():
                 continue
             if str(self.loaded[comp][m].device) != "cpu":
                 if found >= limit:
-                    self.loaded[comp][m].to("cpu")
+                    self.loaded[comp][m] = self.loaded[comp][m].to("cpu")
                 else:
                     found += 1
-        torch.cuda.empty_cache()
+        self.do_gc()
 
     def enforce_total_limit(self, allowed, comp, limit):
         found = 0
@@ -91,7 +96,7 @@ class ModelStorage():
                 del self.loaded[comp][m]
             else:
                 found += 1
-        torch.cuda.empty_cache()
+        self.do_gc()
 
     def enforce_network_limit(self, used, comp):
         # networks cant have a hard limit since you can use an arbitrary number of them
@@ -103,6 +108,7 @@ class ModelStorage():
                 self.loaded[comp][m].to("cpu")
             else:
                 del self.loaded[comp][m]
+        self.do_gc()
 
     def clear_modified(self):
         # static network mode will merge models into the UNET/CLIP
@@ -115,17 +121,11 @@ class ModelStorage():
 
     def load(self, model, device):
         model.to(device)
+        self.do_gc()
 
     def unload(self, model):
         model.to("cpu")
-        torch.cuda.empty_cache()
-
-    def load(self, model, device):
-        model.to(device)
-
-    def unload(self, model):
-        model.to("cpu")
-        torch.cuda.empty_cache()
+        self.do_gc()
 
     def move(self, model, name, comp, device):
         dtype = self.dtype
