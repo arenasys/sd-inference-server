@@ -221,7 +221,8 @@ class Inference(threading.Thread):
 
         check = True
         if not os.path.exists(folder):
-            return
+            os.mkdir(folder)
+        
         if 'drive.google' in url:
             thread = threading.Thread(target=gdownload, args=([self, folder, url]))
             thread.start()
