@@ -345,10 +345,10 @@ class GenerationParameters():
         self.set_status("Encoding")
         return utils.encode_images(self.vae, seeds, images)
 
-    def upscale_images(self, vae, images, mode, width, height, offsets, seeds):
+    def upscale_images(self, vae, images, mode, width, height, seeds):
         if mode in UPSCALERS_LATENT:
             latents = utils.get_latents(vae, seeds, images)
-            latents = upscalers.upscale_single(latents, UPSCALERS_LATENT[mode], width//8, height//8, offsets)
+            latents = upscalers.upscale_single(latents, UPSCALERS_LATENT[mode], width//8, height//8)
 
             if type(latents) == list:
                 latents = torch.stack(latents)
@@ -356,9 +356,9 @@ class GenerationParameters():
             return latents, None
         
         if mode in UPSCALERS_PIXEL:
-            images = upscalers.upscale(images, UPSCALERS_PIXEL[mode], width, height, offsets)
+            images = upscalers.upscale(images, UPSCALERS_PIXEL[mode], width, height)
         else:
-            images = upscalers.upscale_super_resolution(images, self.upscale_model, width, height, offsets)
+            images = upscalers.upscale_super_resolution(images, self.upscale_model, width, height)
 
         self.set_status("Encoding")
         latents = utils.get_latents(vae, seeds, images)
@@ -691,7 +691,6 @@ class GenerationParameters():
         images = self.image
         masks = (self.mask or []).copy()
         width, height = self.width, self.height
-        offsets = self.offsets or [0.5] * len(images)
 
         extents = utils.get_extents(images, masks, self.padding, width, height)
         for i in range(len(masks)):
@@ -742,7 +741,7 @@ class GenerationParameters():
         sampler = SAMPLER_CLASSES[self.sampler](denoiser, self.eta)
 
         self.set_status("Upscaling")
-        latents, upscaled_images = self.upscale_images(self.vae, images, self.img2img_upscaler, width, height, offsets, seeds)
+        latents, upscaled_images = self.upscale_images(self.vae, images, self.img2img_upscaler, width, height, seeds)
         original_latents = latents
 
         if self.keep_artifacts:
@@ -878,10 +877,23 @@ class GenerationParameters():
             self.modify(self.old_file, self.new_file)
         elif self.operation == "prune":
             self.prune(self.file)
-        elif self.operation == "move":
-            self.set_status("Moving")
+        elif self.operation == "rename":
+            self.set_status("Renaming")
             os.makedirs(self.new_file.rsplit(os.path.sep,1)[0], exist_ok=True)
             shutil.move(self.old_file, self.new_file)
+        elif self.operation == "move":
+            self.set_status("Moving")
+            for folder in storage.MODEL_FOLDERS[self.new_folder]:
+                destination = os.path.join(self.storage.path, folder)
+                if self.new_subfolder:
+                    destination = os.path.join(destination, self.new_subfolder)
+                if os.path.exists(destination):
+                    break
+            else:
+                raise ValueError(f"failed to find destination")
+            source = os.path.join(self.storage.path, self.old_file)
+            destination = os.path.join(destination, self.old_file.rsplit(os.path.sep, 1)[-1])
+            shutil.move(source, destination)
         else:
             raise ValueError(f"unknown operation: {self.operation}")
         

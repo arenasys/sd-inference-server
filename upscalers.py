@@ -6,7 +6,7 @@ import torchvision.transforms.functional
  
 from basicsr.archs.rrdbnet_arch import RRDBNet
 
-def upscale_single(input, mode, width, height, offset=0.5):
+def upscale_single(input, mode, width, height):
     if type(input) == torch.Tensor:
         rw = width / input.shape[-1]
         rh = height / input.shape[-2]
@@ -25,23 +25,19 @@ def upscale_single(input, mode, width, height, offset=0.5):
     input = resize(input)
 
     if type(input) == torch.Tensor:
-        dx = int((input.shape[-1]-width)*offset)
-        dy = int((input.shape[-2]-height)*offset)
+        dx = int((input.shape[-1]-width)*0.5)
+        dy = int((input.shape[-2]-height)*0.5)
     else:
-        dx = int((input.size[0]-width)*offset)
-        dy = int((input.size[1]-height)*offset)
+        dx = int((input.size[0]-width)*0.5)
+        dy = int((input.size[1]-height)*0.5)
 
     input = torchvision.transforms.functional.crop(input, dy, dx, height, width)
     return input
 
-def upscale(inputs, mode, width, height, offsets=None):
-    if not offsets:
-        offsets = [0.5] * len(inputs)
-    return [upscale_single(inputs[i], mode, width, height, offsets[i]) for i in range(len(inputs))]
+def upscale(inputs, mode, width, height):
+    return [upscale_single(inputs[i], mode, width, height) for i in range(len(inputs))]
 
-def upscale_super_resolution(images, model, width, height, offsets=None):
-    if not offsets:
-        offsets = [0.5] * len(images)
+def upscale_super_resolution(images, model, width, height):
     images = [i for i in images]
 
     with torch.inference_mode():
@@ -52,7 +48,7 @@ def upscale_super_resolution(images, model, width, height, offsets=None):
                 out = model(img)
                 out = out.clamp_(0, 1)
                 image = utils.FROM_TENSOR(out.squeeze(0))
-            images[i] = upscale_single(image, transforms.InterpolationMode.LANCZOS, width, height, offsets[i])
+            images[i] = upscale_single(image, transforms.InterpolationMode.LANCZOS, width, height)
     
     return images
 
