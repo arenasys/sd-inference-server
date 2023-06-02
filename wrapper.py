@@ -481,7 +481,6 @@ class GenerationParameters():
         return metadata
     
     def attach_networks(self, all_nets, unet_nets, clip_nets, device):
-        print(self.reattach_networks, all_nets, unet_nets, clip_nets)
         self.detach_networks()
 
         static = self.network_mode == "Static"
