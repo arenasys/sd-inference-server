@@ -219,6 +219,8 @@ class GenerationParameters():
         if self.reattach_networks and self.last_models_modified:
             self.storage.clear_modified()
             self.last_models_modified = False
+        if self.network_mode == "Dynamic":
+            self.reattach_networks = True
         self.last_models_config = current
 
     def load_models(self):
@@ -479,6 +481,7 @@ class GenerationParameters():
         return metadata
     
     def attach_networks(self, all_nets, unet_nets, clip_nets, device):
+        print(self.reattach_networks, all_nets, unet_nets, clip_nets)
         self.detach_networks()
 
         static = self.network_mode == "Static"
