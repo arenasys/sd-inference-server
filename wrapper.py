@@ -7,6 +7,7 @@ import os
 import safetensors.torch
 import time
 import shutil
+import tomesd
 
 DIRECTML_AVAILABLE = False
 try:
@@ -549,6 +550,11 @@ class GenerationParameters():
         self.set_device()
         self.load_models()
 
+        if self.tome_ratio:
+            tomesd.apply_patch(self.unet, ratio=self.tome_ratio)
+        else:
+            tomesd.remove_patch(self.unet)
+
         self.set_status("Configuring")
         batch_size = self.get_batch_size()
         device = self.unet.device
@@ -616,6 +622,11 @@ class GenerationParameters():
             self.on_complete(images, metadata)
             self.need_models(unet=False, vae=False, clip=False)
             return images
+
+        if self.hr_tome_ratio:
+            tomesd.apply_patch(self.unet, ratio=self.hr_tome_ratio)
+        else:
+            tomesd.remove_patch(self.unet)
 
         self.set_status("Preparing")
         if self.keep_artifacts:
@@ -686,6 +697,11 @@ class GenerationParameters():
         self.set_status("Loading")
         self.set_device()
         self.load_models()
+
+        if self.tome_ratio:
+            tomesd.apply_patch(self.unet, ratio=self.tome_ratio)
+        else:
+            tomesd.remove_patch(self.unet)
 
         self.set_status("Preparing")
         batch_size = self.get_batch_size()
