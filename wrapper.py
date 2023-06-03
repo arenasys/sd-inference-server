@@ -524,6 +524,18 @@ class GenerationParameters():
         else:
             self.storage.enforce_network_limit([], "HN")
 
+    def attach_tome(self, HR=False):
+        unet = self.unet
+        if type(unet) == controlnet.ControlledUNET:
+            unet = unet.unet
+
+        ratio = self.hr_tome_ratio if HR else self.tome_ratio
+
+        if ratio:
+            tomesd.apply_patch(unet, ratio=ratio)
+        else:
+            tomesd.remove_patch(unet)
+
     def detach_networks(self):
         self.unet.additional.clear()
         self.clip.additional.clear()
@@ -550,10 +562,7 @@ class GenerationParameters():
         self.set_device()
         self.load_models()
 
-        if self.tome_ratio:
-            tomesd.apply_patch(self.unet, ratio=self.tome_ratio)
-        else:
-            tomesd.remove_patch(self.unet)
+        self.attach_tome()
 
         self.set_status("Configuring")
         batch_size = self.get_batch_size()
@@ -578,12 +587,10 @@ class GenerationParameters():
         self.total_steps = self.steps
 
         if self.hr_factor:
-            hr_steps = self.hr_steps or self.steps
-            self.total_steps += hr_steps
-        if not self.hr_sampler:
-            self.hr_sampler = self.sampler
-        if not self.hr_eta:
-            self.hr_eta = self.eta
+            self.hr_steps = self.hr_steps or self.steps
+            self.hr_sampler = self.hr_sampler or self.sampler
+            self.hr_eta = self.hr_eta or self.eta
+            self.total_steps += self.hr_steps
 
         metadata = self.get_metadata("txt2img", self.width, self.height, batch_size, self.prompt, seeds, subseeds)
 
@@ -623,11 +630,6 @@ class GenerationParameters():
             self.need_models(unet=False, vae=False, clip=False)
             return images
 
-        if self.hr_tome_ratio:
-            tomesd.apply_patch(self.unet, ratio=self.hr_tome_ratio)
-        else:
-            tomesd.remove_patch(self.unet)
-
         self.set_status("Preparing")
         if self.keep_artifacts:
             images = utils.decode_images(self.vae, latents)
@@ -636,19 +638,20 @@ class GenerationParameters():
         width = int(self.width * self.hr_factor)
         height = int(self.height * self.hr_factor)
 
-        area = utils.preprocess_areas(self.area, width, height)
-
         self.need_models(unet=False, vae=True, clip=True)
 
         denoiser.reset()
         sampler = SAMPLER_CLASSES[self.hr_sampler](denoiser, self.hr_eta)
         noise = utils.NoiseSchedule(seeds, subseeds, width // 8, height // 8, device, self.unet.dtype)
 
-        conditioning.switch_to_HR(hr_steps)
+        conditioning.switch_to_HR(self.hr_steps)
 
         if self.network_mode == "Dynamic":
             self.set_status("Attaching")
             self.attach_networks(*conditioning.get_initial_networks(), device)
+
+        if area:
+            area = utils.preprocess_areas(self.area, width, height)
 
         self.set_status("Encoding")
         conditioning.encode(self.clip, area)
@@ -664,15 +667,17 @@ class GenerationParameters():
 
         self.need_models(unet=True, vae=False, clip=False)
 
+        self.attach_tome(HR=True)
+
         if self.cn:
             self.cn_image = upscalers.upscale(self.cn_image, transforms.InterpolationMode.NEAREST, width, height)
-            cn_cond, cn_outputs = controlnet.preprocess_control(self.cn_image, annotators, self.cn_args, self.cn_scale)
+            cn_cond, cn_outputs = controlnet.preprocess_control(self.cn_image, annotators, args, scales)
             self.unet.set_controlnet_conditioning(cn_cond)
             if self.keep_artifacts:
-                self.on_artifact("Control 2", [cn_outputs]*batch_size)
+                self.on_artifact("Control HR", [cn_outputs]*batch_size)
 
         self.set_status("Generating")
-        latents = inference.img2img(latents, denoiser, sampler, noise, hr_steps, True, self.hr_strength, self.on_step)
+        latents = inference.img2img(latents, denoiser, sampler, noise, self.hr_steps, True, self.hr_strength, self.on_step)
 
         self.set_status("Decoding")
         self.need_models(unet=False, vae=True, clip=False)
@@ -698,11 +703,8 @@ class GenerationParameters():
         self.set_device()
         self.load_models()
 
-        if self.tome_ratio:
-            tomesd.apply_patch(self.unet, ratio=self.tome_ratio)
-        else:
-            tomesd.remove_patch(self.unet)
-
+        self.attach_tome()
+        
         self.set_status("Preparing")
         batch_size = self.get_batch_size()
         device = self.unet.device
@@ -722,13 +724,18 @@ class GenerationParameters():
         metadata = self.get_metadata("img2img",  width, height, batch_size, self.prompt, seeds, subseeds)
 
         if self.cn:
+            self.unet = controlnet.ControlledUNET(self.unet, self.cn)
+            dtype = self.unet.dtype
+
+            annotators = [self.storage.get_controlnet_annotator(o["annotator"], device, dtype) for o in self.cn_opts]
+            scales = [o["scale"] for o in self.cn_opts]
+            args = [o["args"] for o in self.cn_opts]
+
             for i in range(len(self.cn_image)):
                 if self.mask and self.mask[i] != None:
                     self.cn_image[i] = self.prepare_images([self.cn_image[i]], [extents[i]], width, height)[0]
-            self.unet = controlnet.ControlledUNET(self.unet, self.cn)
-            dtype = self.unet.dtype
-            annotators = [self.storage.get_controlnet_annotator(name, device, dtype) for name in self.cn_annotator]
-            cn_cond, cn_outputs = controlnet.preprocess_control(self.cn_image, annotators, self.cn_args, self.cn_scale)
+
+            cn_cond, cn_outputs = controlnet.preprocess_control(self.cn_image, annotators, args, scales)
             if self.keep_artifacts:
                 self.on_artifact("Control", [cn_outputs]*batch_size)
             self.unet.set_controlnet_conditioning(cn_cond)

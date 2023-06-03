@@ -44,7 +44,6 @@ def preprocess_masks(masks):
         w, h = mask.size
         w, h = w - w % 8, h - h % 8
         mask = mask.resize((w // 8, h // 8), resample=PIL.Image.LANCZOS)
-        mask.save("MASK.png")
         mask = 1 - TO_TENSOR(mask).to(torch.float32)
         return mask[None, :]
     return torch.cat([process(m) for m in masks])

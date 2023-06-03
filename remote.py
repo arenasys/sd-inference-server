@@ -35,7 +35,8 @@ try:
         while True:
             time.sleep(1)
     except:
-        server.stop()
+        pass
     time.sleep(1)
 except:
     pass
+server.stop()

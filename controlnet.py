@@ -15,7 +15,8 @@ def pil_to_cv2(img):
 
 def annotate(img, annotator, arg):
     img = pil_to_cv2(img)
-    img = annotator(img, *arg)
+    if annotator:
+        img = annotator(img, *arg)
     c = torch.from_numpy(img).to(torch.float32) / 255.0
     if len(c.shape) == 2:
         c = torch.stack([c]*3)
