@@ -8,6 +8,7 @@ import safetensors.torch
 import time
 import shutil
 import tomesd
+import contextlib
 
 DIRECTML_AVAILABLE = False
 try:
@@ -524,6 +525,10 @@ class GenerationParameters():
         else:
             self.storage.enforce_network_limit([], "HN")
 
+    def detach_networks(self):
+        self.unet.additional.clear()
+        self.clip.additional.clear()
+
     def attach_tome(self, HR=False):
         unet = self.unet
         if type(unet) == controlnet.ControlledUNET:
@@ -536,9 +541,10 @@ class GenerationParameters():
         else:
             tomesd.remove_patch(unet)
 
-    def detach_networks(self):
-        self.unet.additional.clear()
-        self.clip.additional.clear()
+    def get_autocast_context(self, autocast, device):
+        if autocast:
+            return torch.autocast('cpu' if device == torch.device('cpu') else 'cuda')
+        return contextlib.nullcontext()
 
     def prepare_images(self, inputs, extents, width, height):
         if not inputs:
@@ -619,7 +625,9 @@ class GenerationParameters():
             denoiser.set_inpainting(inpainting_masked, inpainting_masks)
         
         self.set_status("Generating")
-        latents = inference.txt2img(denoiser, sampler, noise, self.steps, self.on_step)
+
+        with self.get_autocast_context(self.autocast, device):
+            latents = inference.txt2img(denoiser, sampler, noise, self.steps, self.on_step)
 
         self.need_models(unet=False, vae=True, clip=False)
 
@@ -677,7 +685,9 @@ class GenerationParameters():
                 self.on_artifact("Control HR", [cn_outputs]*batch_size)
 
         self.set_status("Generating")
-        latents = inference.img2img(latents, denoiser, sampler, noise, self.hr_steps, True, self.hr_strength, self.on_step)
+
+        with self.get_autocast_context(self.autocast, device):
+            latents = inference.img2img(latents, denoiser, sampler, noise, self.hr_steps, True, self.hr_strength, self.on_step)
 
         self.set_status("Decoding")
         self.need_models(unet=False, vae=True, clip=False)
@@ -792,7 +802,9 @@ class GenerationParameters():
         self.need_models(unet=True, vae=False, clip=False)
 
         self.set_status("Generating")
-        latents = inference.img2img(latents, denoiser, sampler, noise, self.steps, False, self.strength, self.on_step)
+
+        with self.get_autocast_context(self.autocast, device):
+            latents = inference.img2img(latents, denoiser, sampler, noise, self.steps, False, self.strength, self.on_step)
 
         self.need_models(unet=False, vae=True, clip=False)
 
