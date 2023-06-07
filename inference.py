@@ -2,6 +2,7 @@ import torch
 import tqdm
 import numpy as np
 
+@torch.cuda.amp.autocast()
 def txt2img(denoiser, sampler, noise, steps, callback):
     schedule = sampler.scheduler.get_schedule(steps)
 
@@ -14,6 +15,7 @@ def txt2img(denoiser, sampler, noise, steps, callback):
         callback(iter.format_dict, denoiser.predictions)
     return latents / 0.18215
 
+@torch.cuda.amp.autocast()
 def img2img(latents, denoiser, sampler, noise, steps, do_exact_steps, strength, callback):
     strength = min(strength, 0.999)
     if do_exact_steps:
