@@ -28,7 +28,7 @@ class ModelStorage():
 
         self.classes = {"UNET": models.UNET, "CLIP": models.CLIP, "VAE": models.VAE, "SR": upscalers.SR, "LoRA": models.LoRA, "HN": models.HN, "CN": models.ControlNet}
         self.vram_limits = {"UNET": 1, "CLIP": 1, "VAE": 1, "SR": 1}
-        self.total_limits = {"UNET": 1, "CLIP": 1, "VAE": 1, "SR": 1}
+        self.ram_limits = {"UNET": 0, "CLIP": 0, "VAE": 0, "SR": 0}
         self.annotators = {}
 
         self.files = {k:{} for k in self.classes}
@@ -74,29 +74,41 @@ class ModelStorage():
         self.do_gc()
         self.find_all()
 
-    def enforce_vram_limit(self, allowed, comp, limit):
-        found = 0
-        for m in self.loaded[comp]:
-            if m == allowed:
-                continue
-            if str(self.loaded[comp][m].device) != "cpu":
-                if found >= limit:
-                    self.loaded[comp][m] = self.loaded[comp][m].to("cpu")
-                else:
-                    found += 1
-        self.do_gc()
+    def enforce_limit(self, current, comp, device):
+        allowed_vram = self.vram_limits[comp]
+        allowed_ram = self.ram_limits[comp]
 
-    def enforce_total_limit(self, allowed, comp, limit):
-        found = 0
+        found_vram = 0
+        found_ram = 0
+
+        if str(device) == "cpu":
+            found_ram += 1
+        else:
+            found_vram += 1
+
         for m in list(self.loaded[comp].keys()):
-            if m == allowed:
+            in_ram = str(self.loaded[comp][m].device) == "cpu"
+            if m == current:
                 continue
-            if found >= limit:
-                self.loaded[comp][m].to("cpu")
+
+            if found_vram >= allowed_vram and not in_ram:
+                if found_ram < allowed_ram:
+                    self.loaded[comp][m] = self.loaded[comp][m].to("cpu")
+                    found_ram += 1
+                else:
+                    del self.loaded[comp][m]
+                self.do_gc()
+                continue
+
+            if found_ram >= allowed_ram and in_ram:
                 del self.loaded[comp][m]
+                self.do_gc()
+                continue
+            
+            if in_ram:
+                found_ram += 1
             else:
-                found += 1
-        self.do_gc()
+                found_vram += 1
 
     def enforce_network_limit(self, used, comp):
         # networks cant have a hard limit since you can use an arbitrary number of them
@@ -104,18 +116,18 @@ class ModelStorage():
         for m in list(self.loaded[comp].keys()):
             if any([os.path.sep+u+"." in m for u in used]):
                 continue
-            if str(self.loaded[comp][m].device) != "cpu":
+            if False and str(self.loaded[comp][m].device) != "cpu":
                 self.loaded[comp][m].to("cpu")
             else:
                 del self.loaded[comp][m]
-        self.do_gc()
+            self.do_gc()
 
     def clear_modified(self):
         # static network mode will merge models into the UNET/CLIP
         # so reload from disk
         for comp in {"UNET", "CLIP"}:
             for model in self.loaded[comp]:
-                self.loaded[comp][model].to("cpu")
+                self.loaded[comp][model] = None
             self.loaded[comp] = {}
         self.clear_file_cache()
 
@@ -135,12 +147,8 @@ class ModelStorage():
         if model.device == device:
             return model.to(dtype)
 
-        if comp in self.total_limits:
-            if str(device) == "cpu":
-                self.enforce_total_limit(name, comp, self.total_limits[comp]-1)
-            else:
-                self.enforce_vram_limit(name, comp, self.vram_limits[comp]-1)
-                self.enforce_total_limit(name, comp, self.total_limits[comp]-1)
+        if comp in self.vram_limits:
+            self.enforce_limit(name, comp, device)
         
         return model.to(device, dtype)
 
