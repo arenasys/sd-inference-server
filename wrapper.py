@@ -1038,7 +1038,6 @@ class GenerationParameters():
             conditioning = prompts.BatchedConditioningSchedules(self.prompt, 1, 1)
         
         self.set_status("Loading")
-        self.device_name = "CPU"
         self.set_device()
         self.load_models()
 
@@ -1061,21 +1060,18 @@ class GenerationParameters():
         comp_state_dict = self.unet.state_dict()
         comp_prefix = self.unet.model_type + ".UNET."
         for k in comp_state_dict:
-            state_dict[comp_prefix+k] = comp_state_dict[k].detach().clone()
-        self.unet = None
+            state_dict[comp_prefix+k] = comp_state_dict[k]
 
         comp_state_dict = self.clip.state_dict()
         comp_prefix = self.clip.model_type + ".CLIP."
         for k in comp_state_dict:
-            state_dict[comp_prefix+k] = comp_state_dict[k].detach().clone()
-        self.clip = None
+            state_dict[comp_prefix+k] = comp_state_dict[k]
 
         comp_state_dict = self.vae.state_dict()
         comp_prefix = self.vae.model_type + ".VAE."
         for k in comp_state_dict:
-            state_dict[comp_prefix+k] = comp_state_dict[k].detach().clone()
+            state_dict[comp_prefix+k] = comp_state_dict[k]
         del comp_state_dict
-        self.vae = None
 
         state_dict = convert.revert(model_type, state_dict)
 
