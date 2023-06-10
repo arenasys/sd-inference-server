@@ -6,7 +6,7 @@ import torchvision.transforms.functional
  
 from basicsr.archs.rrdbnet_arch import RRDBNet
 
-def upscale_single(input, mode, width, height):
+def upscale_single(input, mode, width, height):    
     if type(input) == torch.Tensor:
         rw = width / input.shape[-1]
         rh = height / input.shape[-2]
@@ -14,7 +14,7 @@ def upscale_single(input, mode, width, height):
         rw = width / input.size[0]
         rh = height / input.size[1]
 
-    if rw == rh:
+    if abs(rw-rh) < 0.01:
         z = min(width, height)
     elif rw > rh:
         z = width

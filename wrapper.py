@@ -400,10 +400,6 @@ class GenerationParameters():
             subseeds += [(last_seed + i + 1, last_strength) for i in range(batch_size-len(subseeds))]
 
         return seeds, subseeds
-
-    def get_prompts(self):
-        (prompts, negative_prompts) = self.listify(self.prompt, self.negative_prompt)
-        return prompts, negative_prompts
     
     def get_batch_size(self):
         batch_size = max(self.batch_size or 1, 1)
