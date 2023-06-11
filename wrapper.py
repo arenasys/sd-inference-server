@@ -726,6 +726,7 @@ class GenerationParameters():
         original_images = images
         images = utils.apply_extents(images, extents)
         masks = self.prepare_images(masks, extents, width, height)
+
         seeds, subseeds = self.get_seeds(batch_size)
         metadata = self.get_metadata("img2img",  width, height, batch_size, self.prompt, seeds, subseeds)
 
@@ -784,6 +785,10 @@ class GenerationParameters():
             self.set_status("Preparing")
             masks = [None if mask == None else mask.filter(PIL.ImageFilter.GaussianBlur(self.mask_blur)) for mask in masks]
             mask_latents = utils.get_masks(device, masks)
+
+            if self.mask_fill == "Noise":
+                latents = latents * ((mask_latents * self.strength) + (1-self.strength))
+            
             denoiser.set_mask(mask_latents, original_latents)
             if self.keep_artifacts:
                 self.on_artifact("Mask", [masks[i] if self.mask[i] else None for i in range(len(masks))])
