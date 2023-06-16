@@ -15,7 +15,7 @@ MODEL_FOLDERS = {
     "TI": ["TI", "embeddings", os.path.join("..", "embeddings")], 
     "LoRA": ["LoRA"], 
     "HN": ["HN", "hypernetworks"],
-    "CN": ["CN"]
+    "CN": ["CN", "ControlNet"]
 }
 
 class ModelStorage():
