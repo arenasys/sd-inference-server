@@ -125,7 +125,7 @@ class ModelStorage():
         # networks cant have a hard limit since you can use an arbitrary number of them
         # so they are "decayed" from gpu -> cpu -> disk as they are left unused
         for m in list(self.loaded[comp].keys()):
-            if any([os.path.sep+u+"." in m for u in used]):
+            if any([os.path.sep+u+"." in m or m == u for u in used]):
                 continue
             if False and str(self.loaded[comp][m].device) != "cpu":
                 self.loaded[comp][m].to("cpu")
