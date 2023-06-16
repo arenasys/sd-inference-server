@@ -147,12 +147,11 @@ class Inference(threading.Thread):
 
                 self.got_response({"type":"error", "data":{"message":str(e) + additional, "trace": trace}})
         
-    def download(self, type, url):
-        import gdown
-        import mega
+    def download(self, type, url, token=None):
         import subprocess
 
         def gdownload(self, folder, url):
+            import gdown
             try:
                 parts = url.split("/")
                 id = None
@@ -168,6 +167,7 @@ class Inference(threading.Thread):
                 self.got_response({"type":"downloaded", "data":{"message": "Failed: " + url}})
 
         def megadownload(self, folder, url):
+            import mega
             try:
                 mega.Mega().login().download_url(url, folder)
                 self.got_response({"type":"downloaded", "data":{"message": "Success: " + url}})
@@ -182,6 +182,21 @@ class Inference(threading.Thread):
                     self.got_response({"type":"downloaded", "data":{"message": f"Unsupport type ({content_type}): " + url}})
                     return
             r = subprocess.run(["curl", "-OJL", url], cwd=folder)
+            if r.returncode == 0:
+                self.got_response({"type":"downloaded", "data":{"message": "Success: " + url}})
+            else:
+                self.got_response({"type":"downloaded", "data":{"message": "Failed: " + url}})
+
+        def hfdownload(self, folder, url, token, check=True):
+            header = f"Authorization: Bearer {token}"
+
+            if check:
+                r = subprocess.run(["curl", "-ILH", header, url], capture_output=True)
+                content_type = r.stdout.decode('utf-8').split("content-type: ")[-1].split(";",1)[0].split("\n",1)[0].strip()
+                if not content_type in {"application/zip", "binary/octet-stream", "application/octet-stream", "multipart/form-data"}:
+                    self.got_response({"type":"downloaded", "data":{"message": f"Unsupport type ({content_type}): " + url}})
+                    return
+            r = subprocess.run(["curl", "-OJLH", header, url], cwd=folder)
             if r.returncode == 0:
                 self.got_response({"type":"downloaded", "data":{"message": "Success: " + url}})
             else:
@@ -210,6 +225,10 @@ class Inference(threading.Thread):
                 return
         if 'huggingface' in url:
             url = url.replace("/blob/", "/resolve/")
+            if token:
+                thread = threading.Thread(target=hfdownload, args=([self, folder, url, token, check]))
+                thread.start()
+                return
         
         thread = threading.Thread(target=curldownload, args=([self, folder, url, check]))
         thread.start()
