@@ -27,7 +27,7 @@ ip, port = endpoint.split(':')
 server = Server(params, ip, port, password)
 server.start()
 
-print("ENDPOINT:", endpoint)
+print("BIND:", endpoint)
 print("PASSWORD:", password)
 
 try:
