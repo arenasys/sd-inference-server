@@ -99,7 +99,7 @@ class VAE(AutoencoderKL):
             vae = VAE(model_type, dtype)
             missing, _ = vae.load_state_dict(state_dict, strict=False)
         if missing:
-            raise ValueError("missing keys: " + missing)
+            raise ValueError("missing keys: " + ", ".join(missing))
         return vae
 
     @staticmethod
@@ -140,7 +140,7 @@ class CLIP(CustomCLIP):
             clip = CLIP(model_type, dtype)
             missing, _ = clip.load_state_dict(state_dict, strict=False)
         if missing:
-            raise ValueError("missing keys: " + ', '.join(missing))
+            raise ValueError("missing keys: " + ", ".join(missing))
 
         clip.additional = AdditionalNetworks(clip)
         return clip
@@ -331,7 +331,7 @@ class ControlNet(ControlNetModel):
             cn = ControlNet("CN-v1-CANNY", dtype)
             missing, _ = cn.load_state_dict(state_dict, strict=False)
         if missing:
-            raise ValueError("missing keys: " + missing)
+            raise ValueError("missing keys: " + ", ".join(missing))
         return cn
 
     @staticmethod
