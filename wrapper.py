@@ -577,8 +577,9 @@ class GenerationParameters():
             annotators = [self.storage.get_controlnet_annotator(o["annotator"], device, dtype) for o in self.cn_opts]
             scales = [o["scale"] for o in self.cn_opts]
             args = [o["args"] for o in self.cn_opts]
+            images = upscalers.upscale(self.cn_image, transforms.InterpolationMode.LANCZOS, self.width, self.height)
 
-            cn_cond, cn_outputs = controlnet.preprocess_control(self.cn_image, annotators, args, scales)
+            cn_cond, cn_outputs = controlnet.preprocess_control(images, annotators, args, scales)
             if self.keep_artifacts:
                 self.on_artifact("Control", [cn_outputs]*batch_size)
             self.unet.set_controlnet_conditioning(cn_cond)
@@ -674,8 +675,8 @@ class GenerationParameters():
         self.attach_tome(HR=True)
 
         if self.cn:
-            self.cn_image = upscalers.upscale(self.cn_image, transforms.InterpolationMode.NEAREST, width, height)
-            cn_cond, cn_outputs = controlnet.preprocess_control(self.cn_image, annotators, args, scales)
+            images = upscalers.upscale(self.cn_image, transforms.InterpolationMode.LANCZOS, width, height)
+            cn_cond, cn_outputs = controlnet.preprocess_control(images, annotators, args, scales)
             self.unet.set_controlnet_conditioning(cn_cond)
             if self.keep_artifacts:
                 self.on_artifact("Control HR", [cn_outputs]*batch_size)
