@@ -300,8 +300,8 @@ class ModelStorage():
         return self.get_component(name, "CN", device)
     
     def get_controlnet_annotator(self, name, device, dtype):
-        if name == "none":
-            return None
+        if name in {"none", "invert"}:
+            return name
         if not name in self.annotators:
             self.annotators[name] = annotator.annotators[name](os.path.join(self.path, "CN", "annotators"))
         return self.annotators[name].to(device, dtype)

@@ -15,8 +15,11 @@ def pil_to_cv2(img):
 
 def annotate(img, annotator, arg):
     img = pil_to_cv2(img)
-    if annotator:
+    if type(annotator) != str:
         img = annotator(img, *arg)
+    elif annotator == "invert":
+        img = 255 - img  
+
     c = torch.from_numpy(img).to(torch.float32) / 255.0
     if len(c.shape) == 2:
         c = torch.stack([c]*3)
