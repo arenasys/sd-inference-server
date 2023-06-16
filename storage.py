@@ -44,18 +44,29 @@ class ModelStorage():
         if path != self.path:
             self.clear_file_cache()
         self.path = path
-            
+
+    def get_folder(self, type):
+        folders = [os.path.join(self.path, f) for f in MODEL_FOLDERS[type]]
+        folders = [f for f in folders if os.path.exists(f)]
+        return folders[0]
+
     def get_models(self, folder, ext, recursive=True):
         files = []
+        diff = []
         for f in MODEL_FOLDERS[folder]:
             path = os.path.abspath(os.path.join(self.path, f))
             if recursive:
                 for e in ext:
                     files += glob.glob(os.path.join(path, "**" + os.sep + e), recursive=True)
+                if folder == "SD":
+                    folders = glob.glob(os.path.join(path, "**" + os.sep + "model_index.json"), recursive=True)
+                    diff += [f.rsplit(os.path.sep, 1)[0] for f in folders]
             else:
                 for e in ext:
                     files += glob.glob(os.path.join(path, e))
-        return [f for f in files if not os.path.sep + "_" in f]
+        files = [f for f in files if not os.path.sep + "_" in f]
+        files = [f for f in files if not any([d + os.path.sep in f for d in diff])] + diff
+        return files
 
     def do_gc(self):
         torch.cuda.empty_cache()
@@ -159,7 +170,7 @@ class ModelStorage():
         self.files = {k:{} for k in self.classes}
 
         standalone = {k:{} for k in ["UNET", "CLIP", "VAE"]}
-        for file in self.get_models("SD", ["*.qst", "*.safetensors", "*.ckpt", "*.pt"]):
+        for file in self.get_models("SD", ["*.safetensors", "*.ckpt", "*.pt"]):
             if ".unet." in file:
                 name = self.get_name(file)
                 standalone["UNET"][name] = file
@@ -299,17 +310,12 @@ class ModelStorage():
         if not comp == "TI":
             print(f"LOADING {file.rsplit(os.path.sep, 1)[-1]}...")
 
-        if comp in ["UNET", "CLIP", "VAE"] and file.rsplit(".",1)[-1] in {"safetensors", "ckpt", "pt"}:
-            state_dict = convert.convert_checkpoint(file)
-            return self.parse_model(state_dict)
+        if comp in ["UNET", "CLIP", "VAE"]:
+            state_dict, metadata = convert.convert(file)
+            return self.parse_model(state_dict, metadata)
         
-        out = {}
-        if file.endswith(".qst") or file.endswith(".safetensors"):
-            state_dict = safetensors.torch.load_file(file)
-            if "metadata.model_type" in state_dict:
-                out = self.parse_model(state_dict)
-            else:
-                out = {comp: state_dict}
+        if file.endswith(".safetensors"):
+            out = {comp: safetensors.torch.load_file(file)}
         else:
             out = {comp: torch.load(file, map_location="cpu")}
 
@@ -318,20 +324,11 @@ class ModelStorage():
             
         return out
 
-
-    def parse_model(self, state_dict):
-        metadata = {}
-        for k in state_dict:
-            if k.startswith("metadata."):
-                kk = k.split(".", 1)[1]
-                metadata[kk] = ''.join([chr(c) for c in state_dict[k]])
-
+    def parse_model(self, state_dict, metadata):
         model_type = metadata["model_type"]
 
         sub_state_dicts = {}
         for k in list(state_dict.keys()):
-            if k.startswith("metadata."):
-                continue
             comp = k.split(".")[1]
             key = k[len(f"{model_type}.{comp}."):]
             if not comp in sub_state_dicts:

@@ -4,6 +4,7 @@ import glob
 import shutil
 
 import torch
+import safetensors
 import safetensors.torch
 
 def relative_file(file):
@@ -190,31 +191,44 @@ def clean_component(state_dict):
 def convert_checkpoint(in_file):
     print(f"CONVERTING {in_file.rsplit(os.path.sep,1)[-1]}")
 
+    metadata = {}
     name = in_file.split(os.path.sep)[-1].split(".")[0]
     if in_file.endswith(".ckpt") or in_file.endswith(".pt"):
         state_dict = torch.load(in_file, map_location="cpu")
         if 'state_dict' in state_dict:
             state_dict = state_dict['state_dict']
     elif in_file.endswith(".safetensors"):
-        state_dict = safetensors.torch.load_file(in_file, "cpu")
+        state_dict = {}
+        with safetensors.safe_open(in_file, framework="pt", device="cpu") as f:
+            metadata = f.metadata() or {}
+            state_dict = {}
+            for k in f.keys():
+                state_dict[k] = f.get_tensor(k)
 
-    # only in the SDv2 CLIP
-    v2 = "cond_stage_model.model.transformer.resblocks.0.attn.in_proj_bias" in state_dict
-    inpainting = False
-    if "model.diffusion_model.input_blocks.0.0.weight" in state_dict:
-        inpainting = state_dict["model.diffusion_model.input_blocks.0.0.weight"].shape[1] == 9
-    prediction_type = "epsilon"
+    # GUESS MISSING MODEL INFORMATION
+    if not "model_type" in metadata:
+        metadata["model_type"] = "SDv1"
+        if "cond_stage_model.model.transformer.resblocks.0.attn.in_proj_bias" in state_dict:
+            metadata["model_type"] = "SDv2"
+    
+    if not "model_variant" in metadata:
+        metadata["model_variant"] = ""
+        if "model.diffusion_model.input_blocks.0.0.weight" in state_dict:
+            if state_dict["model.diffusion_model.input_blocks.0.0.weight"].shape[1] == 9:
+                metadata["model_variant"] = "Inpainting"
 
-    if v2:
-        print("CONVERTING FROM SDv2")
+    if not "prediction_type" in metadata:
+        metadata["prediction_type"] = "epsilon"
         yaml_file = os.path.join(os.path.dirname(in_file), name + ".yaml")
         if os.path.exists(yaml_file):
             import yaml
             with open(yaml_file, "r", encoding='utf-8') as f:
-                prediction_type = yaml.safe_load(f)["model"]["params"].get("parameterization", "epsilon")
-        else:
-            print("NO YAML FOUND, ASSUMING", prediction_type, "PREDICTION")
+                metadata["prediction_type"] = yaml.safe_load(f)["model"]["params"].get("parameterization", "epsilon")
+        elif metadata["model_type"] == "SDv2":
+            print("ASSUMING", metadata["prediction_type"], "PREDICTION")
 
+    if metadata["model_type"] == "SDv2":
+        print("CONVERTING FROM SDv2")
         SDv2_convert(state_dict)
     else:
         print("CONVERTING FROM SDv1")
@@ -222,30 +236,22 @@ def convert_checkpoint(in_file):
 
     print("DONE")
 
-    model_type = ("SDv2" if v2 else "SDv1")
-
-    state_dict["metadata.model_type"] = torch.as_tensor([ord(c) for c in model_type])
-    state_dict["metadata.prediction_type"] = torch.as_tensor([ord(c) for c in prediction_type])
-    if inpainting:
-        state_dict["metadata.model_variant"] = torch.as_tensor([ord(c) for c in "Inpainting"])
-    
-    return state_dict
+    return state_dict, metadata
 
 def convert_checkpoint_save(in_file, out_folder):
     name = in_file.split(os.path.sep)[-1].split(".")[0]
-    state_dict = convert_checkpoint(in_file)
+    state_dict, metadata = convert_checkpoint(in_file)
     
     out_file = os.path.join(out_folder, f"{name}.qst")
     print(f"SAVING {out_file}")
-    safetensors.torch.save_file(state_dict, out_file)
+    safetensors.torch.save_file(state_dict, out_file, metadata)
 
-def convert_diffusers_folder(in_folder, out_folder):
-    print(f"CONVERTING {in_folder}")
+def convert_diffusers_folder(in_folder):
+    print(f"CONVERTING {in_folder.rsplit(os.path.sep,1)[-1]}")
     from diffusers import AutoencoderKL, UNet2DConditionModel
     from transformers import CLIPTextModel
     import json
 
-    name = in_folder.strip(os.path.sep).split(os.path.sep)[-1]
     unet_path = os.path.join(in_folder, "unet")
     vae_path = os.path.join(in_folder, "vae")
     clip_path = os.path.join(in_folder, "text_encoder")
@@ -255,7 +261,13 @@ def convert_diffusers_folder(in_folder, out_folder):
         prediction_type = json.load(f)["prediction_type"]
 
     unet = UNet2DConditionModel.from_pretrained(unet_path)
-    model_type = "SDv2" if unet.cross_attention_dim == 1024 else "SDv1"
+    model_type = "SDv2" if unet.config.cross_attention_dim == 1024 else "SDv1"
+
+    metadata = {
+        "model_type": model_type,
+        "prediction_type": prediction_type,
+        "model_variant": ""
+    }
 
     print("CONVERTING FROM", model_type)
 
@@ -275,12 +287,25 @@ def convert_diffusers_folder(in_folder, out_folder):
         state_dict[f"{model_type}.CLIP.{k}"] = clip[k]
         del clip[k]
 
-    state_dict["metadata.model_type"] = torch.as_tensor([ord(c) for c in model_type])
-    state_dict["metadata.prediction_type"] = torch.as_tensor([ord(c) for c in prediction_type])
+    print("DONE")
+
+    return state_dict, metadata
+
+def convert_diffusers_folder_save(in_folder, out_folder):
+    name = in_folder.strip(os.path.sep).split(os.path.sep)[-1]
+    state_dict, metadata = convert_diffusers_folder(in_folder)
 
     out_file = os.path.join(out_folder, f"{name}.qst")
     print(f"SAVING {out_file}")
-    safetensors.torch.save_file(state_dict, out_file)
+    safetensors.torch.save_file(state_dict, out_file, metadata)
+
+def convert(model_path):
+    if os.path.isfile(model_path):
+        return convert_checkpoint(model_path)
+    elif os.path.isdir(model_path):
+        return convert_diffusers_folder(model_path)
+    else:
+        raise ValueError(f"invalid model: {model_path}")
 
 def autoconvert(folder, trash):
     checkpoints = glob.glob(os.path.join(folder, "*.ckpt"))
@@ -307,7 +332,7 @@ def autoconvert(folder, trash):
         if not "unet" in comps or not "vae" in comps or not "text_encoder" in comps or not "scheduler" in comps:
             continue
         try:
-            convert_diffusers_folder(model, folder)
+            convert_diffusers_folder_save(model, folder)
         except Exception as e:
             print("FAILED", str(e))
             continue
@@ -321,7 +346,7 @@ def revert(model_type, state_dict):
         return SDv2_revert(state_dict)
     else:
         raise ValueError(f"unknown model type: {model_type}")
-        
+
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description='Model conversion')
@@ -333,6 +358,6 @@ if __name__ == '__main__':
     out_folder = args.folder
 
     if os.path.isdir(in_path):
-        convert_diffusers_folder(in_path, out_folder)
+        convert_diffusers_folder_save(in_path, out_folder)
     else:
         convert_checkpoint_save(in_path, out_folder)

@@ -938,70 +938,96 @@ class GenerationParameters():
         
         if not self.callback({"type": "done", "data": {}}):
             raise RuntimeError("Aborted")
-        
-    def prune(self, file):
-        old_file = file
-        new_file = file
-
-        on, oe = old_file.rsplit(".",1)
-        if oe == "qst":
+    
+    def trash_model(self, model, copy=False, delete=False):
+        if delete:
+            if os.path.isfile(model):
+                os.remove(model)
+            else:
+                shutil.rmtree(model)
             return
-        if not oe == "safetensors":
-            new_file = on + ".safetensors"
 
-        self.modify(old_file, new_file)
+        trash_path = os.path.join(self.storage.path, "TRASH")
+        trash = os.path.join(trash_path, model.rsplit(os.path.sep)[-1])
+        os.makedirs(trash_path, exist_ok=True)
+
+        if copy:
+            if os.path.isfile(model):
+                shutil.copy(model, trash)
+            else:
+                shutil.copytree(model, trash)
+        else:
+            shutil.move(model, trash_path)
+
+    def prune(self, file):
+        is_checkpoint = any(file.startswith(f) for f in storage.MODEL_FOLDERS["SD"])
+        is_component = any([e in file for e in {".vae.",".clip.",".unet."}])
+        if is_checkpoint and not is_component:
+            self.unet, self.vae, self.clip = file, file, file
+            old_file = os.path.join(self.storage.path, file)
+            new_file = old_file.rsplit(".", 1)[0] + ".safetensors"
+
+            self.build(new_file)
+
+            if new_file != old_file:
+                self.trash_model(old_file, delete=True)
+        else:
+            old_file = file
+            new_file = file
+            on, old_ext = old_file.rsplit(".",1)
+            if not old_ext == "safetensors":
+                new_file = on + ".safetensors"
+            
+            self.modify(old_file, new_file)
 
     def modify(self, old, new):
-        o = os.path.join(self.storage.path, old)
-        n = os.path.join(self.storage.path, new)
+        old_file = os.path.join(self.storage.path, old)
+        new_file = os.path.join(self.storage.path, new)
 
         if not new:
             self.set_status("Deleting")
-            os.remove(o)
+            self.trash_model(old_file, delete=True)
             return
-        
-        oe, ne = old.rsplit(".",1)[-1], new.rsplit(".",1)[-1]   
-        ot, nt = old.split(os.path.sep, 1)[0], new.split(os.path.sep, 1)[0]
 
-        component = ot in storage.MODEL_FOLDERS["SD"] and any([e in old for e in {".vae.",".clip.",".unet."}])
-        if ot in storage.MODEL_FOLDERS["SD"] and not component:
+        old_ext = old.rsplit(".",1)[-1]
+        new_ext = new.rsplit(".",1)[-1]
+
+        if not new_ext in {"safetensors"}:
+            raise ValueError(f"unsuported checkpoint type: {new_ext}. supported types are: safetensors")
+
+        is_checkpoint = any(old.startswith(f) for f in storage.MODEL_FOLDERS["SD"])
+        is_component = any([e in old.rsplit(os.path.sep, 1)[-1] for e in {".vae.",".clip.",".unet."}])
+        if is_checkpoint and not is_component:
             self.set_status("Converting")
-            if not ne in {"qst", "safetensors"}:
-                raise ValueError(f"unsuported checkpoint type: {ne}. supported types are: safetensors, qst")
-            if oe != "qst":
-                state_dict = convert.convert_checkpoint(o)
-            else:
-                state_dict = safetensors.torch.load_file(o)
-
-            if ne != "qst":
-                model_type = ''.join([chr(c) for c in state_dict["metadata.model_type"]])
-                state_dict = convert.revert(model_type, state_dict)
             
-            safetensors.torch.save_file(state_dict, n)
-            if n != o:
-                os.remove(o)
+            state_dict, metadata = convert.convert(old_file)
+            state_dict = convert.revert(metadata["model_type"], state_dict)
+            
+            safetensors.torch.save_file(state_dict, new_file, metadata)
+
+            if new_file != old_file:
+                self.trash_model(old_file, delete=True)
         else:
             self.set_status("Converting")
-            if not ne in {"safetensors", "st"}:
-                raise ValueError(f"unsuported model type: {ne}. supported types are: safetensors, qst")
-            if oe in {"pt", "pth", "ckpt"}:
-                state_dict = torch.load(o, map_location="cpu")
+            
+            if old_ext in {"pt", "pth", "ckpt", "bin"}:
+                state_dict = torch.load(old_file, map_location="cpu")
                 if "state_dict" in state_dict:
                     state_dict = state_dict["state_dict"]
-            elif oe in {"qst", "safetensors"}:
-                state_dict = safetensors.torch.load_file(o)
+            elif old_ext in {"safetensors"}:
+                state_dict = safetensors.torch.load_file(old_file)
             else:
-                raise ValueError(f"unknown model type: {oe}")
+                raise ValueError(f"unknown model type: {old_ext}")
             
             caution = False
-            if component:
+            if is_component:
                 caution = convert.clean_component(state_dict)
             else:
                 for k in list(state_dict.keys()):
-                    if ne in {"safetensors", "qst"} and type(state_dict[k]) != torch.Tensor:
+                    if new_ext in {"safetensors"} and type(state_dict[k]) != torch.Tensor:
                         del state_dict[k]
                         caution = True
-                        continue   
+                        continue
 
             for k in list(state_dict.keys()):
                 if state_dict[k].dtype in {torch.float32, torch.float64, torch.bfloat16}:
@@ -1011,21 +1037,15 @@ class GenerationParameters():
                 raise ValueError(f"conversion failed, empty model after pruning")
             
             if caution:
-                trash_path = os.path.join(self.storage.path, "TRASH")
-                trash = os.path.join(trash_path, o.rsplit(os.path.sep)[-1])
-                os.makedirs(trash_path, exist_ok=True)
-                if n == o:
-                    shutil.copy(o, trash)
-                else:
-                    os.rename(o, trash)
+                self.trash_model(old_file, delete=False)
 
-            safetensors.torch.save_file(state_dict, n)
+            safetensors.torch.save_file(state_dict, new_file)
 
-            if not caution and n != o:
-                os.remove(o)
+            if not caution and new_file != old_file:
+                self.trash_model(old_file, delete=True)
 
-    def build(self, filename):
-        file_type = filename.rsplit(".",1)[-1]
+    def build(self, file):
+        file_type = file.rsplit(".",1)[-1]
         if not file_type in {"safetensors"}:
             raise ValueError(f"unsuported checkpoint type: {file_type}. supported types are: safetensors")
 
@@ -1034,8 +1054,8 @@ class GenerationParameters():
         self.last_models_modified = False
         self.reattach_networks = True
 
-        self.set_status("Parsing")
         if self.prompt:
+            self.set_status("Parsing")
             conditioning = prompts.BatchedConditioningSchedules(self.prompt, 1, 1)
         
         self.set_status("Loading")
@@ -1054,6 +1074,12 @@ class GenerationParameters():
         state_dict = {}
 
         model_type = self.unet.model_type
+
+        metadata = {
+            "model_type": model_type,
+            "prediction_type": self.unet.prediction_type,
+            "model_variant": self.unet.model_variant 
+        }
 
         if self.clip.model_type != model_type:
             raise ValueError(f"UNET and CLIP are incompatible")
@@ -1077,6 +1103,10 @@ class GenerationParameters():
         state_dict = convert.revert(model_type, state_dict)
 
         self.set_status(f"Saving")
-        filename = os.path.join(self.storage.path, "SD", filename)
+        if not self.storage.path in file:
+            if os.path.sep in file:
+                file = os.path.join(self.storage.path, file)
+            else:
+                file = os.path.join(self.storage.get_folder("SD"), file)
 
-        safetensors.torch.save_file(state_dict, filename)
+        safetensors.torch.save_file(state_dict, file, metadata)

@@ -13,8 +13,10 @@ from hypernetwork import Hypernetwork
 class UNET(UNet2DConditionModel):
     def __init__(self, model_type, model_variant, prediction_type, dtype):
         self.model_type = model_type
+        self.model_variant = model_variant
         self.inpainting = model_variant == "Inpainting"
         self.prediction_type = prediction_type
+
         super().__init__(**UNET.get_config(model_type, model_variant))
         self.to(dtype)
         self.additional = None
