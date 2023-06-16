@@ -944,7 +944,7 @@ class GenerationParameters():
         new_file = file
 
         on, oe = old_file.rsplit(".",1)
-        if oe == "st":
+        if oe == "qst":
             return
         if not oe == "safetensors":
             new_file = on + ".safetensors"
@@ -966,14 +966,14 @@ class GenerationParameters():
         component = ot in storage.MODEL_FOLDERS["SD"] and any([e in old for e in {".vae.",".clip.",".unet."}])
         if ot in storage.MODEL_FOLDERS["SD"] and not component:
             self.set_status("Converting")
-            if not ne in {"st", "safetensors"}:
-                raise ValueError(f"unsuported checkpoint type: {ne}. supported types are: safetensors, st")
-            if oe != "st":
+            if not ne in {"qst", "safetensors"}:
+                raise ValueError(f"unsuported checkpoint type: {ne}. supported types are: safetensors, qst")
+            if oe != "qst":
                 state_dict = convert.convert_checkpoint(o)
             else:
                 state_dict = safetensors.torch.load_file(o)
 
-            if ne != "st":
+            if ne != "qst":
                 model_type = ''.join([chr(c) for c in state_dict["metadata.model_type"]])
                 state_dict = convert.revert(model_type, state_dict)
             
@@ -983,12 +983,12 @@ class GenerationParameters():
         else:
             self.set_status("Converting")
             if not ne in {"safetensors", "st"}:
-                raise ValueError(f"unsuported model type: {ne}. supported types are: safetensors, st")
+                raise ValueError(f"unsuported model type: {ne}. supported types are: safetensors, qst")
             if oe in {"pt", "pth", "ckpt"}:
                 state_dict = torch.load(o, map_location="cpu")
                 if "state_dict" in state_dict:
                     state_dict = state_dict["state_dict"]
-            elif oe in {"st", "safetensors"}:
+            elif oe in {"qst", "safetensors"}:
                 state_dict = safetensors.torch.load_file(o)
             else:
                 raise ValueError(f"unknown model type: {oe}")
@@ -998,7 +998,7 @@ class GenerationParameters():
                 caution = convert.clean_component(state_dict)
             else:
                 for k in list(state_dict.keys()):
-                    if ne in {"safetensors", "st"} and type(state_dict[k]) != torch.Tensor:
+                    if ne in {"safetensors", "qst"} and type(state_dict[k]) != torch.Tensor:
                         del state_dict[k]
                         caution = True
                         continue   

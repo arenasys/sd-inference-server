@@ -235,7 +235,7 @@ def convert_checkpoint_save(in_file, out_folder):
     name = in_file.split(os.path.sep)[-1].split(".")[0]
     state_dict = convert_checkpoint(in_file)
     
-    out_file = os.path.join(out_folder, f"{name}.st")
+    out_file = os.path.join(out_folder, f"{name}.qst")
     print(f"SAVING {out_file}")
     safetensors.torch.save_file(state_dict, out_file)
 
@@ -278,7 +278,7 @@ def convert_diffusers_folder(in_folder, out_folder):
     state_dict["metadata.model_type"] = torch.as_tensor([ord(c) for c in model_type])
     state_dict["metadata.prediction_type"] = torch.as_tensor([ord(c) for c in prediction_type])
 
-    out_file = os.path.join(out_folder, f"{name}.st")
+    out_file = os.path.join(out_folder, f"{name}.qst")
     print(f"SAVING {out_file}")
     safetensors.torch.save_file(state_dict, out_file)
 

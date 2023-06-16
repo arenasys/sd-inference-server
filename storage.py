@@ -159,7 +159,7 @@ class ModelStorage():
         self.files = {k:{} for k in self.classes}
 
         standalone = {k:{} for k in ["UNET", "CLIP", "VAE"]}
-        for file in self.get_models("SD", ["*.st", "*.safetensors", "*.ckpt", "*.pt"]):
+        for file in self.get_models("SD", ["*.qst", "*.safetensors", "*.ckpt", "*.pt"]):
             if ".unet." in file:
                 name = self.get_name(file)
                 standalone["UNET"][name] = file
@@ -304,7 +304,7 @@ class ModelStorage():
             return self.parse_model(state_dict)
         
         out = {}
-        if file.endswith(".st") or file.endswith(".safetensors"):
+        if file.endswith(".qst") or file.endswith(".safetensors"):
             state_dict = safetensors.torch.load_file(file)
             if "metadata.model_type" in state_dict:
                 out = self.parse_model(state_dict)
