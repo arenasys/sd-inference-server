@@ -127,10 +127,7 @@ class ModelStorage():
         for m in list(self.loaded[comp].keys()):
             if any([os.path.sep+u+"." in m or m == u for u in used]):
                 continue
-            if False and str(self.loaded[comp][m].device) != "cpu":
-                self.loaded[comp][m].to("cpu")
-            else:
-                del self.loaded[comp][m]
+            del self.loaded[comp][m]
             self.do_gc()
 
     def clear_modified(self):

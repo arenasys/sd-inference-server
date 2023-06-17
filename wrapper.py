@@ -742,8 +742,9 @@ class GenerationParameters():
             for i in range(len(self.cn_image)):
                 if self.mask and self.mask[i] != None:
                     self.cn_image[i] = self.prepare_images([self.cn_image[i]], [extents[i]], width, height)[0]
+            images = upscalers.upscale(self.cn_image, transforms.InterpolationMode.LANCZOS, width, height)
 
-            cn_cond, cn_outputs = controlnet.preprocess_control(self.cn_image, annotators, args, scales)
+            cn_cond, cn_outputs = controlnet.preprocess_control(images, annotators, args, scales)
             if self.keep_artifacts:
                 self.on_artifact("Control", [cn_outputs]*batch_size)
             self.unet.set_controlnet_conditioning(cn_cond)
