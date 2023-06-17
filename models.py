@@ -333,7 +333,7 @@ class ControlNet(ControlNetModel):
             cn = ControlNet("CN-v1-CANNY", dtype)
             missing, _ = cn.load_state_dict(state_dict, strict=False)
         if missing:
-            raise ValueError("missing keys in ControlNet: " + ", ".join(missing))
+            raise ValueError(f"missing keys in ControlNet ({name}): " + ", ".join(missing))
         return cn
 
     @staticmethod
