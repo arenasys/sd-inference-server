@@ -40,17 +40,29 @@ TYPES = {
     float: ["scale", "eta", "hr_factor", "hr_eta"],
 }
 
-SAMPLER_CLASSES = {
+SAMPLER_CLASSES = { # lol
     "Euler": samplers_k.Euler,
     "Euler a": samplers_k.Euler_a,
+    "DDIM": samplers_ddpm.DDIM,
+    "PLMS": samplers_ddpm.PLMS,
     "DPM++ 2M": samplers_k.DPM_2M,
     "DPM++ 2S a": samplers_k.DPM_2S_a,
     "DPM++ SDE": samplers_k.DPM_SDE,
+    "DPM++ 2M SDE": samplers_k.DPM_2M_SDE,
+
+    "Euler Karras": samplers_k.Euler_Karras,
+    "Euler a Karras": samplers_k.Euler_a_Karras,
     "DPM++ 2M Karras": samplers_k.DPM_2M_Karras,
     "DPM++ 2S a Karras": samplers_k.DPM_2S_a_Karras,
     "DPM++ SDE Karras": samplers_k.DPM_SDE_Karras,
-    "DDIM": samplers_ddpm.DDIM,
-    "PLMS": samplers_ddpm.PLMS
+    "DPM++ 2M SDE Karras": samplers_k.DPM_2M_SDE_Karras,
+
+    "Euler Exponential": samplers_k.Euler_Exponential,
+    "Euler a Exponential": samplers_k.Euler_a_Exponential,
+    "DPM++ 2M Exponential": samplers_k.DPM_2M_Exponential,
+    "DPM++ 2S a Exponential": samplers_k.DPM_2S_a_Exponential,
+    "DPM++ SDE Exponential": samplers_k.DPM_SDE_Exponential,
+    "DPM++ 2M SDE Exponential": samplers_k.DPM_2M_SDE_Exponential,
 }
 
 UPSCALERS_LATENT = {

@@ -1,7 +1,9 @@
 import torch
 import numpy as np
+from k_diffusion.sampling import get_ancestral_step, to_d, BrownianTreeNoiseSampler, append_zero
+from k_diffusion.sampling import get_sigmas_karras, get_sigmas_exponential
 
-from k_diffusion.sampling import get_ancestral_step, to_d, BrownianTreeNoiseSampler, get_sigmas_karras
+MN, MX = 0.0312652550637722, 14.611639022827148
 
 class KScheduler():
     def __init__(self):
@@ -52,6 +54,7 @@ class KSampler():
 
     def predict(self, latents, sigma):
         timestep = self.scheduler.sigma_to_timestep(sigma)
+        #print(f"{timestep}, {sigma}")
         original = self.model.predict_original(latents, timestep, sigma)
         self.model.set_predictions(original)
         return original
@@ -152,6 +155,7 @@ class DPM_2M(KSampler):
         denoised = self.predict(x, sigmas[i])
         t, t_next = t_fn(sigmas[i]), t_fn(sigmas[i + 1])
         h = t_next - t
+
         if self.prev_denoised == None or sigmas[i + 1] == 0:
             x = (sigma_fn(t_next) / sigma_fn(t)) * x - (-h).expm1() * denoised
         else:
@@ -192,6 +196,73 @@ class DPM_2S_a(KSampler):
         # Noise addition
         if sigmas[i + 1] > 0:
             x = x + noise() * sigma_up
+        return x
+    
+class DPM_2M_SDE(KSampler):
+    def __init__(self, model, eta=1.0, scheduler=None):
+        super().__init__(model, scheduler, eta)
+        self.solver_type = 'midpoint'
+        self.old_denoised = None
+        self.h_last = None
+        self.reset()
+
+    def reset(self):
+        self.noise_samplers = []
+        self.noise_states = []
+
+    def initialize_noise(self, x, sigma_min, sigma_max, noise):
+        seeds = noise.seeds
+        shape = x[0][None,:]
+
+        for i in range(len(seeds)):
+            torch.manual_seed(seeds[i])
+            noise_sampler = BrownianTreeNoiseSampler(shape, sigma_min, sigma_max)
+            self.noise_samplers += [noise_sampler]
+            self.noise_states += [torch.get_rng_state()]
+
+    def sample_noise(self, t0, t1):
+        noises = []
+        for i in range(len(self.noise_samplers)):
+            torch.set_rng_state(self.noise_states[i])
+            noise = self.noise_samplers[i](t0, t1)
+            noises += [noise]
+            self.noise_states[i] = torch.get_rng_state()
+        
+        noises = torch.cat(noises)
+        return noises
+
+    def step(self, x, sigmas, i, noise):
+        """DPM-Solver++(2M) SDE."""
+
+        sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
+        if not self.noise_samplers:
+            self.initialize_noise(x, sigma_min, sigma_max, noise)
+
+        denoised = self.predict(x, sigmas[i])
+
+        if sigmas[i + 1] == 0:
+            # Denoising step
+            x = denoised
+        else:
+            # DPM-Solver++(2M) SDE
+            t, s = -sigmas[i].log(), -sigmas[i + 1].log()
+            h = s - t
+            eta_h = self.eta * h
+
+            x = sigmas[i + 1] / sigmas[i] * (-eta_h).exp() * x + (-h - eta_h).expm1().neg() * denoised
+
+            if self.old_denoised is not None:
+                r = self.h_last / h
+                if self.solver_type == 'heun':
+                    x = x + ((-h - eta_h).expm1().neg() / (-h - eta_h) + 1) * (1 / r) * (denoised - self.old_denoised)
+                elif self.solver_type == 'midpoint':
+                    x = x + 0.5 * (-h - eta_h).expm1().neg() * (1 / r) * (denoised - self.old_denoised)
+
+            x = x + self.sample_noise(sigmas[i], sigmas[i + 1]) * sigmas[i + 1] * (-2 * eta_h).expm1().neg().sqrt()# * s_noise
+
+            self.h_last = h
+
+        self.old_denoised = denoised
         return x
 
 class Euler(KSampler):
@@ -236,23 +307,72 @@ class Euler_a(KSampler):
 
         return x
     
-class KSchedulerKarras(KScheduler):
+class SchedulerKarras(KScheduler):
     def get_schedule(self, steps):
-        mn, mx = 0.0312652550637722, 14.611639022827148
-        sigmas = get_sigmas_karras(n=steps, sigma_min=mn, sigma_max=mx, device=self.sigmas.device).to(self.dtype)
+        sigmas = get_sigmas_karras(n=steps, sigma_min=MN, sigma_max=MX, device=self.sigmas.device).to(self.dtype)
         return sigmas
     
+class SchedulerExponential(KScheduler):
+    def get_schedule(self, steps):
+        sigmas = get_sigmas_exponential(n=steps, sigma_min=MN, sigma_max=MX, device=self.sigmas.device).to(self.dtype)
+        return sigmas
+
+class Euler_Karras(Euler):
+    def __init__(self, model, eta=1, scheduler=None):
+        scheduler = scheduler or SchedulerKarras().to(model.device, model.dtype)
+        super().__init__(model, eta, scheduler)
+
+class Euler_Exponential(Euler):
+    def __init__(self, model, eta=1, scheduler=None):
+        scheduler = scheduler or SchedulerExponential().to(model.device, model.dtype)
+        super().__init__(model, eta, scheduler)
+
+class Euler_a_Karras(Euler_a):
+    def __init__(self, model, eta=1, scheduler=None):
+        scheduler = scheduler or SchedulerKarras().to(model.device, model.dtype)
+        super().__init__(model, eta, scheduler)
+
+class Euler_a_Exponential(Euler_a):
+    def __init__(self, model, eta=1, scheduler=None):
+        scheduler = scheduler or SchedulerExponential().to(model.device, model.dtype)
+        super().__init__(model, eta, scheduler)
+
 class DPM_2M_Karras(DPM_2M):
     def __init__(self, model, eta=1, scheduler=None):
-        scheduler = scheduler or KSchedulerKarras().to(model.device, model.dtype)
+        scheduler = scheduler or SchedulerKarras().to(model.device, model.dtype)
+        super().__init__(model, eta, scheduler)
+
+class DPM_2M_Exponential(DPM_2M):
+    def __init__(self, model, eta=1, scheduler=None):
+        scheduler = scheduler or SchedulerExponential().to(model.device, model.dtype)
         super().__init__(model, eta, scheduler)
 
 class DPM_2S_a_Karras(DPM_2S_a):
     def __init__(self, model, eta=1, scheduler=None):
-        scheduler = scheduler or KSchedulerKarras().to(model.device, model.dtype)
+        scheduler = scheduler or SchedulerKarras().to(model.device, model.dtype)
+        super().__init__(model, eta, scheduler)
+
+class DPM_2S_a_Exponential(DPM_2S_a):
+    def __init__(self, model, eta=1, scheduler=None):
+        scheduler = scheduler or SchedulerExponential().to(model.device, model.dtype)
         super().__init__(model, eta, scheduler)
 
 class DPM_SDE_Karras(DPM_SDE):
     def __init__(self, model, eta=1, scheduler=None):
-        scheduler = scheduler or KSchedulerKarras().to(model.device, model.dtype)
+        scheduler = scheduler or SchedulerKarras().to(model.device, model.dtype)
+        super().__init__(model, eta, scheduler)
+
+class DPM_SDE_Exponential(DPM_SDE):
+    def __init__(self, model, eta=1, scheduler=None):
+        scheduler = scheduler or SchedulerExponential().to(model.device, model.dtype)
+        super().__init__(model, eta, scheduler)
+
+class DPM_2M_SDE_Karras(DPM_2M_SDE):
+    def __init__(self, model, eta=1, scheduler=None):
+        scheduler = scheduler or SchedulerKarras().to(model.device, model.dtype)
+        super().__init__(model, eta, scheduler)
+
+class DPM_2M_SDE_Exponential(DPM_2M_SDE):
+    def __init__(self, model, eta=1, scheduler=None):
+        scheduler = scheduler or SchedulerExponential().to(model.device, model.dtype)
         super().__init__(model, eta, scheduler)

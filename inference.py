@@ -7,7 +7,7 @@ def txt2img(denoiser, sampler, noise, steps, callback):
 
     latents = sampler.prepare_noise(noise(), schedule)
 
-    iter = tqdm.trange(steps)
+    iter = tqdm.trange(steps, disable=False)
     for i in iter:
         denoiser.set_step(i)
         latents = sampler.step(latents, schedule, i, noise)
@@ -28,7 +28,7 @@ def img2img(latents, denoiser, sampler, noise, steps, do_exact_steps, strength, 
 
     if scheduled_steps != 0:
         latents = sampler.prepare_latents(latents, noise(), schedule)
-        iter = tqdm.trange(steps)
+        iter = tqdm.trange(steps, disable=False)
         for i in iter:
             denoiser.set_step(i)
             latents = sampler.step(latents, schedule, i, noise)
