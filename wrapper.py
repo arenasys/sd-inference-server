@@ -68,11 +68,12 @@ UPSCALERS_PIXEL = {
 
 CROSS_ATTENTION = {
     "Default": attention.use_optimized_attention,
-    "Split v1": attention.use_split_attention_v1,
-    "Split v2": attention.use_split_attention,
+    "Split": attention.use_split_attention,
+    "Doggettx": attention.use_doggettx_attention,
     "Flash": attention.use_flash_attention,
-    "Diffusers": attention.use_diffusers_attention,
+    "Original": attention.use_diffusers_attention,
     "xFormers": attention.use_xformers_attention,
+    "SDP": attention.use_sdp_attention
 }
 
 def format_float(x):

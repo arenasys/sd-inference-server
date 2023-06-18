@@ -45,10 +45,11 @@ def set_attention(forward):
 def get_available():
     available = [
         use_optimized_attention,
-        use_split_attention_v1,
         use_split_attention,
+        use_doggettx_attention,
         use_flash_attention,
-        use_diffusers_attention
+        use_diffusers_attention,
+        use_sdp_attention
     ]
     if HAVE_XFORMERS:
         available += [use_xformers_attention]
@@ -59,9 +60,9 @@ def use_optimized_attention(device):
         try:
             use_xformers_attention(device)
         except Exception:
-            use_split_attention(device)
+            use_doggettx_attention(device)
     else:
-       use_split_attention_v1(device)
+       use_split_attention(device)
 
 def use_diffusers_attention(device):
     set_attention(ORIGINAL_FORWARD)
@@ -72,9 +73,9 @@ def exists(val):
 def default(val, d):
     return val if exists(val) else d
 
-def use_split_attention(device):
+def use_doggettx_attention(device):
     if not "cuda" in str(device):
-       raise RuntimeError("Split v2 attention does not support this platform/device")
+       raise RuntimeError("Doggettx attention does not support CPU generation")
 
     def get_available_vram(device):
         stats = torch.cuda.memory_stats(device)
@@ -85,7 +86,7 @@ def use_split_attention(device):
         mem_free_total = mem_free_cuda + mem_free_torch
         return mem_free_total
 
-    def split_cross_attention_forward(self, x, encoder_hidden_states=None, attention_mask=None):
+    def split_cross_attention_forward_v2(self, x, encoder_hidden_states=None, attention_mask=None):
         h = self.heads
 
         q_in = self.to_q(x)
@@ -148,9 +149,9 @@ def use_split_attention(device):
 
         return out
 
-    set_attention(split_cross_attention_forward)
+    set_attention(split_cross_attention_forward_v2)
 
-def use_split_attention_v1(device):
+def use_split_attention(device):
     def split_cross_attention_forward_v1(self, x, encoder_hidden_states=None, attention_mask=None):
 
         h = self.heads
@@ -206,8 +207,6 @@ def use_split_attention_v1(device):
         return out
 
     set_attention(split_cross_attention_forward_v1)
-
-EPSILON = 1e-6
 
 class FlashAttentionFunction(torch.autograd.Function):
     @ staticmethod
@@ -267,7 +266,7 @@ class FlashAttentionFunction(torch.autograd.Function):
                 if exists(row_mask):
                     exp_weights.masked_fill_(~row_mask, 0.)
 
-                block_row_sums = exp_weights.sum(dim=-1, keepdims=True).clamp(min=EPSILON)
+                block_row_sums = exp_weights.sum(dim=-1, keepdims=True).clamp(min=1e-6)
 
                 new_row_maxes = torch.maximum(block_row_maxes, row_maxes)
 
@@ -400,3 +399,48 @@ def use_xformers_attention(device):
         return out
     
     set_attention(xformers_attention_forward)
+
+def use_sdp_attention(device):
+    def scaled_dot_product_attention_forward(self, x, encoder_hidden_states=None, attention_mask=None):
+        batch_size, sequence_length, inner_dim = x.shape
+
+        mask = attention_mask
+        if mask is not None:
+            mask = self.prepare_attention_mask(mask, sequence_length, batch_size)
+            mask = mask.view(batch_size, self.heads, -1, mask.shape[-1])
+
+        h = self.heads
+        q_in = self.to_q(x)
+        context = default(encoder_hidden_states, x)
+
+        k_in = self.to_k(context)
+        v_in = self.to_v(context)
+
+        head_dim = inner_dim // h
+        q = q_in.view(batch_size, -1, h, head_dim).transpose(1, 2)
+        k = k_in.view(batch_size, -1, h, head_dim).transpose(1, 2)
+        v = v_in.view(batch_size, -1, h, head_dim).transpose(1, 2)
+
+        del q_in, k_in, v_in
+
+        dtype = q.dtype
+
+        # the output of sdp = (batch, num_heads, seq_len, head_dim)
+        hidden_states = torch.nn.functional.scaled_dot_product_attention(
+            q, k, v, attn_mask=mask, dropout_p=0.0, is_causal=False
+        )
+
+        hidden_states = hidden_states.transpose(1, 2).reshape(batch_size, -1, h * head_dim)
+        hidden_states = hidden_states.to(dtype)
+
+        # linear proj
+        hidden_states = self.to_out[0](hidden_states)
+        # dropout
+        hidden_states = self.to_out[1](hidden_states)
+        return hidden_states
+    
+    def scaled_dot_product_attention_no_mem_forward(self, x, encoder_hidden_states=None, attention_mask=None):
+        with torch.backends.cuda.sdp_kernel(enable_flash=True, enable_math=True, enable_mem_efficient=False):
+            return scaled_dot_product_attention_forward(self, x, encoder_hidden_states, attention_mask)
+
+    set_attention(scaled_dot_product_attention_forward)
