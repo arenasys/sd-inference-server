@@ -116,6 +116,9 @@ class Inference(threading.Thread):
                 elif request["type"] == "manage":
                     self.wrapper.set(**request["data"])
                     self.wrapper.manage()
+                elif request["type"] == "annotate":
+                    self.wrapper.set(**request["data"])
+                    self.wrapper.annotate()
                 elif request["type"] == "download":
                     self.download(**request["data"])
                 elif request["type"] == "chunk":
