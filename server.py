@@ -76,7 +76,7 @@ def convert_all_paths(j):
                 convert_all_paths(j[k])
 
 class Inference(threading.Thread):
-    def __init__(self, wrapper, callback):
+    def __init__(self, wrapper, read_only, callback):
         super().__init__()
         
         self.wrapper = wrapper
@@ -85,6 +85,9 @@ class Inference(threading.Thread):
         self.callback = callback
         self.requests = queue.Queue()
         self.current = None
+
+        self.read_only = read_only
+        self.owner = None
 
         self.uploads = {}
 
@@ -96,8 +99,13 @@ class Inference(threading.Thread):
     def run(self):
         while self.stay_alive:
             try:
-                self.current, request = self.requests.get(False)
+                client, self.current, request = self.requests.get(False)
                 convert_all_paths(request)
+
+                read_only = self.read_only and client != self.owner
+                if read_only and request["type"] in {"convert", "manage", "download", "chunk"}:
+                    raise Exception("Read-only")
+
                 if request["type"] == "txt2img":
                     self.wrapper.reset()
                     self.wrapper.set(**request["data"])
@@ -130,6 +138,10 @@ class Inference(threading.Thread):
                 time.sleep(0.01)
                 pass
             except Exception as e:
+                self.requests.task_done()
+                if str(e) == "Read-only":
+                    self.got_response({"type":"error", "data":{"message": "Server is read-only"}})
+                    continue
                 if str(e) == "Aborted":
                     self.got_response({"type":"aborted", "data":{}})
                     continue
@@ -253,7 +265,7 @@ class Inference(threading.Thread):
             self.got_response({"type":"downloaded", "data":{"message": "Finished: " + rel_file}})
 
 class Server():
-    def __init__(self, wrapper, host, port, password=DEFAULT_PASSWORD):
+    def __init__(self, wrapper, host, port, password=DEFAULT_PASSWORD, read_only=False, monitor=False):
         self.stopping = False
 
         self.requests = {}
@@ -263,7 +275,11 @@ class Server():
         if password != None:
             self.scheme = get_scheme(password)
 
-        self.inference = Inference(wrapper, callback=self.on_response)
+        self.monitor = monitor
+        self.read_only = read_only
+        self.owner = None
+
+        self.inference = Inference(wrapper, read_only, callback=self.on_response)
         self.server = websockets.sync.server.serve(self.handle_connection, host=host, port=int(port), max_size=None)
         self.serve = threading.Thread(target=self.serve_forever)
 
@@ -282,9 +298,12 @@ class Server():
         self.join()
         print("SERVER: done")
 
-    def join(self):
-        self.serve.join()
+    def join(self, timeout=None):
+        self.serve.join(timeout)
+        if self.serve.is_alive():
+            return False # timeout
         self.inference.join()
+        return True
 
     def serve_forever(self):
         self.server.serve_forever()
@@ -292,8 +311,15 @@ class Server():
     def handle_connection(self, connection):
         print(f"SERVER: client connected")
         client_id = get_id()
+
         self.clients[client_id] = queue.Queue()
-        self.clients[client_id].put((-1, {"type":"hello", "data":{"id": client_id}}))
+        self.clients[client_id].put((-1, {"type":"hello", "data":{"id":client_id}}))
+
+        if self.owner == None:
+            self.owner = client_id
+            self.inference.owner = self.owner
+            self.clients[client_id].put((-1, {"type":"owner"}))
+
         mapping = {}
         ctr = 0
         try:
@@ -342,7 +368,7 @@ class Server():
                                     break
                             if id in self.requests and self.requests[id] == client_id:
                                 del self.requests[id]
-                                self.clients[client_id].put((id, {'type': 'aborted', 'data': {}}))
+                                self.send_response(client_id, id, {'type': 'aborted', 'data': {}})
 
                         request_id = get_id()
                         user_id = request_id
@@ -350,8 +376,10 @@ class Server():
                             user_id = request["id"]
                         self.requests[request_id] = client_id
                         mapping[request_id] = user_id
-                        self.inference.requests.put((request_id, request))
-                        self.clients[client_id].put((-1, {"type":"ack", "data":{"id": user_id}}))
+
+                        remaining = self.inference.requests.unfinished_tasks
+                        self.inference.requests.put((client_id, request_id, request))
+                        self.clients[client_id].put((-1, {"type":"ack", "data":{"id": user_id, "queue": remaining}}))
                     else:
                         self.clients[client_id].put((-1, {"type":"error", "data":{"message": error}}))
         except websockets.exceptions.WebSocketException:
@@ -361,16 +389,22 @@ class Server():
             log_traceback("CLIENT")
         print(f"SERVER: client disconnected")
 
+    def send_response(self, client, id, response):
+        if client in self.clients:
+            self.clients[client].put((id, response))
+        if client != self.owner and self.monitor and self.owner in self.clients:
+            response = response.copy()
+            response["monitor"] = True
+            self.clients[self.owner].put((id, response))
+        
+
     def on_response(self, id, response):
         if self.stopping:
             return False
         if id in self.requests:
             client = self.requests[id]
-            if client in self.clients:
-                self.clients[client].put((id, response))
-                return True
-            else:
-                return False
+            self.send_response(client, id, response)
+            return client in self.clients
         else:
             return False
 
