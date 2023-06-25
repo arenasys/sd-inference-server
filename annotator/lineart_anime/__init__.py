@@ -113,15 +113,14 @@ class UnetSkipConnectionBlock(nn.Module):
 
 
 class LineartAnimeDetector:
-    def __init__(self, path):
+    def __init__(self, path, download):
         remote_model_path = "https://huggingface.co/lllyasviel/Annotators/resolve/main/netG.pth"
-        modelpath = os.path.join(path, "netG.pth")
-        if not os.path.exists(modelpath):
-            from basicsr.utils.download_util import load_file_from_url
-            load_file_from_url(remote_model_path, model_dir=path)
+        model_path = os.path.join(path, "netG.pth")
+        if not os.path.exists(model_path):
+            download(remote_model_path, model_path)
         norm_layer = functools.partial(nn.InstanceNorm2d, affine=False, track_running_stats=False)
         net = UnetGenerator(3, 1, 8, 64, norm_layer=norm_layer, use_dropout=False)
-        ckpt = torch.load(modelpath)
+        ckpt = torch.load(model_path)
         for key in list(ckpt.keys()):
             if 'module.' in key:
                 ckpt[key.replace('module.', '')] = ckpt[key]

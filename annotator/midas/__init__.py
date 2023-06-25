@@ -11,8 +11,8 @@ from .api import MiDaSInference
 
 
 class MidasDetector:
-    def __init__(self, path):
-        self.model = MiDaSInference("dpt_hybrid", path)
+    def __init__(self, path, download):
+        self.model = MiDaSInference("dpt_hybrid", path, download)
 
     def to(self, device, dtype):
         self.device = device

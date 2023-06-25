@@ -8,6 +8,8 @@ import models
 import convert
 import upscalers
 import annotator
+import segmentation
+import utils
 
 MODEL_FOLDERS = {
     "SD": ["SD", "Stable-diffusion", "VAE"],
@@ -138,6 +140,12 @@ class ModelStorage():
                 self.loaded[comp][model] = None
             self.loaded[comp] = {}
         self.clear_file_cache()
+
+    def clear_annotators(self, allowed=[]):
+        for k in list(self.annotators.keys()):
+            if not k in allowed:
+                del self.annotators[k]
+                self.do_gc()
 
     def load(self, model, device):
         model.to(device)
@@ -296,12 +304,25 @@ class ModelStorage():
                 break
         return self.get_component(name, "CN", device)
     
-    def get_controlnet_annotator(self, name, device, dtype):
+    def get_controlnet_annotator(self, name, device, dtype, callback):
         if name in {"none", "invert"}:
             return name
+        
+        def download(url, file):
+            utils.download(url, file, callback)
+
         if not name in self.annotators:
-            self.annotators[name] = annotator.annotators[name](os.path.join(self.path, "CN", "annotators"))
+            print(f"LOADING {name} ANNOTATOR...")
+            self.annotators[name] = annotator.annotators[name](os.path.join(self.path, "CN", "annotators"), download)
         return self.annotators[name].to(device, dtype)
+    
+    def get_segmentation_annotator(self, name, device, callback):
+        if not name in self.annotators:
+            print(f"LOADING {name} ANNOTATOR...")
+            folder = os.path.join(self.path, "SEGMENTATION")
+            predictor = segmentation.get_predictor(name, folder, callback)
+            self.annotators[name] = predictor
+        return self.annotators[name].to(device)
     
     def load_file(self, file, comp):
         if not comp == "TI":

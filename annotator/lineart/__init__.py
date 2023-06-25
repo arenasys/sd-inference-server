@@ -90,18 +90,17 @@ class Generator(nn.Module):
 
 
 class LineartDetector:
-    def __init__(self, path):
-        self.model = self.load_model('sk_model.pth', path)
-        self.model_coarse = self.load_model('sk_model2.pth', path)
+    def __init__(self, path, download):
+        self.model = self.load_model('sk_model.pth', path, download)
+        self.model_coarse = self.load_model('sk_model2.pth', path, download)
 
-    def load_model(self, name, path):
+    def load_model(self, name, path, download):
         remote_model_path = "https://huggingface.co/lllyasviel/Annotators/resolve/main/" + name
-        modelpath = os.path.join(path, name)
-        if not os.path.exists(modelpath):
-            from basicsr.utils.download_util import load_file_from_url
-            load_file_from_url(remote_model_path, model_dir=path)
+        model_path = os.path.join(path, name)
+        if not os.path.exists(model_path):
+            download(remote_model_path, model_path)
         model = Generator(3, 1, 3)
-        model.load_state_dict(torch.load(modelpath, map_location=torch.device('cpu')))
+        model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
         model.eval()
         model = model.cuda()
         return model

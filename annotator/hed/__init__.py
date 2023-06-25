@@ -53,14 +53,13 @@ class ControlNetHED_Apache2(torch.nn.Module):
 
 
 class HEDdetector:
-    def __init__(self, path):
+    def __init__(self, path, download):
         remote_model_path = "https://huggingface.co/lllyasviel/Annotators/resolve/main/ControlNetHED.pth"
-        modelpath = os.path.join(path, "ControlNetHED.pth")
-        if not os.path.exists(modelpath):
-            from basicsr.utils.download_util import load_file_from_url
-            load_file_from_url(remote_model_path, model_dir=path)
+        model_path = os.path.join(path, "ControlNetHED.pth")
+        if not os.path.exists(model_path):
+            download(remote_model_path, model_path)
         self.netNetwork = ControlNetHED_Apache2().float().cuda().eval()
-        self.netNetwork.load_state_dict(torch.load(modelpath))
+        self.netNetwork.load_state_dict(torch.load(model_path))
 
     def to(self, device, dtype):
         self.device = device

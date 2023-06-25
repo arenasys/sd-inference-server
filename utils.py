@@ -1,6 +1,10 @@
 import PIL
 import torch
 import torchvision.transforms as transforms
+import requests
+import tqdm
+import os
+import time
 
 DIRECTML_AVAILABLE = False
 try:
@@ -332,3 +336,21 @@ class CUDATimer:
 
         torch.cuda.synchronize()
         print(self.start.elapsed_time(self.end))
+
+def download(url, filename, callback):
+    folder = os.path.dirname(filename)
+    os.makedirs(folder, exist_ok=True)
+
+    desc = filename.rsplit(os.path.sep)[-1]
+    resp = requests.get(url, stream=True)
+    total = int(resp.headers.get('content-length', 0))
+    last = None
+    with open(filename+".tmp", 'wb') as file, tqdm.tqdm(desc=desc, total=total, unit='iB', unit_scale=True, unit_divisor=1024) as bar:
+        for data in resp.iter_content(chunk_size=1024):
+            size = file.write(data)
+            bar.update(size)
+            if not last or time.time() - last > 0.5:
+                last = time.time()
+                callback(bar.format_dict)
+
+    os.rename(filename+".tmp", filename)

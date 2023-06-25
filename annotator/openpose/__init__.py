@@ -41,22 +41,19 @@ def draw_pose(pose, H, W, draw_body=True, draw_hand=True, draw_face=True):
 
 
 class OpenposeDetector:
-    def __init__(self, path):
+    def __init__(self, path, download):
         body_modelpath = os.path.join(path, "body_pose_model.pth")
         hand_modelpath = os.path.join(path, "hand_pose_model.pth")
         face_modelpath = os.path.join(path, "facenet.pth")
 
         if not os.path.exists(body_modelpath):
-            from basicsr.utils.download_util import load_file_from_url
-            load_file_from_url(body_model_path, model_dir=path)
+            download(body_model_path, body_modelpath)
 
         if not os.path.exists(hand_modelpath):
-            from basicsr.utils.download_util import load_file_from_url
-            load_file_from_url(hand_model_path, model_dir=path)
+            download(hand_model_path, hand_modelpath)
 
         if not os.path.exists(face_modelpath):
-            from basicsr.utils.download_util import load_file_from_url
-            load_file_from_url(face_model_path, model_dir=path)
+            download(face_model_path, face_modelpath)
 
         self.body_estimation = Body(body_modelpath)
         self.hand_estimation = Hand(hand_modelpath)

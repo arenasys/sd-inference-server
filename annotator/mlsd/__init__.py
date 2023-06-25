@@ -14,11 +14,10 @@ from .utils import pred_lines
 remote_model_path = "https://huggingface.co/lllyasviel/Annotators/resolve/main/mlsd_large_512_fp32.pth"
 
 class MLSDdetector:
-    def __init__(self, path):
+    def __init__(self, path, download):
         model_path = os.path.join(path, "mlsd_large_512_fp32.pth")
         if not os.path.exists(model_path):
-            from basicsr.utils.download_util import load_file_from_url
-            load_file_from_url(remote_model_path, model_dir=path)
+            download(remote_model_path, model_path)
         model = MobileV2_MLSD_Large()
         model.load_state_dict(torch.load(model_path), strict=True)
         self.model = model.cuda().eval()

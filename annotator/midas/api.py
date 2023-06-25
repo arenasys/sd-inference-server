@@ -73,7 +73,7 @@ def load_midas_transform(model_type):
     return transform
 
 
-def load_model(model_type, path):
+def load_model(model_type, path, download):
     # https://github.com/isl-org/MiDaS/blob/master/run.py
     # load network
     model_path = os.path.join(path, ISL_PATHS[model_type])
@@ -89,8 +89,7 @@ def load_model(model_type, path):
 
     elif model_type == "dpt_hybrid":  # DPT-Hybrid
         if not os.path.exists(model_path):
-            from basicsr.utils.download_util import load_file_from_url
-            load_file_from_url(remote_model_path, model_dir=path)
+            download(remote_model_path, model_path)
 
         model = DPTDepthModel(
             path=model_path,
@@ -154,10 +153,10 @@ class MiDaSInference(nn.Module):
         "midas_v21_small",
     ]
 
-    def __init__(self, model_type, path):
+    def __init__(self, model_type, path, download):
         super().__init__()
         assert (model_type in self.MODEL_TYPES_ISL)
-        model, _ = load_model(model_type, path)
+        model, _ = load_model(model_type, path, download)
         self.model = model
         self.model.train = disabled_train
 

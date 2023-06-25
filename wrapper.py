@@ -9,6 +9,7 @@ import time
 import shutil
 import tomesd
 import contextlib
+import numpy as np
 
 DIRECTML_AVAILABLE = False
 try:
@@ -29,6 +30,7 @@ import convert
 import attention
 import controlnet
 import preview
+import segmentation
 
 DEFAULTS = {
     "strength": 0.75, "sampler": "Euler a", "clip_skip": 1, "eta": 1,
@@ -137,7 +139,7 @@ class GenerationParameters():
         if "n" in progress:
             self.current_step += 1
         
-        progress = {"current": step, "total": total, "rate": rate, "remaining": remaining}
+        progress = {"current": step, "total": total, "rate": rate, "remaining": remaining, "unit": "it/s"}
         
         interval = int(self.preview_interval or 0)
         if latents != None and self.show_preview and step % interval == 0:
@@ -153,6 +155,13 @@ class GenerationParameters():
                 images[i] = bytesio.getvalue()
             progress["previews"] = images
 
+        self.set_progress(progress)
+
+    def on_download(self, progress):
+        if not progress["rate"]:
+            self.set_status("Downloading")
+
+        progress = {"current": progress["n"], "total": progress["total"], "rate": (progress["rate"] or 1) / (1024*1024), "unit": "MB/s"}
         self.set_progress(progress)
 
     def on_artifact(self, name, images):
@@ -290,6 +299,16 @@ class GenerationParameters():
             self.storage.load(self.clip, self.device)
         else:
             self.storage.unload(self.clip)
+
+    def clear_annotators(self):
+        allowed = []
+        if self.cn_opts:
+            allowed += [o["annotator"] for o in self.cn_opts]
+        if self.seg_opts:
+            allowed += [o["model"] for o in self.seg_opts]
+        if self.cn_annotator:
+            allowed += self.cn_annotator
+        self.storage.clear_annotators(allowed)
 
     def check_parameters(self, required, optional):
         missing, unused = list(required), []
@@ -568,6 +587,7 @@ class GenerationParameters():
         required = "unet, clip, vae, sampler, prompt, width, height, seed, scale, steps".split(", ")
         optional = "clip_skip, eta, batch_size, hr_steps, hr_factor, hr_upscaler, hr_strength, hr_sampler, hr_eta, area".split(", ")
         self.check_parameters(required, optional)
+        self.clear_annotators()
     
         self.set_status("Parsing")
         conditioning = prompts.BatchedConditioningSchedules(self.prompt, self.steps, self.clip_skip)
@@ -587,7 +607,7 @@ class GenerationParameters():
             self.unet = controlnet.ControlledUNET(self.unet, self.cn)
             dtype = self.unet.dtype
 
-            cn_annotators = [self.storage.get_controlnet_annotator(o["annotator"], device, dtype) for o in self.cn_opts]
+            cn_annotators = [self.storage.get_controlnet_annotator(o["annotator"], device, dtype, self.on_download) for o in self.cn_opts]
             cn_scales = [o["scale"] for o in self.cn_opts]
             cn_args = [o["args"] for o in self.cn_opts]
             cn_images = upscalers.upscale(self.cn_image, transforms.InterpolationMode.LANCZOS, self.width, self.height)
@@ -714,6 +734,7 @@ class GenerationParameters():
         required = "unet, clip, vae, sampler, image, prompt, seed, scale, steps, strength".split(", ")
         optional = "img2img_upscaler, mask, mask_blur, clip_skip, eta, batch_size, padding, width, height".split(", ")
         self.check_parameters(required, optional)
+        self.clear_annotators()
 
         self.set_status("Parsing")
         conditioning = prompts.BatchedConditioningSchedules(self.prompt, self.steps, self.clip_skip)
@@ -755,7 +776,7 @@ class GenerationParameters():
             self.unet = controlnet.ControlledUNET(self.unet, self.cn)
             dtype = self.unet.dtype
 
-            cn_annotators = [self.storage.get_controlnet_annotator(o["annotator"], device, dtype) for o in self.cn_opts]
+            cn_annotators = [self.storage.get_controlnet_annotator(o["annotator"], device, dtype, self.on_download) for o in self.cn_opts]
             cn_scales = [o["scale"] for o in self.cn_opts]
             cn_args = [o["args"] for o in self.cn_opts]
             cn_images = upscalers.upscale(self.cn_image, transforms.InterpolationMode.LANCZOS, width, height)
@@ -846,6 +867,8 @@ class GenerationParameters():
         self.set_status("Loading")
         self.set_device()
         self.storage.clear_file_cache()
+        self.clear_annotators()
+
         if not self.img2img_upscaler in UPSCALERS_PIXEL and not self.img2img_upscaler in UPSCALERS_LATENT:
             self.set_status("Loading Upscaler")
             self.upscale_model = self.storage.get_upscaler(self.img2img_upscaler, self.device)
@@ -889,12 +912,13 @@ class GenerationParameters():
         self.set_status("Loading")
         self.set_device()
         self.storage.clear_file_cache()
+        self.clear_annotators()
 
         device = self.device
         dtype = torch.float16
 
         self.set_status("Annotating")
-        annotator = self.storage.get_controlnet_annotator(self.cn_annotator[0], device, dtype)
+        annotator = self.storage.get_controlnet_annotator(self.cn_annotator[0], device, dtype, self.on_download)
         _, img = controlnet.annotate(self.cn_image[0], annotator, self.cn_args[0])
 
         self.set_status("Fetching")
@@ -1128,3 +1152,33 @@ class GenerationParameters():
                 file = os.path.join(self.storage.get_folder("SD"), file)
 
         safetensors.torch.save_file(state_dict, file, metadata)
+
+    def segmentation(self):
+        self.set_status("Configuring")
+        self.set_device()
+        self.clear_annotators()
+
+        opts = self.seg_opts[0]
+
+        img = self.image[0].convert('RGB')
+        if opts.get("points", []) and opts.get("labels", []):
+            points = np.array(opts["points"])
+            labels = np.array(opts["labels"])
+        else:
+            raise RuntimeError("Segment Anything requires points")
+        
+        self.set_status("Loading")
+        model = self.storage.get_segmentation_annotator(opts["model"], self.device, self.on_download)
+
+        self.set_status("Segmenting")
+        mask = segmentation.segment(model, img, points, labels)
+
+        self.on_artifact("Mask", [mask])
+        img.putalpha(mask)
+
+        bytesio = io.BytesIO()
+        img.save(bytesio, format='PNG')
+        data = bytesio.getvalue()
+        if self.callback:
+            if not self.callback({"type": "segmentation", "data": {"images": [data]}}):
+                raise RuntimeError("Aborted")
