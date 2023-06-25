@@ -822,7 +822,7 @@ class GenerationParameters():
 
         if self.mask:
             self.set_status("Preparing")
-            masks = [None if mask == None else mask.filter(PIL.ImageFilter.GaussianBlur(self.mask_blur)) for mask in masks]
+            masks = [None if mask == None else utils.prepare_mask(mask, self.mask_blur, self.mask_expand) for mask in masks]
             mask_latents = utils.get_masks(device, masks)
 
             if self.mask_fill == "Noise":
@@ -893,7 +893,7 @@ class GenerationParameters():
         if self.mask:
             self.set_status("Preparing")
             images, masks, extents = utils.prepare_inpainting(images, masks, self.padding, width, height)
-            masks = [mask.filter(PIL.ImageFilter.GaussianBlur(self.mask_blur)) for mask in masks]
+            masks = [utils.prepare_mask(mask, self.mask_blur, self.mask_expand) for mask in masks]
 
         self.set_status("Upscaling")
         if not self.upscale_model:

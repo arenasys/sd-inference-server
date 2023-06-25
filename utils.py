@@ -117,6 +117,13 @@ def get_masks(device, masks):
         return masks      
     elif type(masks) == list:
         return preprocess_masks(masks).to(device)
+    
+def prepare_mask(mask, blur, expand):
+    if expand:
+        mask = mask.filter(PIL.ImageFilter.MaxFilter(int(2*expand + 1)))
+    if blur:
+        mask = mask.filter(PIL.ImageFilter.GaussianBlur(blur))
+    return mask
 
 def apply_inpainting(images, originals, masks, extents):
     outputs = [None] * len(images)
