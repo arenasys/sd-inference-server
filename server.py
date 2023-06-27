@@ -268,7 +268,7 @@ class Inference(threading.Thread):
             self.got_response({"type":"downloaded", "data":{"message": "Finished: " + rel_file}})
 
 class Server():
-    def __init__(self, wrapper, host, port, password=DEFAULT_PASSWORD, read_only=False, monitor=False):
+    def __init__(self, wrapper, host, port, password=DEFAULT_PASSWORD, owner=False, read_only=False, monitor=False):
         self.stopping = False
 
         self.requests = {}
@@ -280,7 +280,7 @@ class Server():
 
         self.monitor = monitor
         self.read_only = read_only
-        self.owner = None
+        self.owner = None if owner else "disabled"
 
         self.inference = Inference(wrapper, read_only, callback=self.on_response)
         self.server = websockets.sync.server.serve(self.handle_connection, host=host, port=int(port), max_size=None)
@@ -416,6 +416,10 @@ if __name__ == "__main__":
     parser.add_argument('--bind', type=str, help='address (ip:port) to listen on', default="127.0.0.1:28888")
     parser.add_argument('--password', type=str, help='password to derive encryption key from', default=DEFAULT_PASSWORD)
     parser.add_argument('--models', type=str, help='models folder', default="../../models")
+    parser.add_argument('-r', '--read-only', help='disable filesystem changes', action='store_true')
+    parser.add_argument('-o', '--owner', help='first client is the owner, bypassing read-only', action='store_true')
+    parser.add_argument('-m', '--monitor', help='send all generations to the owner', action='store_true')
+    
     args = parser.parse_args()
 
     ip, port = args.bind.rsplit(":",1)
@@ -423,7 +427,7 @@ if __name__ == "__main__":
     model_storage = storage.ModelStorage(args.models, torch.float16, torch.float32)
     params = wrapper.GenerationParameters(model_storage, torch.device("cuda"))
 
-    server = Server(params, ip, port, args.password)
+    server = Server(params, ip, port, args.password, args.owner, args.read_only, args.monitor)
     server.start()
     
     try:
