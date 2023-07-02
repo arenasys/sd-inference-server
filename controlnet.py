@@ -37,7 +37,7 @@ def annotate(img, annotator, arg):
     img = pil_to_cv2(img)
     if type(annotator) != str:
         img = annotator(img, *arg)
-    elif annotator == "invert":
+    elif annotator == "Invert":
         img = 255 - img  
 
     c = torch.from_numpy(img).to(torch.float32) / 255.0
