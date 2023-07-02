@@ -266,10 +266,10 @@ class GenerationParameters():
         
         self.storage.clear_file_cache()
         
-        self.storage.enforce_network_limit(self.cn or [], "CN")
+        self.storage.enforce_controlnet_limit(self.cn or [])
         if self.cn:
             self.set_status("Loading ControlNet")
-            self.cn = [self.storage.get_controlnet(cn, self.device) for cn in self.cn]
+            self.cn = [self.storage.get_controlnet(cn, self.device, self.on_download) for cn in self.cn]
 
         if self.hr_upscaler:
             if not self.hr_upscaler in UPSCALERS_LATENT and not self.hr_upscaler in UPSCALERS_PIXEL:
@@ -1161,6 +1161,8 @@ class GenerationParameters():
         opts = self.seg_opts[0]
 
         img = self.image[0].convert('RGB')
+        inv = img.copy()
+
         if opts.get("points", []) and opts.get("labels", []):
             points = np.array(opts["points"])
             labels = np.array(opts["labels"])
@@ -1171,10 +1173,13 @@ class GenerationParameters():
         model = self.storage.get_segmentation_annotator(opts["model"], self.device, self.on_download)
 
         self.set_status("Segmenting")
-        mask = segmentation.segment(model, img, points, labels)
+        mask, inv_mask = segmentation.segment(model, img, points, labels)
 
-        self.on_artifact("Mask", [mask])
         img.putalpha(mask)
+        inv.putalpha(inv_mask)
+
+        self.on_artifact("Inverse", [inv])
+        self.on_artifact("Mask", [mask])
 
         bytesio = io.BytesIO()
         img.save(bytesio, format='PNG')

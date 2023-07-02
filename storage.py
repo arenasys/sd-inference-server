@@ -8,6 +8,7 @@ import models
 import convert
 import upscalers
 import annotator
+import controlnet
 import segmentation
 import utils
 
@@ -17,7 +18,7 @@ MODEL_FOLDERS = {
     "TI": ["TI", "embeddings", os.path.join("..", "embeddings")], 
     "LoRA": ["LoRA"], 
     "HN": ["HN", "hypernetworks"],
-    "CN": ["CN", "ControlNet"]
+    "CN": ["CN"]
 }
 
 class ModelStorage():
@@ -131,6 +132,12 @@ class ModelStorage():
                 continue
             del self.loaded[comp][m]
             self.do_gc()
+
+    def enforce_controlnet_limit(self, used):
+        for m in list(self.loaded["CN"].keys()):
+            if not m in used:
+                del self.loaded["CN"][m]
+                self.do_gc()
 
     def clear_modified(self):
         # static network mode will merge models into the UNET/CLIP
@@ -297,15 +304,24 @@ class ModelStorage():
                 break
         return self.get_component(name, "HN", device)
 
-    def get_controlnet(self, name, device):
-        for cn in self.files["CN"]:
-            if os.path.sep + name + "." in cn:
-                name = cn
-                break
-        return self.get_component(name, "CN", device)
+    def get_controlnet(self, name, device, callback):
+        file, _ = controlnet.get_controlnet(name, os.path.join(self.path, "CN"), callback)
+        file = os.path.join("CN", file)
+
+        if name in self.loaded["CN"]:
+            return self.move(self.loaded["CN"][name], name, "CN", device)
+
+        state_dict = self.load_file(os.path.join(self.path, file), "CN")
+        if not "CN" in state_dict:
+            raise ValueError(f"model doesnt contain a CN: {file}")
+        
+        model = models.ControlNet.from_model(name, state_dict["CN"], self.dtype)
+        self.loaded["CN"][name] = model
+
+        return self.move(model, name, "CN", device)
     
     def get_controlnet_annotator(self, name, device, dtype, callback):
-        if name in {"none", "invert"}:
+        if name in {"None", "Invert"}:
             return name
         
         def download(url, file):

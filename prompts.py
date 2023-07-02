@@ -161,7 +161,7 @@ def tokenize_prompt(clip, parsed):
 
         tokenized = tokenized[len(chunk):]
         chunks += [chunk]
-    
+
     if not chunks:
         chunks = [[]]
     

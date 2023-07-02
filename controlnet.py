@@ -1,4 +1,5 @@
 import torch
+import os
 import PIL.Image
 import cv2
 import einops
@@ -7,11 +8,30 @@ from diffusers.models.controlnet import ControlNetModel
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 
+import utils
+
+CONTROLNET_MODELS = {
+    "Canny": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11p_sd15_canny.pth",
+    "Depth": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11f1p_sd15_depth.pth",
+    "Pose": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11p_sd15_openpose.pth",
+    "Lineart": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11p_sd15_lineart.pth",
+    "Softedge": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11p_sd15_softedge.pth",
+    "Anime": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11p_sd15s2_lineart_anime.pth",
+    "M-LSD": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11p_sd15_mlsd.pth",
+    "Instruct": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11e_sd15_ip2p.pth",
+    "Shuffle": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11e_sd15_shuffle.pth",
+    "Tile": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11f1e_sd15_tile.pth",
+    "Inpaint": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11p_sd15_inpaint.pth",
+    "Normal": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11p_sd15_normalbae.pth",
+    "Scribble": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11p_sd15_scribble.pth",
+    "Segmentation": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11p_sd15_seg.pth"
+}
+
 def cv2_to_pil(img):
-    return PIL.Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+    return PIL.Image.fromarray(img)
 
 def pil_to_cv2(img):
-    return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+    return np.array(img)
 
 def annotate(img, annotator, arg):
     img = pil_to_cv2(img)
@@ -38,6 +58,15 @@ def preprocess_control(images, annotators, args, scales):
         outputs += [out]
         conditioning += [(s,cond)]
     return conditioning, outputs
+
+def get_controlnet(name, folder, callback):
+    url = CONTROLNET_MODELS[name]
+    name = url.rsplit("/",1)[-1]
+    file = os.path.join(folder, name)
+    if not os.path.exists(file):
+        utils.download(url, file, callback)
+        return name, True
+    return name, False
 
 class ControlledUNET:
     def __init__(self, unet, controlnets):

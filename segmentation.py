@@ -35,6 +35,8 @@ def segment(model, image, points, labels):
 
     mask = masks[np.argmax(scores)]*255.0
     mask = mask.reshape(mask.shape[-2], mask.shape[-1]).astype(np.uint8)
-    mask = PIL.Image.fromarray(mask, 'L')
 
-    return mask
+    mask_img = PIL.Image.fromarray(mask, 'L')
+    inv_img = PIL.Image.fromarray(255-mask, 'L')
+
+    return mask_img, inv_img

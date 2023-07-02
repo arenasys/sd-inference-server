@@ -7,11 +7,11 @@ import annotator.openpose
 import annotator.mlsd
 
 annotators = {
-    "canny": annotator.canny.CannyDetector,
-    "softedge": annotator.hed.HEDdetector,
-    "lineart": annotator.lineart.LineartDetector,
-    "anime": annotator.lineart_anime.LineartAnimeDetector,
-    "depth": annotator.midas.MidasDetector,
-    "pose": annotator.openpose.OpenposeDetector,
-    "mlsd": annotator.mlsd.MLSDdetector
+    "Canny": annotator.canny.CannyDetector,
+    "Softedge": annotator.hed.HEDdetector,
+    "Lineart": annotator.lineart.LineartDetector,
+    "Anime": annotator.lineart_anime.LineartAnimeDetector,
+    "Depth": annotator.midas.MidasDetector,
+    "Pose": annotator.openpose.OpenposeDetector,
+    "M-LSD": annotator.mlsd.MLSDdetector,
 }
