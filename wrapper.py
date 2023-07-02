@@ -645,7 +645,7 @@ class GenerationParameters():
 
         self.set_status("Preparing")
         self.need_models(unet=True, vae=False, clip=False)
-        denoiser = guidance.GuidedDenoiser(self.unet, conditioning, self.scale)
+        denoiser = guidance.GuidedDenoiser(self.unet, conditioning, self.scale, self.cfg_rescale or 0.0)
         noise = utils.NoiseSchedule(seeds, subseeds, self.width // 8, self.height // 8, device, self.unet.dtype)
         sampler = SAMPLER_CLASSES[self.sampler](denoiser, self.eta)
 
@@ -807,7 +807,7 @@ class GenerationParameters():
 
         self.need_models(unet=True, vae=True, clip=False)
 
-        denoiser = guidance.GuidedDenoiser(self.unet, conditioning, self.scale)
+        denoiser = guidance.GuidedDenoiser(self.unet, conditioning, self.scale, self.cfg_rescale or 0.0)
         noise = utils.NoiseSchedule(seeds, subseeds, width // 8, height // 8, device, self.unet.dtype)
         sampler = SAMPLER_CLASSES[self.sampler](denoiser, self.eta)
 

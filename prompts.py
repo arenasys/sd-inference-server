@@ -398,9 +398,16 @@ class BatchedConditioningSchedules():
         return networks
     
     def get_initial_networks(self, comparable=False):
-        unet = self.get_networks_at_step(0,0)[0]
-        clip = self.get_networks_at_step(0,1)[0]
-        all = list(set(unet.keys()).union(set(clip.keys())))
+        unets = self.get_networks_at_step(0,0)
+        clips = self.get_networks_at_step(0,1)
+
+        all = set()
+        for d in unets + clips:
+            all = all.union(set(d.keys()))
+        all = list(all)
+
+        unet = unets[0]
+        clip = clips[0]
 
         if comparable:
             unet_t = tuple([tuple([k,unet[k]]) for k in sorted(unet.keys())])

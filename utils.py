@@ -349,7 +349,7 @@ def download(url, filename, callback):
     os.makedirs(folder, exist_ok=True)
 
     desc = filename.rsplit(os.path.sep)[-1]
-    resp = requests.get(url, stream=True)
+    resp = requests.get(url, stream=True, timeout=10)
     total = int(resp.headers.get('content-length', 0))
     last = None
     with open(filename+".tmp", 'wb') as file, tqdm.tqdm(desc=desc, total=total, unit='iB', unit_scale=True, unit_divisor=1024) as bar:

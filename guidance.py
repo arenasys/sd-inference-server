@@ -1,7 +1,7 @@
 import torch
 
 class GuidedDenoiser():
-    def __init__(self, unet, conditioning_schedule, scale):
+    def __init__(self, unet, conditioning_schedule, scale, cfg_rescale):
         self.unet = unet
         self.conditioning_schedule = conditioning_schedule
         self.conditioning = None
@@ -12,6 +12,8 @@ class GuidedDenoiser():
 
         self.device = unet.device
         self.dtype = unet.dtype
+
+        self.cfg_rescale = cfg_rescale
 
         self.predictions = None
 
@@ -76,6 +78,12 @@ class GuidedDenoiser():
 
             # Apply CFG
             cfg = neg + ((pos - neg) * (pos_weights * self.scale)).sum(dim=0, keepdims=True)
+
+            # Rescale CFG
+            if self.cfg_rescale:
+                std = (torch.std(pos)/torch.std(cfg))
+                factor = self.cfg_rescale*std + (1-self.cfg_rescale)
+                cfg = cfg * factor
             
             composed_pred += [cfg]
             i += pos_len + neg_len
