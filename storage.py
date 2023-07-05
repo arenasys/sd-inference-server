@@ -321,7 +321,7 @@ class ModelStorage():
         return self.move(model, name, "CN", device)
     
     def get_controlnet_annotator(self, name, device, dtype, callback):
-        if name in {"None", "Invert"}:
+        if not name in annotator.annotators:
             return name
         
         def download(url, file):

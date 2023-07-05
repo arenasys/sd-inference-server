@@ -269,6 +269,7 @@ class GenerationParameters():
         self.storage.enforce_controlnet_limit(self.cn or [])
         if self.cn:
             self.set_status("Loading ControlNet")
+            self.cn_models = [c for c in self.cn]
             self.cn = [self.storage.get_controlnet(cn, self.device, self.on_download) for cn in self.cn]
 
         if self.hr_upscaler:
@@ -768,6 +769,8 @@ class GenerationParameters():
         original_images = images
         images = utils.apply_extents(images, extents)
         masks = self.prepare_images(masks, extents, width, height)
+        if masks:
+            masks = [None if mask == None else utils.prepare_mask(mask, self.mask_blur, self.mask_expand) for mask in masks]
 
         seeds, subseeds = self.get_seeds(batch_size)
         metadata = self.get_metadata("img2img",  width, height, batch_size, self.prompt, seeds, subseeds)
@@ -781,7 +784,8 @@ class GenerationParameters():
             cn_args = [o["args"] for o in self.cn_opts]
             cn_images = upscalers.upscale(self.cn_image, transforms.InterpolationMode.LANCZOS, width, height)
 
-            cn_cond, cn_outputs = controlnet.preprocess_control(cn_images, cn_annotators, cn_args, cn_scales)
+            cn_cond, cn_outputs = controlnet.preprocess_control(cn_images, cn_annotators, cn_args, cn_scales, masks=masks)
+
             if self.keep_artifacts:
                 self.on_artifact("Control", [cn_outputs]*batch_size)
             self.unet.set_controlnet_conditioning(cn_cond)
@@ -822,7 +826,6 @@ class GenerationParameters():
 
         if self.mask:
             self.set_status("Preparing")
-            masks = [None if mask == None else utils.prepare_mask(mask, self.mask_blur, self.mask_expand) for mask in masks]
             mask_latents = utils.get_masks(device, masks)
 
             if self.mask_fill == "Noise":
@@ -834,9 +837,7 @@ class GenerationParameters():
 
         if self.unet.inpainting: #SDv1-Inpainting, SDv2-Inpainting
             self.set_status("Preparing")
-            if not self.mask:
-                masks = None
-            inpainting_masked, inpainting_masks = utils.encode_inpainting(upscaled_images, masks, self.vae, seeds)
+            inpainting_masked, inpainting_masks = utils.encode_inpainting(upscaled_images, masks or None, self.vae, seeds)
             denoiser.set_inpainting(inpainting_masked, inpainting_masks)
 
         self.need_models(unet=True, vae=False, clip=False)

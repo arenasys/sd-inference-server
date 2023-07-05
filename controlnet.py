@@ -9,6 +9,7 @@ import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 
 import utils
+from annotator import shuffle
 
 CONTROLNET_MODELS = {
     "Canny": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11p_sd15_canny.pth",
@@ -33,28 +34,45 @@ def cv2_to_pil(img):
 def pil_to_cv2(img):
     return np.array(img)
 
-def annotate(img, annotator, arg):
+def annotate(img, annotator, arg, mask=None):
     img = pil_to_cv2(img)
     if type(annotator) != str:
         img = annotator(img, *arg)
     elif annotator == "Invert":
-        img = 255 - img  
+        img = 255 - img
+    elif annotator == "Shuffle":
+        img = shuffle(img)
 
     c = torch.from_numpy(img).to(torch.float32) / 255.0
+
     if len(c.shape) == 2:
         c = torch.stack([c]*3)
     if c.shape[-1] == 3:
         c = einops.rearrange(c, "h w c -> c h w")    
     if len(c.shape) == 3:
         c = c.unsqueeze(0)
+
+    if annotator == "Inpaint" and mask != None:
+        mask = utils.TO_TENSOR(mask).to(torch.float32)
+        mask = torch.cat((mask, mask, mask), 0).unsqueeze(0)
+        c[mask > 0.5] = -1
+        img_mask = einops.rearrange(mask[0], "c h w -> h w c").numpy()
+        img[img_mask > 0.5] = 0
+
     return c, cv2_to_pil(img)
 
-def preprocess_control(images, annotators, args, scales):
+def preprocess_control(images, annotators, args, scales, masks=[]):
     conditioning = []
     outputs = []
+
+    if masks and any(masks):
+        mask = [m for m in masks if m][0]
+    else:
+        mask = None
+
     for i in range(len(images)):
         s, a, arg, im = scales[i], annotators[i], args[i], images[i]
-        cond, out = annotate(im, a, arg)
+        cond, out = annotate(im, a, arg, mask)
         outputs += [out]
         conditioning += [(s,cond)]
     return conditioning, outputs
@@ -81,6 +99,7 @@ class ControlledUNET:
         down_samples, mid_sample = None, None
         for i in range(len(self.controlnets)):
             cn_scale, cn_cond = self.controlnet_cond[i]
+
             down, mid = self.controlnets[i](
                 latents, timestep,
                 encoder_hidden_states=encoder_hidden_states,

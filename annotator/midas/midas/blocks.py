@@ -45,7 +45,6 @@ def _make_encoder(backbone, features, use_pretrained, groups=1, expand=False, ex
         
     return pretrained, scratch
 
-
 def _make_scratch(in_shape, out_shape, groups=1, expand=False):
     scratch = nn.Module()
 

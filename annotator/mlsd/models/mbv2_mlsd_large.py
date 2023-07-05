@@ -5,7 +5,6 @@ import torch.nn as nn
 import torch.utils.model_zoo as model_zoo
 from  torch.nn import  functional as F
 
-
 class BlockTypeA(nn.Module):
     def __init__(self, in_c1, in_c2, out_c1, out_c2, upscale = True):
         super(BlockTypeA, self).__init__()

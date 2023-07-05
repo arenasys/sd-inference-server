@@ -2,15 +2,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .base_model import BaseModel
 from .blocks import (
-    FeatureFusionBlock,
     FeatureFusionBlock_custom,
     Interpolate,
     _make_encoder,
     forward_vit,
 )
-
 
 def _make_fusion_block(features, use_bn):
     return FeatureFusionBlock_custom(
@@ -21,6 +18,20 @@ def _make_fusion_block(features, use_bn):
         expand=False,
         align_corners=True,
     )
+
+class BaseModel(torch.nn.Module):
+    def load(self, path):
+        """Load model from file.
+
+        Args:
+            path (str): file path
+        """
+        parameters = torch.load(path, map_location=torch.device('cpu'))
+
+        if "optimizer" in parameters:
+            parameters = parameters["model"]
+
+        self.load_state_dict(parameters)
 
 
 class DPT(BaseModel):
