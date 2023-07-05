@@ -68,26 +68,30 @@ class OpenposeDetector:
         return self
 
 
-    def __call__(self, oriImg, hand_and_face=False, return_is_index=False):
-        oriImg = oriImg[:, :, ::-1].copy()
-        H, W, C = oriImg.shape
+    def __call__(self, src, hand_and_face=False):
+        if src is tuple:
+            pose, (H,W) = src
+            return draw_pose(pose, H, W)
+
+        src = src[:, :, ::-1].copy()
+        H, W, C = src.shape
         with torch.no_grad():
-            candidate, subset = self.body_estimation(oriImg, self.device, self.dtype)
+            candidate, subset = self.body_estimation(src, self.device, self.dtype)
             hands = []
             faces = []
             if hand_and_face:
                 # Hand
-                hands_list = util.handDetect(candidate, subset, oriImg)
+                hands_list = util.handDetect(candidate, subset, src)
                 for x, y, w, is_left in hands_list:
-                    peaks = self.hand_estimation(oriImg[y:y+w, x:x+w, :], self.device, self.dtype).astype(np.float32)
+                    peaks = self.hand_estimation(src[y:y+w, x:x+w, :], self.device, self.dtype).astype(np.float32)
                     if peaks.ndim == 2 and peaks.shape[1] == 2:
                         peaks[:, 0] = np.where(peaks[:, 0] < 1e-6, -1, peaks[:, 0] + x) / float(W)
                         peaks[:, 1] = np.where(peaks[:, 1] < 1e-6, -1, peaks[:, 1] + y) / float(H)
                         hands.append(peaks.tolist())
                 # Face
-                faces_list = util.faceDetect(candidate, subset, oriImg)
+                faces_list = util.faceDetect(candidate, subset, src)
                 for x, y, w in faces_list:
-                    heatmaps = self.face_estimation(oriImg[y:y+w, x:x+w, :], self.device, self.dtype)
+                    heatmaps = self.face_estimation(src[y:y+w, x:x+w, :], self.device, self.dtype)
                     peaks = self.face_estimation.compute_peaks_from_heatmaps(heatmaps).astype(np.float32)
                     if peaks.ndim == 2 and peaks.shape[1] == 2:
                         peaks[:, 0] = np.where(peaks[:, 0] < 1e-6, -1, peaks[:, 0] + x) / float(W)
@@ -99,7 +103,4 @@ class OpenposeDetector:
                 candidate[:, 1] /= float(H)
             bodies = dict(candidate=candidate.tolist(), subset=subset.tolist())
             pose = dict(bodies=bodies, hands=hands, faces=faces)
-            if return_is_index:
-                return pose
-            else:
-                return draw_pose(pose, H, W)
+            return draw_pose(pose, H, W), pose

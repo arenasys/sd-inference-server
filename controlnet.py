@@ -1,10 +1,8 @@
 import torch
 import os
 import PIL.Image
-import cv2
 import einops
 import numpy as np
-from diffusers.models.controlnet import ControlNetModel
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -34,14 +32,16 @@ def cv2_to_pil(img):
 def pil_to_cv2(img):
     return np.array(img)
 
-def annotate(img, annotator, arg, mask=None):
+def annotate(img, annotator, model, arg, mask=None):
     img = pil_to_cv2(img)
-    if type(annotator) != str:
-        img = annotator(img, *arg)
-    elif annotator == "Invert":
+    if annotator == "Invert":
         img = 255 - img
     elif annotator == "Shuffle":
         img = shuffle(img)
+    elif annotator == "Pose":
+        img, pose = model(img, *arg)
+    elif model:
+        img = model(img, *arg)
 
     c = torch.from_numpy(img).to(torch.float32) / 255.0
 
@@ -61,7 +61,7 @@ def annotate(img, annotator, arg, mask=None):
 
     return c, cv2_to_pil(img)
 
-def preprocess_control(images, annotators, args, scales, masks=[]):
+def preprocess_control(images, annotators, models, args, scales, masks=[]):
     conditioning = []
     outputs = []
 
@@ -71,10 +71,10 @@ def preprocess_control(images, annotators, args, scales, masks=[]):
         mask = None
 
     for i in range(len(images)):
-        s, a, arg, im = scales[i], annotators[i], args[i], images[i]
-        cond, out = annotate(im, a, arg, mask)
+        sc, an, md, arg, im = scales[i], annotators[i], models[i], args[i], images[i]
+        cond, out = annotate(im, an, md, arg, mask)
         outputs += [out]
-        conditioning += [(s,cond)]
+        conditioning += [(sc,cond)]
     return conditioning, outputs
 
 def get_controlnet(name, folder, callback):

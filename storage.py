@@ -322,7 +322,7 @@ class ModelStorage():
     
     def get_controlnet_annotator(self, name, device, dtype, callback):
         if not name in annotator.annotators:
-            return name
+            return None
         
         def download(url, file):
             utils.download(url, file, callback)
