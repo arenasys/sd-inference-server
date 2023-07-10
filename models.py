@@ -75,7 +75,6 @@ class VAE(AutoencoderKL):
     def __init__(self, model_type, dtype):
         self.model_type = model_type
         super().__init__(**VAE.get_config(model_type))
-        self.enable_slicing()
         self.to(dtype)
 
     class LatentDistribution(DiagonalGaussianDistribution):
