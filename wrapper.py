@@ -282,12 +282,12 @@ class GenerationParameters():
                 self.upscale_model = self.storage.get_upscaler(self.img2img_upscaler, self.device)
 
         if self.minimal_vram and self.vae:
-            self.vae.enable_slicing(True)
-            self.vae.enable_tiling(True)
+            self.vae.enable_slicing()
+            self.vae.enable_tiling()
         elif self.vae:
-            self.vae.enable_slicing(False)
-            self.vae.enable_tiling(False)
-
+            self.vae.disable_slicing()
+            self.vae.disable_tiling()
+        
     def need_models(self, unet, vae, clip):
         if not self.minimal_vram:
             return
