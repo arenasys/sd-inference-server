@@ -72,13 +72,13 @@ def get_available():
 
 def use_optimized_attention(device):
     if "cuda" in str(device):
-        if "cuda" in torch.__version__:
+        if "rocm" in torch.__version__:
+            use_doggettx_attention(device)
+        else:
             if HAVE_XFORMERS:
                 use_xformers_attention(device)
             else:
                 use_sdp_attention(device)
-        else:
-            use_doggettx_attention(device)
     else:
        use_split_attention(device)
 
