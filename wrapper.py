@@ -86,7 +86,8 @@ CROSS_ATTENTION = {
     "Doggettx": attention.use_doggettx_attention,
     "Flash": attention.use_flash_attention,
     "Original": attention.use_diffusers_attention,
-    "SDP": attention.use_sdp_attention
+    "SDP": attention.use_sdp_attention,
+    "XFormers": attention.use_xformers_attention
 }
 
 def format_float(x):

@@ -3,6 +3,13 @@ import einops
 import math
 import diffusers
 
+HAVE_XFORMERS = False
+try:
+    import xformers
+    HAVE_XFORMERS = True
+except Exception:
+    pass
+
 ORIGINAL_FORWARD = None
 try:
     ORIGINAL_FORWARD = diffusers.models.attention_processor.Attention.forward
@@ -59,12 +66,17 @@ def get_available():
         use_diffusers_attention,
         use_sdp_attention
     ]
+    if HAVE_XFORMERS:
+        available += [use_xformers_attention]
     return available
 
 def use_optimized_attention(device):
     if "cuda" in str(device):
         if "cuda" in torch.__version__:
-            use_diffusers_attention(device)
+            if HAVE_XFORMERS:
+                use_xformers_attention(device)
+            else:
+                use_sdp_attention(device)
         else:
             use_doggettx_attention(device)
     else:
@@ -156,6 +168,37 @@ def use_doggettx_attention(device):
         return out
 
     set_attention(split_cross_attention_forward_v2)
+
+def use_xformers_attention(device):
+    if not "cuda" in str(device):
+        raise RuntimeError("XFormers attention does not support CPU generation")
+    if not HAVE_XFORMERS:
+        raise RuntimeError("XFormers not installed")
+
+    def xformers_attention_forward(self, x, encoder_hidden_states=None, attention_mask=None):
+        h = self.heads
+        q_in = self.to_q(x)
+        context = default(encoder_hidden_states, x)
+
+        k_in = self.to_k(context)
+        v_in = self.to_v(context)
+
+        q, k, v = map(lambda t: einops.rearrange(t, 'b n (h d) -> b n h d', h=h), (q_in, k_in, v_in))
+        del q_in, k_in, v_in
+
+        dtype = q.dtype
+
+        out = xformers.ops.memory_efficient_attention(q, k, v, attn_bias=None)
+
+        out = out.to(dtype)
+
+        out = einops.rearrange(out, 'b n h d -> b n (h d)', h=h)
+
+        out = self.to_out[0](out)
+        out = self.to_out[1](out)
+        return out
+    
+    set_attention(xformers_attention_forward)
 
 def use_split_attention(device):
     def split_cross_attention_forward_v1(self, x, encoder_hidden_states=None, attention_mask=None):
