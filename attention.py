@@ -3,40 +3,48 @@ import einops
 import math
 import diffusers
 
-HAVE_XFORMERS = False
-try:
-    import xformers
-    HAVE_XFORMERS = True
-except Exception:
-    pass
-
-HAVE_FLASH = False
-try:
-    from flash_attn.flash_attention import FlashAttention
-    from flash_attn.flash_attn_interface import flash_attn_unpadded_kvpacked_func
-    HAVE_FLASH = True
-    print("FLASH ATTENTION TEST MODE")
-except Exception:
-    pass
-
 ORIGINAL_FORWARD = None
 try:
     ORIGINAL_FORWARD = diffusers.models.attention_processor.Attention.forward
 except:
-    pass
-try:
-    ORIGINAL_FORWARD = diffusers.models.attention.CrossAttention.forward
-except:
-    pass
+    raise Exception("Incompatible Diffusers version")
+CURRENT_FORWARD = ORIGINAL_FORWARD
+
+def do_attention(self, hidden_states, encoder_hidden_states=None, attention_mask=None, temb=None):
+    if CURRENT_FORWARD == ORIGINAL_FORWARD:
+        return ORIGINAL_FORWARD(self, hidden_states, encoder_hidden_states=encoder_hidden_states, attention_mask=attention_mask, temb=temb)
+
+    residual = hidden_states
+
+    if self.spatial_norm is not None:
+        hidden_states = self.spatial_norm(hidden_states, temb)
+
+    input_ndim = hidden_states.ndim
+
+    if input_ndim == 4:
+        batch_size, channel, height, width = hidden_states.shape
+        hidden_states = hidden_states.view(batch_size, channel, height * width).transpose(1, 2)
+
+    if self.group_norm is not None:
+        hidden_states = self.group_norm(hidden_states.transpose(1, 2)).transpose(1, 2)
+
+    hidden_states = CURRENT_FORWARD(self, hidden_states, encoder_hidden_states, attention_mask)
+
+    if input_ndim == 4:
+            hidden_states = hidden_states.transpose(-1, -2).reshape(batch_size, channel, height, width)
+
+    if self.residual_connection:
+        hidden_states = hidden_states+ residual
+
+    hidden_states = hidden_states / self.rescale_output_factor
+
+    return hidden_states
 
 def set_attention(forward):
+    global CURRENT_FORWARD
+    CURRENT_FORWARD = forward
     try:
-        diffusers.models.attention_processor.Attention.forward = forward
-        return
-    except:
-        pass
-    try:
-        diffusers.models.attention.CrossAttention.forward = forward
+        diffusers.models.attention_processor.Attention.forward = do_attention
         return
     except:
         pass
@@ -51,15 +59,13 @@ def get_available():
         use_diffusers_attention,
         use_sdp_attention
     ]
-    if HAVE_XFORMERS:
-        available += [use_xformers_attention]
     return available
 
 def use_optimized_attention(device):
     if "cuda" in str(device):
-        try:
-            use_xformers_attention(device)
-        except Exception:
+        if "cuda" in torch.__version__:
+            use_diffusers_attention(device)
+        else:
             use_doggettx_attention(device)
     else:
        use_split_attention(device)
@@ -90,6 +96,7 @@ def use_doggettx_attention(device):
         h = self.heads
 
         q_in = self.to_q(x)
+
         context = default(encoder_hidden_states, x)
 
         context = context if context is not None else x
@@ -101,7 +108,6 @@ def use_doggettx_attention(device):
 
         dtype = q_in.dtype
         device = q_in.device
-
 
         k_in = k_in * self.scale
     
@@ -290,56 +296,6 @@ class FlashAttentionFunction(torch.autograd.Function):
 def use_flash_attention(device):
     flash_func = FlashAttentionFunction
 
-    def forward_flash_attn_test(self, x, encoder_hidden_states=None, attention_mask=None):
-        query = self.to_q(x)
-        context = encoder_hidden_states if encoder_hidden_states is not None else x
-        key = self.to_k(context)
-        value = self.to_v(context)
-
-        batch_size = query.shape[0]
-
-        flsh = FlashAttention(self.scale)
-
-        query_dim, inner_dim = self.to_q.weight.shape
-        head_dim = inner_dim // self.heads
-        context_dim = self.to_k.weight.shape[1]
-
-        if (head_dim > 128 or (head_dim % 8) != 0) or context_dim != query_dim:
-            query = self.head_to_batch_dim(query)
-            key = self.head_to_batch_dim(key)
-            value = self.head_to_batch_dim(value)
-
-            attention_probs = self.get_attention_scores(query, key, attention_mask)
-            hidden_states = torch.bmm(attention_probs, value)
-            out = self.batch_to_head_dim(hidden_states)
-        elif context_dim == query_dim:
-            qkv = torch.stack([
-                query, key, value
-            ], dim=2)
-            qkv = einops.rearrange(qkv, 'b s t (h d) -> b s t h d', h=self.heads)
-            out, _ = flsh(qkv)
-            out = einops.rearrange(out, 'b s h d -> b s (h d)', h=self.heads)
-        else:
-            h = self.heads
-            kv = torch.stack([key, value], dim=2)
-
-            q_seqlen = query.shape[1]
-            kv_seqlen = kv.shape[1]
-
-            q = einops.rearrange(query, 'b s (h d) -> (b s) h d', h=h)
-            kv = einops.rearrange(kv, 'b s t (h d) -> (b s) t h d', h=h)
-
-            cu_seqlens_q = torch.arange(0, (batch_size + 1) * q_seqlen, step=q_seqlen, dtype=torch.int32, device=q.device)
-            cu_seqlens_k = torch.arange(0, (batch_size + 1) * kv_seqlen, step=kv_seqlen, dtype=torch.int32, device=kv.device)
-            
-            out = flash_attn_unpadded_kvpacked_func(q, kv, cu_seqlens_q, cu_seqlens_k, q_seqlen, kv_seqlen, 0.0, self.scale)
-
-            out = einops.rearrange(out, '(b s) h d -> b s (h d)', b = batch_size, h = h)
-
-        out = self.to_out[0](out)
-        out = self.to_out[1](out)
-        return out
-
     def forward_flash_attn(self, x, encoder_hidden_states=None, attention_mask=None):
         q_bucket_size = 512
         k_bucket_size = 1024
@@ -364,41 +320,7 @@ def use_flash_attention(device):
         out = self.to_out[1](out)
         return out
     
-    if HAVE_FLASH:
-        set_attention(forward_flash_attn_test)
-    else:
-        set_attention(forward_flash_attn)
-
-def use_xformers_attention(device):
-    if not "cuda" in str(device):
-        raise RuntimeError("XFormers attention does not support CPU generation")
-    if not HAVE_XFORMERS:
-        raise RuntimeError("XFormers not installed")
-
-    def xformers_attention_forward(self, x, encoder_hidden_states=None, attention_mask=None):
-        h = self.heads
-        q_in = self.to_q(x)
-        context = default(encoder_hidden_states, x)
-
-        k_in = self.to_k(context)
-        v_in = self.to_v(context)
-
-        q, k, v = map(lambda t: einops.rearrange(t, 'b n (h d) -> b n h d', h=h), (q_in, k_in, v_in))
-        del q_in, k_in, v_in
-
-        dtype = q.dtype
-
-        out = xformers.ops.memory_efficient_attention(q, k, v, attn_bias=None)
-
-        out = out.to(dtype)
-
-        out = einops.rearrange(out, 'b n h d -> b n (h d)', h=h)
-
-        out = self.to_out[0](out)
-        out = self.to_out[1](out)
-        return out
-    
-    set_attention(xformers_attention_forward)
+    set_attention(forward_flash_attn)
 
 def use_sdp_attention(device):
     def scaled_dot_product_attention_forward(self, x, encoder_hidden_states=None, attention_mask=None):

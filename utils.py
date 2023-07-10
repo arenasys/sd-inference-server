@@ -53,15 +53,17 @@ def preprocess_masks(masks):
     return torch.cat([process(m) for m in masks])
 
 def encode_inpainting(images, masks, vae, seeds):
-    if type(images) != torch.Tensor:
-        images = preprocess_images(images)
-    images = images.to(vae.device, vae.dtype)
     if masks != None:
         if type(masks) != torch.Tensor:
             masks = torch.cat([TO_TENSOR(m)[None,:] for m in masks])
         masks = masks.to(vae.device, vae.dtype)
         masks = torch.round(masks)
-        images = torch.lerp(images, images * (1.0 - masks), 1.0)
+
+        if type(images) != torch.Tensor:
+            images = torch.cat([TO_TENSOR(i)[None,:] for i in images])
+        images = images.to(vae.device, vae.dtype)
+        images = 2.0 * images - 1.0
+        images = images * (1.0 - masks)
     else:
         masks_shape = (images.shape[0], 1, images.shape[2], images.shape[3])
         masks = torch.ones(masks_shape).to(vae.device, vae.dtype)

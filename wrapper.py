@@ -86,7 +86,6 @@ CROSS_ATTENTION = {
     "Doggettx": attention.use_doggettx_attention,
     "Flash": attention.use_flash_attention,
     "Original": attention.use_diffusers_attention,
-    "xFormers": attention.use_xformers_attention,
     "SDP": attention.use_sdp_attention
 }
 
@@ -343,9 +342,6 @@ class GenerationParameters():
         
         if self.minimal_vram and self.show_preview == "Full":
             raise ValueError("Full preview is incompatible with minimal VRAM")
-        
-        if self.attention and self.attention in CROSS_ATTENTION:
-            CROSS_ATTENTION[self.attention](self.device)
 
     def set_device(self):
         device = torch.device("cuda")
@@ -361,6 +357,10 @@ class GenerationParameters():
                 device = torch.device(idx)
                 self.storage.dtype = torch.float16
         self.device = device
+    
+    def set_attention(self):
+        if self.attention and self.attention in CROSS_ATTENTION:
+            CROSS_ATTENTION[self.attention](self.device)
 
     def listify(self, *args):
         if args == None:
@@ -596,6 +596,7 @@ class GenerationParameters():
 
         self.set_status("Loading")
         self.set_device()
+        self.set_attention()
         self.load_models()
 
         self.attach_tome()
@@ -647,7 +648,7 @@ class GenerationParameters():
         conditioning.encode(self.clip, area)
 
         self.set_status("Preparing")
-        self.need_models(unet=True, vae=False, clip=False)
+        self.need_models(unet=True, vae=True, clip=False)
         denoiser = guidance.GuidedDenoiser(self.unet, conditioning, self.scale, self.cfg_rescale or 0.0)
         noise = utils.NoiseSchedule(seeds, subseeds, self.width // 8, self.height // 8, device, self.unet.dtype)
         sampler = SAMPLER_CLASSES[self.sampler](denoiser, self.eta)
@@ -745,6 +746,7 @@ class GenerationParameters():
 
         self.set_status("Loading")
         self.set_device()
+        self.set_attention()
         self.load_models()
 
         self.attach_tome()
@@ -772,6 +774,7 @@ class GenerationParameters():
         images = utils.apply_extents(images, extents)
         masks = self.prepare_images(masks, extents, width, height)
         if masks:
+            original_masks = [None if mask == None else utils.prepare_mask(mask, 0, 0) for mask in masks]
             masks = [None if mask == None else utils.prepare_mask(mask, self.mask_blur, self.mask_expand) for mask in masks]
 
         seeds, subseeds = self.get_seeds(batch_size)
@@ -829,11 +832,12 @@ class GenerationParameters():
 
         if self.mask:
             self.set_status("Preparing")
-            mask_latents = utils.get_masks(device, masks)
 
+            original_mask_latents = utils.get_masks(device, original_masks)
             if self.mask_fill == "Noise":
-                latents = latents * ((mask_latents * self.strength) + (1-self.strength))
+                latents = latents * ((original_mask_latents * self.strength) + (1-self.strength))
             
+            mask_latents = utils.get_masks(device, masks)
             denoiser.set_mask(mask_latents, original_latents)
             if self.keep_artifacts:
                 self.on_artifact("Mask", [masks[i] if self.mask[i] else None for i in range(len(masks))])
@@ -896,7 +900,17 @@ class GenerationParameters():
 
         if self.mask:
             self.set_status("Preparing")
-            images, masks, extents = utils.prepare_inpainting(images, masks, self.padding, width, height)
+            for i in range(len(masks)):
+                if masks[i]:
+                    masks[i] = upscalers.upscale([masks[i]], transforms.InterpolationMode.LANCZOS, images[i].width, images[i].height)[0]
+            extents = utils.get_extents(images, masks, self.padding, width, height)
+            for i in range(len(masks)):
+                if masks[i] == None:
+                    masks[i] = PIL.Image.new("L", (images[i].width, images[i].height), color=255)
+            original_images = images
+            images = utils.apply_extents(images, extents)
+            masks = utils.apply_extents(masks, extents)
+            masks = upscalers.upscale(masks, transforms.InterpolationMode.LANCZOS, width, height)
             masks = [utils.prepare_mask(mask, self.mask_blur, self.mask_expand) for mask in masks]
 
         self.set_status("Upscaling")
@@ -906,7 +920,8 @@ class GenerationParameters():
             images = upscalers.upscale_super_resolution(images, self.upscale_model, width, height)
 
         if self.mask:
-            images = utils.apply_inpainting(images, original_images, masks, extents)
+            outputs, masked = utils.apply_inpainting(images, original_images, masks, extents)
+            images = [outputs[i] if self.mask[i] else images[i] for i in range(len(images))]
 
         self.on_complete(images, metadata)
         return images
