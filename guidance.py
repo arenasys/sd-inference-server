@@ -132,6 +132,9 @@ class GuidedDenoiser():
         model_input = self.get_model_inputs(latents)
         conditioning = self.conditioning
 
+        if self.unet.prediction_type == "unknown":
+            self.unet.determine_prediction_type()
+
         if self.unet.prediction_type == "epsilon":
             original_pred = self.predict_original_epsilon(model_input, timestep, sigma, conditioning)
         elif self.unet.prediction_type == "v":

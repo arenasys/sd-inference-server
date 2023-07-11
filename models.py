@@ -16,10 +16,18 @@ class UNET(UNet2DConditionModel):
         self.model_variant = model_variant
         self.inpainting = model_variant == "Inpainting"
         self.prediction_type = prediction_type
+        self.upcast_attention = True if model_variant == "SDv2.1" else False
+        self.determined = False
 
         super().__init__(**UNET.get_config(model_type, model_variant))
         self.to(dtype)
         self.additional = None
+
+    def __call__(self, *args, **kwargs):
+        if not 'added_cond_kwargs' in kwargs:
+            kwargs['added_cond_kwargs'] = {}
+        kwargs['cross_attention_kwargs'] = {'upcast_attention': self.upcast_attention}
+        return super().__call__(*args, **kwargs)
         
     @staticmethod
     def from_model(name, state_dict, dtype=None):
@@ -86,6 +94,27 @@ class UNET(UNet2DConditionModel):
         else:
             raise ValueError(f"unknown type: {model_type}")
         return config
+    
+    def determine_type(self):
+        needs_type = self.prediction_type == "unknown" or self.model_type == "SDv2"
+        if self.determined or not needs_type:
+            return
+        self.determined = True
+
+        test_cond = torch.ones((1, 2, self.config.cross_attention_dim), device=self.device, dtype=self.dtype) * 0.5
+        test_latent = torch.ones((1, self.config.in_channels, 8, 8), device=self.device, dtype=self.dtype) * 0.5
+        test_timestep = torch.asarray([999], device=self.device, dtype=self.dtype)
+
+        test_pred = self(test_latent, test_timestep, encoder_hidden_states=test_cond).sample
+        if torch.isnan(test_pred).any():
+            print('UPCASTING ATTENTION')
+            self.upcast_attention = True
+            self.model_variant = "SDv2.1"
+            test_pred = self(test_latent, test_timestep, encoder_hidden_states=test_cond).sample
+
+        is_v = (test_pred - 0.5).mean().item() < -1
+        self.prediction_type = "v" if is_v else "epsilon"
+        print("USING",self.prediction_type,"PREDICTION")
 
 class VAE(AutoencoderKL):
     def __init__(self, model_type, dtype):

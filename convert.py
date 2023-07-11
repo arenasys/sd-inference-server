@@ -150,6 +150,7 @@ def SDv2_convert(state_dict):
     # remove unknown keys
     for k in list(state_dict.keys()):
         if not k in mapping:
+            print("DEL", k)
             del state_dict[k]
 
     # cast to fp16
@@ -298,14 +299,17 @@ def convert_checkpoint(in_file):
                 metadata["model_variant"] = "Inpainting"
 
     if not "prediction_type" in metadata:
-        metadata["prediction_type"] = "epsilon"
+        metadata["prediction_type"] = "unknown"
         yaml_file = os.path.join(os.path.dirname(in_file), name + ".yaml")
         if os.path.exists(yaml_file):
             import yaml
             with open(yaml_file, "r", encoding='utf-8') as f:
                 metadata["prediction_type"] = yaml.safe_load(f)["model"]["params"].get("parameterization", "epsilon")
-        elif metadata["model_type"] != "SDv1":
-            print("ASSUMING", metadata["prediction_type"], "PREDICTION")
+        else:
+            if metadata["model_type"] in {"SDXL-Base"} :
+                metadata["prediction_type"] = "epsilon"
+                print("USING", metadata["prediction_type"], "PREDICTION")
+
 
     if metadata["model_type"] == "SDv1":
         print("CONVERTING FROM SDv1")

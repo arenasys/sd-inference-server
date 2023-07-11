@@ -17,7 +17,7 @@ except:
     raise Exception("Incompatible Diffusers version")
 CURRENT_FORWARD = ORIGINAL_FORWARD
 
-def do_attention(self, hidden_states, encoder_hidden_states=None, attention_mask=None, temb=None):
+def do_attention(self, hidden_states, encoder_hidden_states=None, attention_mask=None, temb=None, **cross_attention_kwargs):
     if CURRENT_FORWARD == ORIGINAL_FORWARD:
         return ORIGINAL_FORWARD(self, hidden_states, encoder_hidden_states=encoder_hidden_states, attention_mask=attention_mask, temb=temb)
 
@@ -35,7 +35,7 @@ def do_attention(self, hidden_states, encoder_hidden_states=None, attention_mask
     if self.group_norm is not None:
         hidden_states = self.group_norm(hidden_states.transpose(1, 2)).transpose(1, 2)
 
-    hidden_states = CURRENT_FORWARD(self, hidden_states, encoder_hidden_states, attention_mask)
+    hidden_states = CURRENT_FORWARD(self, hidden_states, encoder_hidden_states, attention_mask, **cross_attention_kwargs)
 
     if input_ndim == 4:
             hidden_states = hidden_states.transpose(-1, -2).reshape(batch_size, channel, height, width)
@@ -104,7 +104,7 @@ def use_doggettx_attention(device):
         mem_free_total = mem_free_cuda + mem_free_torch
         return mem_free_total
 
-    def split_cross_attention_forward_v2(self, x, encoder_hidden_states=None, attention_mask=None):
+    def split_cross_attention_forward_v2(self, x, encoder_hidden_states=None, attention_mask=None, **cross_attention_kwargs):
         h = self.heads
 
         q_in = self.to_q(x)
@@ -116,6 +116,7 @@ def use_doggettx_attention(device):
 
         k_in = self.to_k(context)
         v_in = self.to_v(context)
+
         del context, x
 
         dtype = q_in.dtype
@@ -125,6 +126,9 @@ def use_doggettx_attention(device):
     
         q, k, v = map(lambda t: einops.rearrange(t, 'b n (h d) -> (b h) n d', h=h), (q_in, k_in, v_in))
         del q_in, k_in, v_in
+
+        if cross_attention_kwargs.get('upcast_attention', False):
+            q, k, v = q.float(), k.float(), v.float()
     
         r1 = torch.zeros(q.shape[0], q.shape[1], v.shape[2], device=q.device, dtype=q.dtype)
     
@@ -175,7 +179,7 @@ def use_xformers_attention(device):
     if not HAVE_XFORMERS:
         raise RuntimeError("XFormers not installed")
 
-    def xformers_attention_forward(self, x, encoder_hidden_states=None, attention_mask=None):
+    def xformers_attention_forward(self, x, encoder_hidden_states=None, attention_mask=None, **cross_attention_kwargs):
         h = self.heads
         q_in = self.to_q(x)
         context = default(encoder_hidden_states, x)
@@ -187,6 +191,9 @@ def use_xformers_attention(device):
         del q_in, k_in, v_in
 
         dtype = q.dtype
+
+        if cross_attention_kwargs.get('upcast_attention', False):
+            q, k, v = q.float(), k.float(), v.float()
 
         out = xformers.ops.memory_efficient_attention(q, k, v, attn_bias=None)
 
@@ -201,7 +208,7 @@ def use_xformers_attention(device):
     set_attention(xformers_attention_forward)
 
 def use_split_attention(device):
-    def split_cross_attention_forward_v1(self, x, encoder_hidden_states=None, attention_mask=None):
+    def split_cross_attention_forward_v1(self, x, encoder_hidden_states=None, attention_mask=None, **cross_attention_kwargs):
 
         h = self.heads
 
@@ -231,6 +238,9 @@ def use_split_attention(device):
         del v_in, v0, v1, v2
 
         dtype = q.dtype
+
+        if cross_attention_kwargs.get('upcast_attention', False):
+            q, k, v = q.float(), k.float(), v.float()
 
         r1 = torch.zeros(q.shape[0], q.shape[1], v.shape[2], device=q.device, dtype=q.dtype)
         for i in range(0, q.shape[0], 2):
@@ -339,7 +349,7 @@ class FlashAttentionFunction(torch.autograd.Function):
 def use_flash_attention(device):
     flash_func = FlashAttentionFunction
 
-    def forward_flash_attn(self, x, encoder_hidden_states=None, attention_mask=None):
+    def forward_flash_attn(self, x, encoder_hidden_states=None, attention_mask=None, **cross_attention_kwargs):
         q_bucket_size = 512
         k_bucket_size = 1024
 
@@ -355,8 +365,15 @@ def use_flash_attention(device):
 
         q, k, v = map(lambda t: einops.rearrange(t, 'b n (h d) -> b h n d', h=h), (q, k, v))
 
+        dtype = q.dtype
+
+        if cross_attention_kwargs.get('upcast_attention', False):
+            q, k, v = q.float(), k.float(), v.float()
+
         out = flash_func.apply(q, k, v, attention_mask, False, q_bucket_size, k_bucket_size)
 
+        out = out.to(dtype)
+        
         out = einops.rearrange(out, 'b h n d -> b n (h d)')
 
         out = self.to_out[0](out)
@@ -366,7 +383,7 @@ def use_flash_attention(device):
     set_attention(forward_flash_attn)
 
 def use_sdp_attention(device):
-    def scaled_dot_product_attention_forward(self, x, encoder_hidden_states=None, attention_mask=None):
+    def scaled_dot_product_attention_forward(self, x, encoder_hidden_states=None, attention_mask=None, **cross_attention_kwargs):
         batch_size, sequence_length, inner_dim = x.shape
 
         mask = attention_mask
@@ -389,6 +406,9 @@ def use_sdp_attention(device):
         del q_in, k_in, v_in
 
         dtype = q.dtype
+
+        if cross_attention_kwargs.get('upcast_attention', False):
+            q, k, v = q.float(), k.float(), v.float()
 
         # the output of sdp = (batch, num_heads, seq_len, head_dim)
         hidden_states = torch.nn.functional.scaled_dot_product_attention(

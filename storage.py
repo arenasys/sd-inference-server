@@ -272,6 +272,7 @@ class ModelStorage():
 
     def get_unet(self, name, device):
         unet = self.get_component(name, "UNET", device)
+        unet.determine_type()
         return unet
 
     def get_clip(self, name, device):
