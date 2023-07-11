@@ -5,6 +5,7 @@ class GuidedDenoiser():
         self.unet = unet
         self.conditioning_schedule = conditioning_schedule
         self.conditioning = None
+        self.additional_conditioning = None
         self.scale = scale
 
         self.mask = None
@@ -19,14 +20,16 @@ class GuidedDenoiser():
 
         self.inpainting_input = None
 
-        self.get_compositions()
+        self.get_conditioning()
 
-    def get_compositions(self):
+    def get_conditioning(self):
         self.compositions = self.conditioning_schedule.get_compositions(self.dtype, self.device)
+        self.add_time_ids = torch.tensor([(1024,1024) + (0,0) + (1024,1024)], dtype=self.unet.dtype)
+        self.add_time_ids = torch.cat([self.add_time_ids, self.add_time_ids], dim=0)
 
     def set_mask(self, mask, original):
         self.mask = mask.to(self.dtype)
-        self.original = original.to(self.dtype) * 0.18215
+        self.original = original.to(self.dtype)
 
     def set_inpainting(self, masked, masks):
         self.inpainting_input = torch.cat([masks, masked], dim=1).to(self.device, self.dtype)
@@ -34,14 +37,17 @@ class GuidedDenoiser():
     def set_predictions(self, predictions):
         self.predictions = predictions
 
-    def predict_noise_epsilon(self, latents, timestep, conditioning, alpha):
+    def predict(self, latents, timestep, conditioning):
+        timestep = torch.ceil_(timestep)
         inputs = self.get_additional_inputs(latents)
-        noise_pred = self.unet(inputs, timestep, encoder_hidden_states=conditioning).sample
+        return self.unet(inputs, timestep, encoder_hidden_states=conditioning, added_cond_kwargs=self.additional_conditioning).sample
+
+    def predict_noise_epsilon(self, latents, timestep, conditioning, alpha):
+        noise_pred = self.predict(latents, timestep, conditioning)
         return noise_pred
 
     def predict_noise_v(self, latents, timestep, conditioning, alpha):
-        inputs = self.get_additional_inputs(latents)
-        v_pred = self.unet(inputs, timestep, encoder_hidden_states=conditioning).sample
+        v_pred = self.predict(latents, timestep, conditioning)
         return alpha.sqrt() * v_pred + (1-alpha).sqrt() * latents
 
     def mask_noise(self, latents, alpha, noise):
@@ -63,7 +69,7 @@ class GuidedDenoiser():
             inpainting_inputs = torch.cat([self.inpainting_input]*latents.shape[0])
             latents = torch.cat([latents, inpainting_inputs], dim=1)
         return latents
-
+    
     def compose_predictions(self, pred):
         composed_pred = []
         i = 0
@@ -103,8 +109,8 @@ class GuidedDenoiser():
 
     def predict_original_epsilon(self, latents, timestep, sigma, conditioning):
         c_in = 1 / (sigma ** 2 + 1) ** 0.5
-        inputs = self.get_additional_inputs(latents * c_in)
-        noise_pred = self.unet(inputs, timestep, encoder_hidden_states=conditioning).sample
+
+        noise_pred = self.predict(latents * c_in, timestep, conditioning)
         original_pred = latents - sigma * noise_pred
         return original_pred
 
@@ -113,8 +119,7 @@ class GuidedDenoiser():
         c_skip = 1 / (sigma ** 2 + 1)
         c_out = -sigma * 1 / (sigma ** 2 + 1) ** 0.5
 
-        inputs = self.get_additional_inputs(latents * c_in)
-        v_pred = self.unet(inputs, timestep, encoder_hidden_states=conditioning).sample
+        v_pred = self.predict(latents * c_in, timestep, conditioning)
         original_pred = v_pred * c_out + latents * c_skip
         return original_pred
 
@@ -137,9 +142,9 @@ class GuidedDenoiser():
         return masked_pred
 
     def set_step(self, step):
-        self.conditioning = self.conditioning_schedule.get_conditioning_at_step(step).to(self.dtype)
-        nets = self.conditioning_schedule.get_networks_at_step(step)
-        self.unet.additional.set_strength(nets)
+        self.conditioning = self.conditioning_schedule.get_conditioning_at_step(step, self.dtype, self.device)
+        self.additional_conditioning = self.conditioning_schedule.get_additional_conditioning_at_step(step, self.dtype, self.device)
+        self.unet.additional.set_strength(self.conditioning_schedule.get_networks_at_step(step))
         
     def reset(self):
         self.mask = None

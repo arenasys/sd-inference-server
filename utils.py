@@ -69,28 +69,22 @@ def encode_inpainting(images, masks, vae, seeds):
         masks = torch.ones(masks_shape).to(vae.device, vae.dtype)
         images = torch.zeros(images.shape).to(vae.device, vae.dtype)
 
-    noise = singular_noise(seeds, images.shape[3] // 8, images.shape[2] // 8, vae.device).to(vae.dtype)
-
-    dists = vae.encode(images)
-    mean = torch.stack([dists.mean[i%len(images)] for i in range(len(seeds))])
-    std = torch.stack([dists.std[i%len(images)] for i in range(len(seeds))])
-
-    latents = (mean + std * noise) * 0.18215
-
+    latents = encode_images(vae, seeds, images)
     masks = torch.nn.functional.interpolate(masks, size=(masks.shape[2]//8,masks.shape[3]//8))
 
     return latents, masks
 
-
 def encode_images(vae, seeds, images):
-    images = preprocess_images(images).to(vae.device, vae.dtype)
+    if type(images) != torch.Tensor:
+        images = preprocess_images(images).to(vae.device, vae.dtype)
+    
     noise = singular_noise(seeds, images.shape[3] // 8, images.shape[2] // 8, vae.device).to(vae.dtype)
 
     dists = vae.encode(images)
     mean = torch.stack([dists.mean[i%len(images)] for i in range(len(seeds))])
     std = torch.stack([dists.std[i%len(images)] for i in range(len(seeds))])
 
-    latents = mean + std * noise
+    latents = (mean + std * noise) * vae.scaling_factor
     
     return latents
 
@@ -101,7 +95,7 @@ def encode_images_disjointed(vae, seeds, images):
     return latents
     
 def decode_images(vae, latents):
-    latents = latents.clone().detach().to(vae.device, vae.dtype)
+    latents = latents.clone().detach().to(vae.device, vae.dtype) / vae.scaling_factor
     images = vae.decode(latents).sample
     return postprocess_images(images)
 

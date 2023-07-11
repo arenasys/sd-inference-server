@@ -12,7 +12,7 @@ def txt2img(denoiser, sampler, noise, steps, callback):
         denoiser.set_step(i)
         latents = sampler.step(latents, schedule, i, noise)
         callback(iter.format_dict, denoiser.predictions)
-    return latents / 0.18215
+    return latents
 
 def img2img(latents, denoiser, sampler, noise, steps, do_exact_steps, strength, callback):
     strength = min(strength, 0.999)
@@ -24,7 +24,7 @@ def img2img(latents, denoiser, sampler, noise, steps, do_exact_steps, strength, 
     
     schedule = sampler.scheduler.get_truncated_schedule(steps, scheduled_steps)
 
-    latents = latents.to(denoiser.unet.dtype) * 0.18215
+    latents = latents.to(denoiser.unet.dtype)
 
     if scheduled_steps != 0:
         latents = sampler.prepare_latents(latents, noise(), schedule)
@@ -33,4 +33,4 @@ def img2img(latents, denoiser, sampler, noise, steps, do_exact_steps, strength, 
             denoiser.set_step(i)
             latents = sampler.step(latents, schedule, i, noise)
             callback(iter.format_dict, denoiser.predictions)
-    return latents / 0.18215
+    return latents

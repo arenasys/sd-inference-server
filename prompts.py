@@ -175,6 +175,7 @@ def encode_tokens(clip, chunks, clip_skip=1):
     padding_token = tokenizer.pad_token_id
 
     chunk_encodings = []
+    pooled_text_embs = []
 
     for chunk in chunks:
         # add special tokens and padding
@@ -186,11 +187,7 @@ def encode_tokens(clip, chunks, clip_skip=1):
         tokens, weights = list(zip(*chunk))
 
         # encode chunk tokens
-        encoding = clip.text_model(tokens)
-
-        # do clip skip
-        encoding = encoding['hidden_states'][-clip_skip]
-        encoding = clip.text_model.final_layer_norm(encoding)
+        encoding, pooled_text_emb = clip.encode(tokens, clip_skip)
         
         # each token has been encoded into its own tensor
         # we weight this tensor with the tokens weight
@@ -204,10 +201,16 @@ def encode_tokens(clip, chunks, clip_skip=1):
         encoding = encoding * (original_mean / new_mean)
 
         chunk_encodings += [encoding]
+        pooled_text_embs += [pooled_text_emb]
 
     # combine all chunk encodings
     encoding = torch.hstack(chunk_encodings)
-    return encoding
+    if all([p != None for p in pooled_text_embs]):
+        pooled_text_emb = torch.hstack(pooled_text_embs)
+    else:
+        pooled_text_emb = None
+    
+    return encoding, pooled_text_emb
 
 def seperate_schedule(schedule):
     prompt_schedule = []
@@ -231,6 +234,7 @@ class PromptSchedule():
         self.schedule = parse_prompt(prompt, steps, HR)
         self.schedule, self.network_schedule = seperate_schedule(self.schedule)
         self.encoded = None
+        self.pooled_text_embs = None
         self.all_networks = {}
 
     def get_weight(self, prompt):
@@ -252,13 +256,19 @@ class PromptSchedule():
     def encode(self, clip, clip_skip):
         clip_networks = [self.parent.get_networks_at_step(0,1)[self.index]]
         clip.additional.set_strength(clip_networks)
-        self.encoded = [(steps, encode_tokens(clip, chunks, clip_skip)) for steps, chunks in self.tokenized]
+        self.encoded = [(steps, *encode_tokens(clip, chunks, clip_skip)) for steps, chunks in self.tokenized]
 
     def get_encoding_at_step(self, step):
-        for start, encoding in self.encoded:
+        for start, encoding, _ in self.encoded:
             if start >= step:
                 return encoding
-        return encoding[-1][1]
+        return encoding
+    
+    def get_pooled_text_embed_at_step(self, step):
+        for start, _, pooled_text_embed in self.encoded:
+            if start >= step:
+                return pooled_text_embed
+        return pooled_text_embed
     
     def get_all_networks(self):
         if self.all_networks:
@@ -288,6 +298,7 @@ class ConditioningSchedule():
         self.clip_skip = clip_skip
         self.areas = None
         self.HR = False
+        self.model_type = None
         self.parse()
 
     def switch_to_HR(self, hr_steps):
@@ -301,6 +312,7 @@ class ConditioningSchedule():
 
     def encode(self, clip, areas):
         self.areas = areas
+        self.model_type = clip.model_type
 
         for p in self.positives + self.negatives:
             p.tokenize(clip)
@@ -340,6 +352,15 @@ class ConditioningSchedule():
     def get_conditioning_at_step(self, step):
         return [p.get_encoding_at_step(step) for p in self.positives] + \
                [n.get_encoding_at_step(step) for n in self.negatives]
+    
+    def get_additional_conditioning_at_step(self, step):
+        if self.model_type == "SDXL-Base":
+            text_embeds = [p.get_pooled_text_embed_at_step(step) for p in self.positives] + \
+                        [n.get_pooled_text_embed_at_step(step) for n in self.negatives]
+            time_ids = [torch.tensor([1024, 1024, 0,0, 1024, 1024]) for _ in self.positives + self.negatives]
+            return {"text_embeds": text_embeds, "time_ids": time_ids}
+        else:
+            return {}
     
     def get_composition(self, dtype, device):
         pos_w = [p.weight for p in self.positives]
@@ -417,12 +438,27 @@ class BatchedConditioningSchedules():
         else:
             return all, unet, clip
     
-    def get_conditioning_at_step(self, step):
+    def get_conditioning_at_step(self, step, dtype, device):
         conditioning = []
         for b in self.batches:
             conditioning += b.get_conditioning_at_step(step)
-        cond = torch.cat(conditioning)
+        cond = torch.cat(conditioning).to(device, dtype)
         return cond
+    
+    def get_additional_conditioning_at_step(self, step, dtype, device):
+        add_conditioning = {}
+
+        for b in self.batches:
+            add_cond = b.get_additional_conditioning_at_step(step)
+            for k in add_cond:
+                if not k in add_conditioning:
+                    add_conditioning[k] = []
+                add_conditioning[k] += add_cond[k]
+        
+        for k in add_conditioning:
+            add_conditioning[k] = torch.stack(add_conditioning[k]).to(device, dtype)
+
+        return add_conditioning
     
     def get_compositions(self, dtype, device):
         compositions = []

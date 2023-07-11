@@ -144,11 +144,11 @@ class GenerationParameters():
         interval = int(self.preview_interval or 0)
         if latents != None and self.show_preview and step % interval == 0:
             if self.show_preview == "Full":
-                images = preview.full_preview(latents / 0.18215, self.vae)
+                images = preview.full_preview(latents, self.vae)
             elif self.show_preview == "Medium":
-                images = preview.model_preview(latents)
+                images = preview.model_preview(latents, self.vae)
             else:
-                images = preview.cheap_preview(latents)
+                images = preview.cheap_preview(latents, self.vae)
             for i in range(len(images)):
                 bytesio = io.BytesIO()
                 images[i].save(bytesio, format='PNG')

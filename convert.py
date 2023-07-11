@@ -174,6 +174,46 @@ def SDv2_convert(state_dict):
 
     return state_dict
 
+def SDXL_Base_convert(state_dict):
+    mapping = {}
+    with open(relative_file(os.path.join("mappings", "SDXL-Base_mapping.txt"))) as file:
+        for line in file:
+            src, dst = line.strip().split(" TO ")
+            mapping[src] = dst
+    
+    for k in list(state_dict.keys()):
+        if "attn.in_proj" in k:
+            chunk = torch.chunk(state_dict[k], 3)
+            state_dict["chunk0-"+k] = chunk[0]
+            state_dict["chunk1-"+k] = chunk[1]
+            state_dict["chunk2-"+k] = chunk[2]
+            del state_dict[k]
+        if k.endswith("text_projection"):
+            state_dict[k] = state_dict[k].T
+
+    for k in list(state_dict.keys()):
+        if not k in mapping:
+            del state_dict[k]
+
+    for k in state_dict:
+        if state_dict[k].dtype in {torch.float32, torch.float64, torch.bfloat16}:
+            state_dict[k] = state_dict[k].to(torch.float16)
+
+    for src, dst in mapping.items():
+        if src in state_dict:
+            state_dict[dst] = state_dict[src]
+            del state_dict[src]
+
+    for k in state_dict:
+        if ".VAE." in k and k.endswith(".weight") and "mid_block.attentions.0." in k:
+            state_dict[k] = state_dict[k].squeeze()
+    
+    position_ids = torch.Tensor([list(range(77))]).to(torch.int64)
+    state_dict["SDXL-Base.CLIP.open_clip.text_model.embeddings.position_ids"] = position_ids
+    state_dict["SDXL-Base.CLIP.ldm_clip.text_model.embeddings.position_ids"] = position_ids
+
+    return state_dict
+
 def clean_component(state_dict):
     valid = set()
     with open(relative_file(os.path.join("mappings", "COMP_valid.txt"))) as file:
@@ -210,6 +250,8 @@ def convert_checkpoint(in_file):
         metadata["model_type"] = "SDv1"
         if "cond_stage_model.model.transformer.resblocks.0.attn.in_proj_bias" in state_dict:
             metadata["model_type"] = "SDv2"
+        if "conditioner.embedders.1.model.text_projection" in state_dict:
+            metadata["model_type"] = "SDXL-Base"
     
     if not "model_variant" in metadata:
         metadata["model_variant"] = ""
@@ -224,15 +266,18 @@ def convert_checkpoint(in_file):
             import yaml
             with open(yaml_file, "r", encoding='utf-8') as f:
                 metadata["prediction_type"] = yaml.safe_load(f)["model"]["params"].get("parameterization", "epsilon")
-        elif metadata["model_type"] == "SDv2":
+        elif metadata["model_type"] != "SDv1":
             print("ASSUMING", metadata["prediction_type"], "PREDICTION")
 
-    if metadata["model_type"] == "SDv2":
-        print("CONVERTING FROM SDv2")
-        SDv2_convert(state_dict)
-    else:
+    if metadata["model_type"] == "SDv1":
         print("CONVERTING FROM SDv1")
         SDv1_convert(state_dict)
+    elif metadata["model_type"] == "SDv2":
+        print("CONVERTING FROM SDv2")
+        SDv2_convert(state_dict)
+    elif metadata["model_type"] == "SDXL-Base":
+        print("CONVERTING FROM SDXL-Base")
+        SDXL_Base_convert(state_dict)        
 
     print("DONE")
 

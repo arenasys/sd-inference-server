@@ -23,7 +23,7 @@ class KScheduler():
         return timesteps[-(steps + 1):].to(self.dtype)
 
     def get_sigmas(self):
-        betas = torch.linspace(0.00085 ** 0.5, 0.0120 ** 0.5, 1000, dtype=torch.float64) ** 2
+        betas = torch.linspace(0.00085 ** 0.5, 0.012 ** 0.5, 1000, dtype=torch.float64) ** 2
         alphas = torch.tensor(np.cumprod(1. - betas.numpy(), axis=0), dtype=torch.float16)
         sigmas = ((1 - alphas) / alphas).to(torch.float32) ** 0.5
         log_sigmas = sigmas.log()
@@ -54,7 +54,6 @@ class KSampler():
 
     def predict(self, latents, sigma):
         timestep = self.scheduler.sigma_to_timestep(sigma)
-        #print(f"{timestep}, {sigma}")
         original = self.model.predict_original(latents, timestep, sigma)
         self.model.set_predictions(original)
         return original

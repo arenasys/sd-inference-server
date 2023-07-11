@@ -4,17 +4,50 @@ from transformers import CLIPTextModel
 from transformers.models.clip.modeling_clip import CLIPTextTransformer, _expand_mask, BaseModelOutputWithPooling
 
 class CustomCLIP(torch.nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, text_projection=False):
         super().__init__()
         self.text_model = CustomCLIPTextTransformer(config)
+        if text_projection:
+            self.text_projection = torch.nn.Linear(config.hidden_size, config.projection_dim, bias=False)
 
     def __getattr__(self, name):
         if name == "device":
             return next(self.parameters()).device
         return super().__getattr__(name)
 
-    def forward(self, input_ids = None):
-        return self.text_model(input_ids)
+    def forward(self, input_ids, clip_skip=1):
+        output = self.text_model(input_ids).hidden_states[-clip_skip]
+        cond = self.text_model.final_layer_norm(output)
+        emb = None
+        return cond, emb
+
+class CustomSDXLCLIP(torch.nn.Module):
+    def __init__(self, open_clip_config, ldm_clip_config):
+        super().__init__()
+        self.open_clip = CustomCLIP(open_clip_config, text_projection=True)
+        self.ldm_clip = CustomCLIP(ldm_clip_config)
+
+    def __getattr__(self, name):
+        if name == "device":
+            return next(self.parameters()).device
+        return super().__getattr__(name)
+    
+    def forward(self, input_ids, clip_skip=1):
+        clip_skip = 2
+
+        open_clip_input_ids = input_ids
+        ldm_clip_input_ids = [49407 if type(i) == int and i == 0 else i for i in input_ids]
+
+        open_clip_outputs = self.open_clip.text_model(open_clip_input_ids)
+        ldm_clip_outputs = self.ldm_clip.text_model(ldm_clip_input_ids)
+
+        open_clip_cond = open_clip_outputs.hidden_states[-clip_skip]
+        ldm_clip_cond = ldm_clip_outputs.hidden_states[-clip_skip]
+        cond = torch.cat([ldm_clip_cond, open_clip_cond], dim=2)
+        
+        emb = self.open_clip.text_projection(open_clip_outputs.pooler_output)[0]
+
+        return cond, emb
 
 class CustomCLIPTextTransformer(CLIPTextTransformer):
     # needed to nicely handle mixed tokens and embeddings
@@ -51,7 +84,7 @@ class CustomCLIPTextTransformer(CLIPTextTransformer):
             return_dict=return_dict,
         )
 
-        last_hidden_state = encoder_outputs[0]
+        last_hidden_state = encoder_outputs.last_hidden_state
         last_hidden_state = self.final_layer_norm(last_hidden_state)
 
         pooled_output = last_hidden_state[torch.arange(last_hidden_state.shape[0], device=input_ids.device), input_ids.to(torch.int).argmax(dim=-1)]

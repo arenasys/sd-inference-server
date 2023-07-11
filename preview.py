@@ -52,20 +52,26 @@ CHEAP_MODEL_PATH = os.path.join("approx", "VAE-cheap.safetensors")
 APPROX_MODEL = VAEApprox()
 APPROX_MODEL_PATH = os.path.join("approx", "VAE-approx.pt")
 
-def cheap_preview(latents):
+def cheap_preview(latents, vae):
     if not CHEAP_MODEL.loaded:
         CHEAP_MODEL.conv.load_state_dict(safetensors.torch.load_file(relative_file(CHEAP_MODEL_PATH)))
     CHEAP_MODEL.to(latents.device).to(latents.dtype)
-    outputs = CHEAP_MODEL(latents) / 0.18215
+    outputs = CHEAP_MODEL(latents) / vae.scaling_factor
+    if vae.model_type == "SDXL-Base":
+        outputs = [o.flip(0) for o in outputs]
     outputs = [utils.FROM_TENSOR(((o + 1)/2).clamp(0,1)) for o in outputs]
+
     return outputs
 
-def model_preview(latents):
+def model_preview(latents, vae):
     if not APPROX_MODEL.loaded:
         APPROX_MODEL.load_state_dict(torch.load(relative_file(APPROX_MODEL_PATH), map_location='cpu'))
     APPROX_MODEL.to(latents.device).to(latents.dtype)
-    outputs = utils.postprocess_images(APPROX_MODEL(latents))
+    outputs = APPROX_MODEL(latents)
+    if vae.model_type == "SDXL-Base":
+        outputs = [o.flip(0) for o in outputs]
+    outputs = utils.postprocess_images(outputs)
     return outputs
 
 def full_preview(latents, vae):
-    return utils.postprocess_images(vae.decode(latents.to(vae.dtype)).sample)
+    return utils.postprocess_images(vae.decode(latents.to(vae.dtype)).sample / vae.scaling_factor)

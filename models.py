@@ -3,7 +3,7 @@ import torch
 import utils
 
 from transformers import CLIPTextConfig, CLIPTokenizer
-from clip import CustomCLIP
+from clip import CustomCLIP, CustomSDXLCLIP
 from diffusers import AutoencoderKL, UNet2DConditionModel
 from diffusers.models.vae import DiagonalGaussianDistribution
 from diffusers.models.controlnet import ControlNetModel
@@ -67,6 +67,22 @@ class UNET(UNet2DConditionModel):
                 attention_head_dim=[5, 10, 20, 20],
                 use_linear_projection=True
             )
+        elif model_type == "SDXL-Base":
+            config = dict(
+                sample_size=128,
+                in_channels=4,
+                out_channels=4,
+                down_block_types=('DownBlock2D', 'CrossAttnDownBlock2D', 'CrossAttnDownBlock2D'),
+                up_block_types=('CrossAttnUpBlock2D', 'CrossAttnUpBlock2D', 'UpBlock2D'),
+                block_out_channels=(320, 640, 1280),
+                cross_attention_dim=2048,
+                transformer_layers_per_block=[1, 2, 10],
+                attention_head_dim=[5, 10, 20],
+                use_linear_projection=True,
+                addition_embed_type='text_time',
+                addition_time_embed_dim=256,
+                projection_class_embeddings_input_dim=2816
+            )
         else:
             raise ValueError(f"unknown type: {model_type}")
         return config
@@ -74,7 +90,9 @@ class UNET(UNet2DConditionModel):
 class VAE(AutoencoderKL):
     def __init__(self, model_type, dtype):
         self.model_type = model_type
-        super().__init__(**VAE.get_config(model_type))
+        config = VAE.get_config(model_type)
+        super().__init__(**config)
+        self.scaling_factor = config["scaling_factor"]
         self.to(dtype)
 
     class LatentDistribution(DiagonalGaussianDistribution):
@@ -105,30 +123,48 @@ class VAE(AutoencoderKL):
 
     @staticmethod
     def get_config(model_type):
-        if model_type in {"SDv1", "SDv2"}:
-            config = dict(
-                sample_size=256,
-                in_channels=3,
-                out_channels=3,
-                down_block_types=('DownEncoderBlock2D', 'DownEncoderBlock2D', 'DownEncoderBlock2D', 'DownEncoderBlock2D'),
-                up_block_types=('UpDecoderBlock2D', 'UpDecoderBlock2D', 'UpDecoderBlock2D', 'UpDecoderBlock2D'),
-                block_out_channels=(128, 256, 512, 512),
-                latent_channels=4,
-                layers_per_block=2,
-            )
+        config = dict(
+            sample_size=256,
+            in_channels=3,
+            out_channels=3,
+            down_block_types=('DownEncoderBlock2D', 'DownEncoderBlock2D', 'DownEncoderBlock2D', 'DownEncoderBlock2D'),
+            up_block_types=('UpDecoderBlock2D', 'UpDecoderBlock2D', 'UpDecoderBlock2D', 'UpDecoderBlock2D'),
+            block_out_channels=(128, 256, 512, 512),
+            latent_channels=4,
+            layers_per_block=2,
+            scaling_factor=0.18215
+        )
+        if model_type == "SDv1":
+            config["sample_size"] = 512
+        elif model_type == "SDv2":
+            config["sample_size"] = 768
+        elif model_type == "SDXL-Base":
+            config["sample_size"] = 1024
+            config["scaling_factor"] = 0.13025
         else:
             raise ValueError(f"unknown type: {model_type}")
         return config
 
-class CLIP(CustomCLIP):
+class CLIP(torch.nn.Module):
     def __init__(self, model_type, dtype):
+        super().__init__()
         self.model_type = model_type
-        super().__init__(CLIP.get_config(model_type))
+        if model_type in {"SDv1", "SDv2"}:
+            self.model = CustomCLIP(CLIP.get_config(model_type))
+        elif model_type == "SDXL-Base":
+            self.model = CustomSDXLCLIP(CLIP.get_config(model_type, "OpenCLIP"), CLIP.get_config(model_type, "LDM"))
         self.to(dtype)
-
         self.tokenizer = Tokenizer(model_type)
         self.additional = None
-        
+
+    def encode(self, input_ids, clip_skip):
+        return self.model(input_ids, clip_skip)
+
+    def __getattr__(self, name):
+        if name == "device":
+            return next(self.parameters()).device
+        return super().__getattr__(name)
+
     @staticmethod
     def from_model(name, state_dict, dtype=None):
         if not dtype:
@@ -139,7 +175,7 @@ class CLIP(CustomCLIP):
         
         with utils.DisableInitialization():
             clip = CLIP(model_type, dtype)
-            missing, _ = clip.load_state_dict(state_dict, strict=False)
+            missing, _ = clip.model.load_state_dict(state_dict, strict=False)
         if missing:
             raise ValueError("missing keys in CLIP: " + ", ".join(missing))
 
@@ -147,48 +183,33 @@ class CLIP(CustomCLIP):
         return clip
 
     @staticmethod
-    def get_config(model_type):
-        if model_type == "SDv1":
+    def get_config(model_type, model_variant=""):
+        if model_type == "SDv1" or (model_type == "SDXL-Base" and model_variant == "LDM"):
             config = CLIPTextConfig(
-                attention_dropout=0.0,
-                bos_token_id=0,
-                dropout=0.0,
-                eos_token_id=2,
                 hidden_act="quick_gelu",
                 hidden_size=768,
-                initializer_factor=1.0,
-                initializer_range=0.02,
                 intermediate_size=3072,
-                layer_norm_eps=1e-05,
-                max_position_embeddings=77,
-                model_type="clip_text_model",
                 num_attention_heads=12,
                 num_hidden_layers=12,
-                pad_token_id=1,
                 projection_dim=768,
-                transformers_version="4.25.1",
-                vocab_size=49408
             )
         elif model_type == "SDv2":
             config = CLIPTextConfig(
-                vocab_size=49408,
+                hidden_act="gelu",
                 hidden_size=1024,
                 intermediate_size=4096,
-                num_hidden_layers=23,
                 num_attention_heads=16,
-                max_position_embeddings=77,
+                num_hidden_layers=23,
+                projection_dim=512
+            )
+        elif model_type == "SDXL-Base" and model_variant == "OpenCLIP":
+            config = CLIPTextConfig(
                 hidden_act="gelu",
-                layer_norm_eps=1e-05,
-                dropout=0.0,
-                attention_dropout=0.0,
-                initializer_range=0.02,
-                initializer_factor=1.0,
-                pad_token_id=1,
-                bos_token_id=0,
-                eos_token_id=2,
-                model_type="clip_text_model",
-                projection_dim=512,
-                transformers_version="4.25.0.dev0",
+                hidden_size=1280,
+                intermediate_size=5120,
+                num_attention_heads=20,
+                num_hidden_layers=32,
+                projection_dim=1280
             )
         else:
             raise ValueError(f"unknown type: {model_type}")
@@ -329,7 +350,7 @@ class ControlNet(ControlNetModel):
         utils.cast_state_dict(state_dict, dtype)
         
         with utils.DisableInitialization():
-            cn = ControlNet("CN-v1-CANNY", dtype)
+            cn = ControlNet("CN-v1", dtype)
             missing, _ = cn.load_state_dict(state_dict, strict=False)
         if missing:
             raise ValueError(f"missing keys in ControlNet ({name}): " + ", ".join(missing))
@@ -337,7 +358,7 @@ class ControlNet(ControlNetModel):
 
     @staticmethod
     def get_config(model_type):
-        if model_type == "CN-v1-CANNY":
+        if model_type == "CN-v1":
             config = dict(
                 cross_attention_dim=768
             )
