@@ -95,7 +95,7 @@ class ControlledUNET:
     def set_controlnet_conditioning(self, conditioning):
         self.controlnet_cond = [(s,cond.to(self.device, self.dtype)) for s,cond in conditioning]
 
-    def __call__(self, latents, timestep, encoder_hidden_states):
+    def __call__(self, latents, timestep, encoder_hidden_states, **kwargs):
         down_samples, mid_sample = None, None
         for i in range(len(self.controlnets)):
             cn_scale, cn_cond = self.controlnet_cond[i]
@@ -114,7 +114,7 @@ class ControlledUNET:
                     down_samples[j] += down[j]
                 mid_sample += mid
             
-        return self.unet(latents, timestep, encoder_hidden_states=encoder_hidden_states, down_block_additional_residuals=down_samples, mid_block_additional_residual=mid_sample)
+        return self.unet(latents, timestep, encoder_hidden_states=encoder_hidden_states, down_block_additional_residuals=down_samples, mid_block_additional_residual=mid_sample, **kwargs)
     
     def to(self, *args):
         self.unet.to(*args)
