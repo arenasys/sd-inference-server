@@ -150,4 +150,4 @@ class GuidedDenoiser():
         self.mask = None
         self.original = None
         self.conditioning = None
-        self.get_compositions()
+        self.get_conditioning()

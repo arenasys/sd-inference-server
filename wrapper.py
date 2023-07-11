@@ -662,7 +662,7 @@ class GenerationParameters():
         sampler = SAMPLER_CLASSES[self.sampler](denoiser, self.eta)
 
         if self.unet.inpainting: #SDv1-Inpainting, SDv2-Inpainting
-            images = torch.zeros((batch_size, 3, self.width, self.height))
+            images = torch.zeros((batch_size, 3, self.height, self.width))
             inpainting_masked, inpainting_masks = utils.encode_inpainting(images, None, self.vae, seeds)
             denoiser.set_inpainting(inpainting_masked, inpainting_masks)
         
@@ -714,6 +714,10 @@ class GenerationParameters():
         if self.keep_artifacts:
             images = utils.decode_images(self.vae, latents)
             self.on_artifact("Upscaled", images)
+
+        if self.unet.inpainting: #SDv1-Inpainting, SDv2-Inpainting
+            images = torch.zeros((batch_size, 3, height, width))
+            denoiser.set_inpainting(*utils.encode_inpainting(images, None, self.vae, seeds))
 
         self.need_models(unet=True, vae=False, clip=False)
 

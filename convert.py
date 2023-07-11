@@ -174,6 +174,44 @@ def SDv2_convert(state_dict):
 
     return state_dict
 
+def SDXL_Base_revert(state_dict):
+    mapping = {}
+    with open(relative_file(os.path.join("mappings", "SDXL-Base_mapping.txt"))) as file:
+        for line in file:
+            src, dst = line.strip().split(" TO ")
+            mapping[dst] = src
+
+    for k in state_dict:
+        if ".VAE." in k and k.endswith(".weight") and "mid_block.attentions.0." in k and len(state_dict[k].shape) == 2:
+            state_dict[k] = state_dict[k].unsqueeze(-1).unsqueeze(-1)
+
+    for k in list(state_dict.keys()):
+        if not k in mapping:
+            del state_dict[k]
+
+    for src, dst in mapping.items():
+        if src in state_dict:
+            state_dict[dst] = state_dict[src]
+            del state_dict[src]
+
+    chunks = {}
+    for k in list(state_dict.keys()):
+        if k.startswith("chunk"):
+            c, o = k.split("-",1)
+            c = int(c[-1])
+            if not o in chunks:
+                chunks[o] = [None,None,None]
+            chunks[o][c] = state_dict[k]
+            del state_dict[k]
+        if k.endswith("text_projection"):
+            state_dict[k] = state_dict[k].T.contiguous()
+
+    for k in list(chunks.keys()):
+        state_dict[k] = torch.cat(chunks[k])
+        del chunks[k]
+
+    return state_dict
+
 def SDXL_Base_convert(state_dict):
     mapping = {}
     with open(relative_file(os.path.join("mappings", "SDXL-Base_mapping.txt"))) as file:
@@ -389,6 +427,8 @@ def revert(model_type, state_dict):
         return SDv1_revert(state_dict)
     elif model_type == "SDv2":
         return SDv2_revert(state_dict)
+    elif model_type == "SDXL-Base":
+        return SDXL_Base_revert(state_dict)
     else:
         raise ValueError(f"unknown model type: {model_type}")
 

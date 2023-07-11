@@ -89,6 +89,9 @@ class LoRANetwork(torch.nn.Module):
             for model in models:
                 if name in model.modules:
                     model.modules[name].attach_lora(module, static)
+                    break
+            else:
+                print("FAILED TO ATTACH", name)
 
     def set_strength(self, strength):
         for _, module in self.named_modules():

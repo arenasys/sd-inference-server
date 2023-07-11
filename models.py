@@ -159,6 +159,9 @@ class CLIP(torch.nn.Module):
 
     def encode(self, input_ids, clip_skip):
         return self.model(input_ids, clip_skip)
+    
+    def state_dict(self):
+        return self.model.state_dict()
 
     def __getattr__(self, name):
         if name == "device":
@@ -179,7 +182,7 @@ class CLIP(torch.nn.Module):
         if missing:
             raise ValueError("missing keys in CLIP: " + ", ".join(missing))
 
-        clip.additional = AdditionalNetworks(clip)
+        clip.additional = AdditionalNetworks(clip.model)
         return clip
 
     @staticmethod
