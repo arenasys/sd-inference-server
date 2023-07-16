@@ -132,7 +132,7 @@ def do_recursive_merge(self, operation):
 
     return operation_name
 
-def merge(self, recipe):
+def merge(self, recipe, unet_nets, clip_nets):
     self.set_status("Parsing")
 
     needed_until = {}
@@ -166,11 +166,21 @@ def merge(self, recipe):
     self.storage.uncap_ram = True
     
     op = get_result_history(recipe, final_result_name)
+    result_name = base64_encode(op)
+
     all = get_required_model_names(self, op, prune=False)
     required = get_required_model_names(self, op, prune=True)
 
+    for comp in ["UNET", "CLIP"]:
+        for name in list(self.storage.loaded[comp].keys()):
+            if name in required:
+                if name == result_name:
+                    self.storage.check_attached_networks(name, comp, unet_nets)
+                else:
+                    self.storage.check_attached_networks(name, comp, {})
+
     self.set_status("Loading CLIP")
-    self.clip = self.storage.get_clip(clip_source, self.device)
+    self.clip = self.storage.get_clip(clip_source, self.device, clip_nets)
     self.clip_name = clip_source
     self.clip.set_textual_inversions(self.storage.get_embeddings(self.device))
 
@@ -194,8 +204,8 @@ def merge(self, recipe):
             self.storage.get_component(name, "UNET", torch.device("cpu"))
 
     self.set_status("Merging")
-    result = do_recursive_merge(self, op)
+    do_recursive_merge(self, op)
 
     self.storage.clear_file_cache()
-    self.unet = self.storage.get_unet(result, self.device)
+    self.unet = self.storage.get_unet(result_name, self.device, unet_nets)
     self.unet_name = "Merge"

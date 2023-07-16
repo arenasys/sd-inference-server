@@ -80,18 +80,18 @@ class LoRANetwork(torch.nn.Module):
             lora = LoRAModule(self.net_name, name, up, down, alpha)
             self.add_module(name, lora)
 
-    def attach(self, models, static):
+    def attach(self, model, static):
+        if static:
+            if self.net_name in model.static:
+                return
+            model.static[self.net_name] = model.strength[0][self.net_name]
+
         for _, module in self.named_modules():
             if not hasattr(module, "name"):
                 continue
             name = module.name.replace("lora_", "")
-
-            for model in models:
-                if name in model.modules:
-                    model.modules[name].attach_lora(module, static)
-                    break
-            else:
-                print("FAILED TO ATTACH", name)
+            if name in model.modules:
+                model.modules[name].attach_lora(module, static)
 
     def set_strength(self, strength):
         for _, module in self.named_modules():

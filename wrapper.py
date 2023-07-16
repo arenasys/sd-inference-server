@@ -237,31 +237,21 @@ class GenerationParameters():
                                 value[i][j] = value[i][j].convert("L")
             
             setattr(self, key, value)
-    
-    def check_modified(self, nets):
-        current = tuple([self.network_mode, self.unet, self.clip, *nets])
-        self.reattach_networks = current != self.last_models_config
-        if self.reattach_networks and self.last_models_modified:
-            self.storage.clear_modified()
-            self.last_models_modified = False
-        if self.network_mode == "Dynamic":
-            self.reattach_networks = True
-        self.last_models_config = current
 
-    def load_models(self):
+    def load_models(self, unet_nets, clip_nets):
         if self.merge_recipe:
-            merge.merge(self, self.merge_recipe)
+            merge.merge(self, self.merge_recipe, unet_nets, clip_nets)
         else:
             self.storage.reset_merge()
             if not self.unet or type(self.unet) == str:
                 self.unet_name = self.unet or self.model
                 self.set_status("Loading UNET")
-                self.unet = self.storage.get_unet(self.unet_name, self.device)
+                self.unet = self.storage.get_unet(self.unet_name, self.device, unet_nets)
             
             if not self.clip or type(self.clip) == str:
                 self.clip_name = self.clip or self.model
                 self.set_status("Loading CLIP")
-                self.clip = self.storage.get_clip(self.clip_name, self.device)
+                self.clip = self.storage.get_clip(self.clip_name, self.device, clip_nets)
                 self.clip.set_textual_inversions(self.storage.get_embeddings(self.device))
             
             if not self.vae or type(self.vae) == str:
@@ -523,23 +513,22 @@ class GenerationParameters():
         hn_names = []
 
         for n in all_nets:
-            prefix, n = n.split(":",1)
+            prefix, name = n.split(":",1)
             if prefix == "lora":
-                lora_names += [n]
+                lora_names += [name]
             if prefix == "hypernet":
-                hn_names += [n]
+                hn_names += [name]
 
         if lora_names:
-            if self.reattach_networks:
-                self.set_status("Loading LoRAs")
-                self.storage.enforce_network_limit(lora_names, "LoRA")
-                self.loras = [self.storage.get_lora(name, device) for name in lora_names]
+            self.set_status("Loading LoRAs")
+            self.storage.enforce_network_limit(lora_names, "LoRA")
+            self.loras = [self.storage.get_lora(name, device) for name in lora_names]
 
-                for lora in self.loras:
-                    lora.attach([self.unet.additional, self.clip.additional], static)
-                    if static:
-                        self.last_models_modified = True
-                        lora.to("cpu")
+            for lora in self.loras:
+                for model in [self.unet.additional, self.clip.additional]:
+                    lora.attach(model, static)
+                if static:
+                    lora.to("cpu")
         else:
             self.storage.enforce_network_limit([], "LoRA")
 
@@ -591,12 +580,13 @@ class GenerationParameters():
     
         self.set_status("Parsing")
         conditioning = prompts.BatchedConditioningSchedules(self.prompt, self.steps, self.clip_skip)
-        self.check_modified(conditioning.get_initial_networks(True))
+        initial_networks = conditioning.get_initial_networks() if self.network_mode == "Static" else ({},{})
+        all_networks = conditioning.get_all_networks()
 
         self.set_status("Loading")
         self.set_device()
         self.set_attention()
-        self.load_models()
+        self.load_models(*initial_networks)
 
         self.attach_tome()
 
@@ -641,7 +631,7 @@ class GenerationParameters():
             area = []
         
         self.set_status("Attaching")
-        self.attach_networks(*conditioning.get_initial_networks(), device)
+        self.attach_networks(all_networks, *initial_networks, device)
 
         self.set_status("Encoding")
         conditioning.encode(self.clip, area)
@@ -689,7 +679,10 @@ class GenerationParameters():
 
         if self.network_mode == "Dynamic":
             self.set_status("Attaching")
-            self.attach_networks(*conditioning.get_initial_networks(), device)
+            hr_all_networks = conditioning.get_all_networks()
+            if tuple(sorted(hr_all_networks)) != tuple(sorted(all_networks)):
+                print("ATTACH HR")
+                self.attach_networks(hr_all_networks, *initial_networks, device)
 
         if area:
             area = utils.preprocess_areas(self.area, width, height)
@@ -745,12 +738,13 @@ class GenerationParameters():
 
         self.set_status("Parsing")
         conditioning = prompts.BatchedConditioningSchedules(self.prompt, self.steps, self.clip_skip)
-        self.check_modified(conditioning.get_initial_networks(True))
+        initial_networks = conditioning.get_initial_networks() if self.network_mode == "Static" else ({},{})
+        all_networks = conditioning.get_all_networks()
 
         self.set_status("Loading")
         self.set_device()
         self.set_attention()
-        self.load_models()
+        self.load_models(*initial_networks)
 
         self.attach_tome()
         
@@ -813,7 +807,7 @@ class GenerationParameters():
         self.total_steps = int(self.steps * self.strength) + 1
 
         self.set_status("Attaching")
-        self.attach_networks(*conditioning.get_initial_networks(), device)
+        self.attach_networks(all_networks, *initial_networks, device)
 
         self.set_status("Encoding")
         conditioning.encode(self.clip, self.area)
@@ -1113,21 +1107,23 @@ class GenerationParameters():
         if not file_type in {"safetensors"}:
             raise ValueError(f"unsuported checkpoint type: {file_type}. supported types are: safetensors")
 
+        initial_networks = ({}, {})
         if self.prompt:
             self.set_status("Parsing")
+            self.network_mode = "Static"
             conditioning = prompts.BatchedConditioningSchedules(self.prompt, 1, 1)
-            self.check_modified(conditioning.get_initial_networks(True))
+            initial_networks = conditioning.get_initial_networks()
+            all_networks = conditioning.get_all_networks()
         
         self.set_status("Loading")
         self.set_device()
-        self.load_models()
+        self.load_models(*initial_networks)
 
         device = self.unet.device
 
         if self.prompt:
             self.set_status("Attaching")
-            nets = conditioning.get_initial_networks()
-            self.attach_networks(*nets, device)
+            self.attach_networks(all_networks, *initial_networks, device)
         
         self.set_status("Building")
 

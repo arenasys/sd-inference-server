@@ -287,12 +287,24 @@ class ModelStorage():
             raise ValueError(f"unknown {comp}: {name}")
         return self.files[comp][name]
 
-    def get_unet(self, name, device):
+    def check_attached_networks(self, name, comp, allowed):
+        if name in self.loaded[comp]:
+            reset = False
+            attached = self.loaded[comp][name].additional.static 
+            for k in attached:
+                if not k in allowed or attached[k] != allowed[k]:
+                    reset = True
+            if reset:
+                self.remove(comp, name) 
+
+    def get_unet(self, name, device, nets={}):
+        self.check_attached_networks(name, "UNET", nets)
         unet = self.get_component(name, "UNET", device)
         unet.determine_type()
         return unet
 
-    def get_clip(self, name, device):
+    def get_clip(self, name, device, nets={}):
+        self.check_attached_networks(name, "CLIP", nets)
         clip = self.get_component(name, "CLIP", device)
         clip.textual_inversions = {}
         return clip

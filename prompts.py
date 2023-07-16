@@ -418,25 +418,10 @@ class BatchedConditioningSchedules():
             networks += b.get_networks_at_step(step, idx)
         return networks
     
-    def get_initial_networks(self, comparable=False):
+    def get_initial_networks(self):
         unets = self.get_networks_at_step(0,0)
         clips = self.get_networks_at_step(0,1)
-
-        all = set()
-        for d in unets + clips:
-            all = all.union(set(d.keys()))
-        all = list(all)
-
-        unet = unets[0]
-        clip = clips[0]
-
-        if comparable:
-            unet_t = tuple([tuple([k,unet[k]]) for k in sorted(unet.keys())])
-            clip_t = tuple([tuple([k,clip[k]]) for k in sorted(clip.keys())])
-            all_t = tuple(sorted(all))
-            return tuple([all_t, unet_t, clip_t])
-        else:
-            return all, unet, clip
+        return unets[0], clips[0]
     
     def get_conditioning_at_step(self, step, dtype, device):
         conditioning = []

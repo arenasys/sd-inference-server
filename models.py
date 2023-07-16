@@ -342,6 +342,7 @@ class AdditionalNetworks():
     def __init__(self, model):
         self.modules = {}
         self.strength = {}
+        self.static = {}
 
         model_type = str(type(model))
         if "CLIP" in model_type:
@@ -350,6 +351,7 @@ class AdditionalNetworks():
             self.modules = self.hijack_model(model, 'unet', ["Transformer2DModel", "Attention"])
         else:
             raise ValueError(f"INVALID TARGET {model_type}")
+        self.model_type = model_type
 
     def clear(self):
         for name in self.modules:
