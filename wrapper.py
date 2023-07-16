@@ -31,6 +31,7 @@ import attention
 import controlnet
 import preview
 import segmentation
+import merge
 
 DEFAULTS = {
     "strength": 0.75, "sampler": "Euler a", "clip_skip": 1, "eta": 1,
@@ -248,21 +249,25 @@ class GenerationParameters():
         self.last_models_config = current
 
     def load_models(self):
-        if not self.unet or type(self.unet) == str:
-            self.unet_name = self.unet or self.model
-            self.set_status("Loading UNET")
-            self.unet = self.storage.get_unet(self.unet_name, self.device)
-        
-        if not self.clip or type(self.clip) == str:
-            self.clip_name = self.clip or self.model
-            self.set_status("Loading CLIP")
-            self.clip = self.storage.get_clip(self.clip_name, self.device)
-            self.clip.set_textual_inversions(self.storage.get_embeddings(self.device))
-        
-        if not self.vae or type(self.vae) == str:
-            self.vae_name = self.vae or self.model
-            self.set_status("Loading VAE")
-            self.vae = self.storage.get_vae(self.vae_name, self.device)
+        if self.merge_recipe:
+            merge.merge(self, self.merge_recipe)
+        else:
+            self.storage.reset_merge()
+            if not self.unet or type(self.unet) == str:
+                self.unet_name = self.unet or self.model
+                self.set_status("Loading UNET")
+                self.unet = self.storage.get_unet(self.unet_name, self.device)
+            
+            if not self.clip or type(self.clip) == str:
+                self.clip_name = self.clip or self.model
+                self.set_status("Loading CLIP")
+                self.clip = self.storage.get_clip(self.clip_name, self.device)
+                self.clip.set_textual_inversions(self.storage.get_embeddings(self.device))
+            
+            if not self.vae or type(self.vae) == str:
+                self.vae_name = self.vae or self.model
+                self.set_status("Loading VAE")
+                self.vae = self.storage.get_vae(self.vae_name, self.device)
         
         self.storage.clear_file_cache()
         
@@ -319,28 +324,14 @@ class GenerationParameters():
         self.storage.clear_annotators(allowed)
 
     def check_parameters(self, required, optional):
-        missing, unused = list(required), []
-        other = "storage, device, model".split(", ")
-
         for attr, value in DEFAULTS.items():
             if getattr(self, attr) == None:
                 setattr(self, attr, value)
-
-        for attr in self.__dict__.keys():
-            if attr in required:
-                missing.remove(attr)
-                continue
-            if attr in optional or attr in other:
-                continue
-            unused += [attr]
 
         for t in TYPES:
             for attr in TYPES[t]:
                 if getattr(self, attr) != None:
                     setattr(self, attr, t(getattr(self, attr)))
-
-        if missing:
-            raise ValueError(f"missing required parameters: {', '.join(missing)}")
 
         if not self.sampler in SAMPLER_CLASSES:
             raise ValueError(f"unknown sampler: {self.sampler}")
@@ -1122,14 +1113,10 @@ class GenerationParameters():
         if not file_type in {"safetensors"}:
             raise ValueError(f"unsuported checkpoint type: {file_type}. supported types are: safetensors")
 
-        self.storage.clear_modified()
-        self.network_mode = "Static"
-        self.last_models_modified = False
-        self.reattach_networks = True
-
         if self.prompt:
             self.set_status("Parsing")
             conditioning = prompts.BatchedConditioningSchedules(self.prompt, 1, 1)
+            self.check_modified(conditioning.get_initial_networks(True))
         
         self.set_status("Loading")
         self.set_device()

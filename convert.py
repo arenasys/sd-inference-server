@@ -310,7 +310,6 @@ def convert_checkpoint(in_file):
                 metadata["prediction_type"] = "epsilon"
                 print("USING", metadata["prediction_type"], "PREDICTION")
 
-
     if metadata["model_type"] == "SDv1":
         print("CONVERTING FROM SDv1")
         SDv1_convert(state_dict)

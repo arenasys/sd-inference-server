@@ -38,6 +38,8 @@ class ModelStorage():
         self.loaded = {k:{} for k in self.classes}
         self.file_cache = {}
 
+        self.uncap_ram = False
+
         self.embeddings_files = {}
         self.embeddings = {}
 
@@ -72,6 +74,7 @@ class ModelStorage():
         return files
 
     def do_gc(self):
+        gc.collect()
         torch.cuda.empty_cache()
         gc.collect()
 
@@ -114,7 +117,7 @@ class ModelStorage():
                 self.do_gc()
                 continue
 
-            if found_ram >= allowed_ram and in_ram:
+            if found_ram >= allowed_ram and in_ram and not self.uncap_ram:
                 del self.loaded[comp][m]
                 self.do_gc()
                 continue
@@ -162,18 +165,32 @@ class ModelStorage():
         model.to("cpu")
         self.do_gc()
 
+    def add(self, comp, name, model):
+        self.loaded[comp][name] = model
+
+    def remove(self, comp, name):
+        if name in self.loaded[comp]:
+            del self.loaded[comp][name]
+        self.do_gc()
+
+    def reset_merge(self):
+        self.uncap_ram = False
+        for comp in self.loaded:
+            for name in list(self.loaded[comp].keys()):
+                if not "." in name:
+                    self.remove(comp, name)
+
     def move(self, model, name, comp, device):
         dtype = self.dtype
         if comp in {"VAE"}:
             dtype = self.vae_dtype
 
-        if model.device == device:
-            return model.to(dtype)
+        model = model.to(device, dtype)
 
         if comp in self.vram_limits:
             self.enforce_limit(name, comp, device)
-        
-        return model.to(device, dtype)
+
+        return model
 
     def get_name(self, file):
         return os.path.relpath(file, self.path)
