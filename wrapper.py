@@ -1117,6 +1117,10 @@ class GenerationParameters():
         
         self.set_status("Loading")
         self.set_device()
+
+        self.attention = "Default"
+        self.set_attention()
+        
         self.load_models(*initial_networks)
 
         device = self.unet.device
