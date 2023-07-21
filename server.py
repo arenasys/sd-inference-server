@@ -117,6 +117,9 @@ class Inference(threading.Thread):
                 elif request["type"] == "options":
                     self.wrapper.reset()
                     self.wrapper.options()
+                elif request["type"] == "upscale":
+                    self.wrapper.set(**request["data"])
+                    self.wrapper.upscale()
                 elif request["type"] == "convert":
                     self.wrapper.reset()
                     self.wrapper.set(**request["data"])
