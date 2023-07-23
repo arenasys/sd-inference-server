@@ -277,7 +277,7 @@ class LoRA(LoRANetwork):
         utils.cast_state_dict(state_dict, dtype)
 
         model = LoRA("lora:"+name, state_dict)
-        model.to(dtype)
+        model.to(torch.device("cpu"), dtype)
 
         return model
 
@@ -313,22 +313,24 @@ class AdditionalNetworks():
             for hn in self.hns:
                 v = hn(x)
                 for i in range(len(self.parent.strength)):
-                    if hn.net_name in self.parent.strength[i]:
-                        x[i] += ((v[i] * self.parent.strength[i][hn.net_name])).clone()
+                    strength = self.parent.get_strength(i, hn.net_name)
+                    if strength:
+                        x[i] += ((v[i] * strength)).clone()
             out = self.original_forward(x)
             for lora in self.loras:
                 v = None
                 for i in range(len(self.parent.strength)):
-                    if lora.net_name in self.parent.strength[i]:
+                    strength = self.parent.get_strength(i, lora.net_name)
+                    if strength:
                         if v == None:
                             v = lora(x)
-                        out[i] += v[i] * self.parent.strength[i][lora.net_name]
+                        out[i] += v[i] * strength
             return out
 
         def attach_lora(self, module, static):
             if static:
                 weight = module.get_weight()
-                self.original_module.weight += weight * self.parent.strength[0][module.net_name]
+                self.original_module.weight += weight * self.parent.get_strength(0, module.net_name)
             else:
                 self.loras.append(module)
         
@@ -342,6 +344,7 @@ class AdditionalNetworks():
     def __init__(self, model):
         self.modules = {}
         self.strength = {}
+        self.strength_override = {}
         self.static = {}
 
         model_type = str(type(model))
@@ -358,8 +361,18 @@ class AdditionalNetworks():
             self.modules[name].clear()
         self.strength = {}
     
+    def get_strength(self, index, name):
+        if name in self.strength_override:
+            return self.strength_override[name]
+        if name in self.strength[index]:
+            return self.strength[index][name]
+        return 0.0
+
     def set_strength(self, strength):
         self.strength = strength
+
+    def set_strength_override(self, name, strength):
+        self.strength_override[name] = strength
 
     def hijack_model(self, model, prefix, targets):
         modules = {}

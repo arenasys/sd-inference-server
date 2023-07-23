@@ -165,6 +165,20 @@ class GenerationParameters():
         progress = {"current": progress["n"], "total": progress["total"], "rate": (progress["rate"] or 1) / (1024*1024), "unit": "MB/s"}
         self.set_progress(progress)
 
+    def on_decompose(self, progress):
+        if not progress["rate"]:
+            self.set_status("Decomposing")
+
+        progress = {"current": progress["n"], "total": progress["total"], "rate": (progress["rate"] or 1), "unit": "it/s"}
+        self.set_progress(progress)
+
+    def on_merge(self, progress):
+        if not progress["rate"]:
+            self.set_status("Merging")
+
+        progress = {"current": progress["n"], "total": progress["total"], "rate": (progress["rate"] or 1), "unit": "it/s"}
+        self.set_progress(progress)
+
     def on_artifact(self, name, images):
         if self.callback:
             if type(images[0]) == list:
@@ -239,10 +253,10 @@ class GenerationParameters():
             setattr(self, key, value)
 
     def load_models(self, unet_nets, clip_nets):
-        if self.merge_recipe:
-            merge.merge(self, self.merge_recipe, unet_nets, clip_nets)
+        if self.merge_checkpoint_recipe:
+            merge.merge_checkpoint(self, self.merge_checkpoint_recipe, unet_nets, clip_nets)
         else:
-            self.storage.reset_merge()
+            self.storage.reset_merge(["UNET"])
             if not self.unet or type(self.unet) == str:
                 self.unet_name = self.unet or self.model
                 self.set_status("Loading UNET")
@@ -519,6 +533,14 @@ class GenerationParameters():
             if prefix == "hypernet":
                 hn_names += [name]
 
+        if self.merge_lora_recipe:
+            merged_name = merge.merge_lora(self, self.merge_lora_recipe)
+            lora_names += [merged_name]
+            for model in [self.unet.additional, self.clip.additional]:
+                model.set_strength_override(f"lora:{merged_name}", 1.0)
+        else:
+            self.storage.reset_merge(["LoRA"])
+
         if lora_names:
             self.set_status("Loading LoRAs")
             self.storage.enforce_network_limit(lora_names, "LoRA")
@@ -528,7 +550,7 @@ class GenerationParameters():
                 for model in [self.unet.additional, self.clip.additional]:
                     lora.attach(model, static)
                 if static:
-                    lora.to("cpu")
+                    lora.to("cpu", torch.float16)
         else:
             self.storage.enforce_network_limit([], "LoRA")
 
@@ -671,7 +693,6 @@ class GenerationParameters():
 
         self.need_models(unet=False, vae=True, clip=True)
 
-        denoiser.reset()
         sampler = SAMPLER_CLASSES[self.hr_sampler](denoiser, self.hr_eta)
         noise = utils.NoiseSchedule(seeds, subseeds, width // 8, height // 8, device, self.unet.dtype)
 
@@ -681,10 +702,9 @@ class GenerationParameters():
             self.set_status("Attaching")
             hr_all_networks = conditioning.get_all_networks()
             if tuple(sorted(hr_all_networks)) != tuple(sorted(all_networks)):
-                print("ATTACH HR")
                 self.attach_networks(hr_all_networks, *initial_networks, device)
 
-        if area:
+        if self.area:
             area = utils.preprocess_areas(self.area, width, height)
 
         self.set_status("Encoding")
@@ -713,6 +733,8 @@ class GenerationParameters():
             self.unet.set_controlnet_conditioning(cn_cond)
             if self.keep_artifacts:
                 self.on_artifact("Control HR", [cn_outputs]*batch_size)
+        
+        denoiser.reset()
 
         self.set_status("Generating")
 
@@ -1170,6 +1192,27 @@ class GenerationParameters():
                 file = os.path.join(self.storage.get_folder("SD"), file)
 
         safetensors.torch.save_file(state_dict, file, metadata)
+
+    def build_lora(self, file):
+        file_type = file.rsplit(".",1)[-1]
+        if not file_type in {"safetensors"}:
+            raise ValueError(f"unsuported checkpoint type: {file_type}. supported types are: safetensors")
+
+        self.set_status("Loading")
+        self.set_device()
+
+        name = merge.merge_lora(self, self.merge_lora_recipe)
+        lora = self.storage.get_lora(name, torch.device("cpu"))
+        state_dict = lora.state_dict()
+
+        self.set_status(f"Saving")
+        if not self.storage.path in file:
+            if os.path.sep in file:
+                file = os.path.join(self.storage.path, file)
+            else:
+                file = os.path.join(self.storage.get_folder("LoRA"), file)
+
+        safetensors.torch.save_file(state_dict, file)
 
     def segmentation(self):
         self.set_status("Configuring")

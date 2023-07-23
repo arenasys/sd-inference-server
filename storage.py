@@ -173,9 +173,9 @@ class ModelStorage():
             del self.loaded[comp][name]
         self.do_gc()
 
-    def reset_merge(self):
+    def reset_merge(self, comps):
         self.uncap_ram = False
-        for comp in self.loaded:
+        for comp in comps:
             for name in list(self.loaded[comp].keys()):
                 if not "." in name:
                     self.remove(comp, name)
