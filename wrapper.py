@@ -1091,7 +1091,7 @@ class GenerationParameters():
             self.set_status("Converting")
             
             if old_ext in {"pt", "pth", "ckpt", "bin"}:
-                state_dict = torch.load(old_file, map_location="cpu")
+                state_dict = utils.safe_torch_load(old_file)
                 if "state_dict" in state_dict:
                     state_dict = state_dict["state_dict"]
             elif old_ext in {"safetensors"}:

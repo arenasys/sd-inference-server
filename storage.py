@@ -381,7 +381,7 @@ class ModelStorage():
         if file.endswith(".safetensors"):
             out = {comp: safetensors.torch.load_file(file)}
         else:
-            out = {comp: torch.load(file, map_location="cpu")}
+            out = {comp: utils.load_pickle(file)}
 
         if comp in out and comp == "CN":
             out[comp] = convert.CN_convert(out[comp])

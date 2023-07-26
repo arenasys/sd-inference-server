@@ -7,6 +7,8 @@ import torch
 import safetensors
 import safetensors.torch
 
+import utils
+
 def relative_file(file):
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), file)
 
@@ -273,7 +275,7 @@ def convert_checkpoint(in_file):
     metadata = {}
     name = in_file.split(os.path.sep)[-1].split(".")[0]
     if in_file.endswith(".ckpt") or in_file.endswith(".pt"):
-        state_dict = torch.load(in_file, map_location="cpu")
+        state_dict = utils.load_pickle(in_file, map_location="cpu")
         if 'state_dict' in state_dict:
             state_dict = state_dict['state_dict']
     elif in_file.endswith(".safetensors"):

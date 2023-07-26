@@ -65,7 +65,7 @@ def cheap_preview(latents, vae):
 
 def model_preview(latents, vae):
     if not APPROX_MODEL.loaded:
-        APPROX_MODEL.load_state_dict(torch.load(relative_file(APPROX_MODEL_PATH), map_location='cpu'))
+        APPROX_MODEL.load_state_dict(utils.load_pickle(relative_file(APPROX_MODEL_PATH), map_location='cpu'))
     APPROX_MODEL.to(latents.device).to(latents.dtype)
     outputs = APPROX_MODEL(latents)
     if vae.model_type == "SDXL-Base":

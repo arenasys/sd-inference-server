@@ -5,6 +5,7 @@ import requests
 import tqdm
 import os
 import time
+import pickle
 
 DIRECTML_AVAILABLE = False
 try:
@@ -357,3 +358,18 @@ def download(url, filename, callback):
                 callback(bar.format_dict)
 
     os.rename(filename+".tmp", filename)
+
+class SafeUnpickler:
+    class Dummy:
+        pass
+    class Unpickler(pickle.Unpickler):
+        def find_class(self, module, name):
+            root = module.split(".",1)[0]
+            if root in {"collections", "torch"}:
+                return super().find_class(module, name)
+            else:
+                print("IGNORE", module, name)
+                return SafeUnpickler.Dummy
+
+def load_pickle(file, map_location="cpu"):
+    return torch.load(file, map_location=map_location, pickle_module=SafeUnpickler)
