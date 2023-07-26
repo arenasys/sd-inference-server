@@ -361,7 +361,8 @@ def download(url, filename, callback):
 
 class SafeUnpickler:
     class Dummy:
-        pass
+        def __init__(self, *args, **kwargs):
+            pass
     class Unpickler(pickle.Unpickler):
         def find_class(self, module, name):
             root = module.split(".",1)[0]
