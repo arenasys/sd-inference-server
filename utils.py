@@ -373,4 +373,4 @@ class SafeUnpickler:
                 return SafeUnpickler.Dummy
 
 def load_pickle(file, map_location="cpu"):
-    return torch.load(file, map_location=map_location, pickle_module=SafeUnpickler)
+    return torch.load(file, map_location=map_location)#, pickle_module=SafeUnpickler)
