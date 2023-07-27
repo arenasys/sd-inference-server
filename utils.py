@@ -360,17 +360,34 @@ def download(url, filename, callback):
     os.rename(filename+".tmp", filename)
 
 class SafeUnpickler:
+    ignored = []  
+
     class Dummy:
         def __init__(self, *args, **kwargs):
             pass
+
     class Unpickler(pickle.Unpickler):
-        def find_class(self, module, name):
+        def is_allowed(self, module, name):
             root = module.split(".",1)[0]
             if root in {"collections", "torch"}:
+                return True
+            if root in {"__builtin__", "__builtins__"}:
+                if name in {"list", "tuple", "set", "frozenset", "dict"}:
+                    return True
+            return False
+    
+        def find_class(self, module, name):
+            if self.is_allowed(module, name):
                 return super().find_class(module, name)
             else:
-                print("IGNORE", module, name)
+                SafeUnpickler.ignored += [(module, name)]
                 return SafeUnpickler.Dummy
+    
+    def load(*args, **kwargs):
+        return SafeUnpickler.Unpickler(*args, **kwargs).load()
 
 def load_pickle(file, map_location="cpu"):
-    return torch.load(file, map_location=map_location)#, pickle_module=SafeUnpickler)
+    try:
+        return torch.load(file, map_location=map_location, pickle_module=SafeUnpickler)
+    except:
+        raise RuntimeError(f"Failed to unpickle file, {file}\nIgnored types, {str(SafeUnpickler.ignored)}")
