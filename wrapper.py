@@ -1000,7 +1000,7 @@ class GenerationParameters():
 
         if self.operation == "build":
             self.build(self.file)
-        if self.operation == "build_lora":
+        elif self.operation == "build_lora":
             self.build_lora(self.file)
         elif self.operation == "modify":
             self.modify(self.old_file, self.new_file)
