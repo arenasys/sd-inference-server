@@ -7,6 +7,7 @@ import tqdm
 import models
 import utils
 import storage
+import lora
 
 def base64_encode(obj):
     return base64.b64encode(str(obj).encode('utf-8')).decode('utf-8')
@@ -46,9 +47,9 @@ def do_checkpoint_merge(self, inputs, alpha, merge_function):
 
     out_state_dict = {}
 
-    iter = tqdm.tqdm(state_dicts[0])
-    for k in iter:
-        self.on_merge(iter.format_dict)
+    self.set_status("Merging")
+
+    for k in state_dicts[0]:
         if key_mapping:
             if k in key_mapping:
                 out_state_dict[k] = merge_function(*[sd[k] for sd in state_dicts], alpha[key_mapping[k]])
@@ -65,40 +66,75 @@ def do_checkpoint_merge(self, inputs, alpha, merge_function):
     
     return out
 
-def do_lora_merge(self, name, state_dicts, alpha, merge_function):
-    arch = set([tuple(sorted(i.keys())) for i in state_dicts])
+def get_lora_key_alpha(key, key_mapping, alpha):
+    key = key.replace("lora_unet_", "")
+    for k in key_mapping:
+        kk = k.rsplit(".",1)[0].replace('.', '_')
+        if kk == key:
+            return alpha[key_mapping[k]]
+
+    print(key)
+    return 0.5
+
+def do_lora_merge(self, name, inputs, rank, conv_rank, alpha, clip_alpha, merge_function):
+    arch = set([tuple(sorted(i.state_dict().keys())) for i in inputs])
     if len(arch) != 1:
         raise Exception("Incompatible model architectures")
-    keys = arch.pop()
+
+    for i in inputs:
+        i.precompute_decomposition(self.device, self.on_decompose)
+    
+    keys = inputs[0].decomposition.keys()
 
     key_mapping = None
     if type(alpha) == list:
         key_mapping = block_mapping(len(alpha))
 
     out_state_dict = {}
+    out_decomposed = {}
 
-    iter = tqdm.tqdm(keys)
-    for k in iter:
-        self.on_merge(iter.format_dict)
-        if key_mapping:
-            if k in key_mapping:
-                out_state_dict[k] = merge_function(*[sd[k] for sd in state_dicts], alpha[key_mapping[k]])
+    self.set_status("Merging")
+
+    for k in keys:
+        if k.startswith("lora_unet"):
+            if key_mapping:
+                key_alpha = get_lora_key_alpha(k, key_mapping, alpha)
+            else:
+                key_alpha = alpha
         else:
-            out_state_dict[k] = merge_function(*[sd[k] for sd in state_dicts], alpha)
+            key_alpha = clip_alpha
+
+        if True:
+            data = [i.decomposition[k] for i in inputs]
+            U = merge_function(*[d[0] for d in data], key_alpha)
+            S = merge_function(*[d[1] for d in data], key_alpha)
+            Vh = merge_function(*[d[2] for d in data], key_alpha)
+            size = data[0][3]
+            out_decomposed[k] = (U,S,Vh,size)
+
+            key_up, key_down, key_alpha = lora.LoRANetwork.get_key_at_rank(out_decomposed[k], rank, conv_rank)
+        else:
+            data = [lora.LoRANetwork.get_key_at_rank(i.decomposition[k], rank, conv_rank) for i in inputs]
+            key_up = merge_function(*[d[0] for d in data], key_alpha)
+            key_down = merge_function(*[d[1] for d in data], key_alpha)
+            key_alpha = merge_function(*[d[2] for d in data], key_alpha)
+
+        out_state_dict[k + ".lora_up.weight"] = key_up
+        out_state_dict[k + ".lora_down.weight"] = key_down
+        out_state_dict[k + ".alpha"] = key_alpha
+
+
+    out_lora = models.LoRA(name, out_state_dict)
+    out_lora.decomposed = out_decomposed
     
-    if self.network_mode == "Static":
-        for k in list(out_state_dict.keys()):
-            out_state_dict[k+".weight"] = out_state_dict[k]
-            del out_state_dict[k]
-        return models.LoRA(name, out_state_dict, composed=True)
-    else:
-        out_state_dict = models.LoRA.decompose(out_state_dict, 64, 64, self.on_decompose)
-        return models.LoRA(name, out_state_dict)
+    return out_lora
 
 def get_result_history(recipe, result_name):
     index = int(result_name.split("_")[-1])
     full_op = recipe[index]
-    operation = {k:full_op[k] for k in ["operation", "alpha", "model_a", "model_b", "model_c"] if k in full_op}
+
+    important_keys = ["operation", "alpha", "model_a", "model_b", "model_c", "clip_alpha", "rank", "conv_rank"]
+    operation = {k:full_op[k] for k in important_keys if k in full_op}
 
     for k in ["model_a", "model_b", "model_c"]:
         if not k in operation:
@@ -135,8 +171,6 @@ def get_base_model_names(self, operation):
 
 def do_recursive_merge(self, operation, comp="UNET"):
     operation_name = base64_encode(operation)
-    if comp == "LoRA":
-        operation_name += self.network_mode
 
     if operation_name in self.storage.loaded[comp]:
         return operation_name
@@ -165,9 +199,11 @@ def do_recursive_merge(self, operation, comp="UNET"):
     if comp == "UNET":
         result = do_checkpoint_merge(self, inputs, alpha, merge_function)
     elif comp == "LoRA":
-        inputs = [i.compose() for i in inputs]
         net_name = f"{operation_name}.safetensors"
-        result = do_lora_merge(self, net_name, inputs, alpha, merge_function)
+        clip_alpha = operation['clip_alpha']
+        rank = operation['rank']
+        conv_rank = operation['conv_rank']
+        result = do_lora_merge(self, net_name, inputs, rank, conv_rank, alpha, clip_alpha, merge_function)
     
     self.storage.add(comp, operation_name, result)
 
@@ -269,8 +305,6 @@ def merge_lora(self, recipe):
     
     final_result_name = f"_result_{len(recipe)-1}"
 
-    self.storage.uncap_ram = True
-    
     op = get_result_history(recipe, final_result_name)
     all = get_required_model_names(self, op, prune=False)
     required = get_required_model_names(self, op, prune=True)
@@ -293,4 +327,6 @@ def merge_lora(self, recipe):
     self.set_status("Merging")
     result_name = do_recursive_merge(self, op, "LoRA")
 
-    return result_name
+    keep = [n for n in all if n != result_name]
+
+    return result_name, keep

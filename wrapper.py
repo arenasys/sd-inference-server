@@ -168,16 +168,22 @@ class GenerationParameters():
     def on_decompose(self, progress):
         if not progress["rate"]:
             self.set_status("Decomposing")
+            self.last = None
 
-        progress = {"current": progress["n"], "total": progress["total"], "rate": (progress["rate"] or 1), "unit": "it/s"}
-        self.set_progress(progress)
+        if self.last != progress["n"]:
+            self.last =  progress["n"]
+            progress = {"current": progress["n"], "total": progress["total"], "rate": (progress["rate"] or 1), "unit": "it/s"}
+            self.set_progress(progress)
 
     def on_merge(self, progress):
         if not progress["rate"]:
             self.set_status("Merging")
+            self.last = None
 
-        progress = {"current": progress["n"], "total": progress["total"], "rate": (progress["rate"] or 1), "unit": "it/s"}
-        self.set_progress(progress)
+        if self.last != progress["n"]:
+            self.last =  progress["n"]
+            progress = {"current": progress["n"], "total": progress["total"], "rate": (progress["rate"] or 1), "unit": "it/s"}
+            self.set_progress(progress)
 
     def on_artifact(self, name, images):
         if self.callback:
@@ -533,8 +539,9 @@ class GenerationParameters():
             if prefix == "hypernet":
                 hn_names += [name]
 
+        merged_name, keep_models = None, []
         if self.merge_lora_recipe:
-            merged_name = merge.merge_lora(self, self.merge_lora_recipe)
+            merged_name, keep_models = merge.merge_lora(self, self.merge_lora_recipe)
             lora_names += [merged_name]
             for model in [self.unet.additional, self.clip.additional]:
                 model.set_strength_override(f"lora:{merged_name}", 1.0)
@@ -543,13 +550,14 @@ class GenerationParameters():
 
         if lora_names:
             self.set_status("Loading LoRAs")
-            self.storage.enforce_network_limit(lora_names, "LoRA")
+            self.storage.enforce_network_limit(lora_names + keep_models, "LoRA")
             self.loras = [self.storage.get_lora(name, device) for name in lora_names]
 
-            for lora in self.loras:
+            for i, lora in enumerate(self.loras):
+                is_static = static and lora_names[i] != merged_name
                 for model in [self.unet.additional, self.clip.additional]:
-                    lora.attach(model, static)
-                if static:
+                    lora.attach(model, is_static)
+                if is_static:
                     lora.to("cpu", torch.float16)
         else:
             self.storage.enforce_network_limit([], "LoRA")
@@ -992,6 +1000,8 @@ class GenerationParameters():
 
         if self.operation == "build":
             self.build(self.file)
+        if self.operation == "build_lora":
+            self.build_lora(self.file)
         elif self.operation == "modify":
             self.modify(self.old_file, self.new_file)
         elif self.operation == "prune":
@@ -1201,8 +1211,8 @@ class GenerationParameters():
         self.set_status("Loading")
         self.set_device()
 
-        name = merge.merge_lora(self, self.merge_lora_recipe)
-        lora = self.storage.get_lora(name, torch.device("cpu"))
+        merged_name, _ = merge.merge_lora(self, self.merge_lora_recipe)
+        lora = self.storage.get_lora(merged_name, torch.device("cpu"))
         state_dict = lora.state_dict()
 
         self.set_status(f"Saving")

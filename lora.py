@@ -57,32 +57,17 @@ class LoRAModule(torch.nn.Module):
         self.lora_down = self.lora_down.to(*args)
         self.lora_up = self.lora_up.to(*args)
         return self
-    
-class LoRAWeight(torch.nn.Module):
-    def __init__(self, net_name, name, weight):
-        super().__init__()
-        self.net_name = net_name
-        self.name = name
-        self.weight = weight
-
-    def get_weight(self):
-        return self.weight
-    
-    def forward(self, x):
-        return x
-
-    def to(self, *args):
-        self.weight = self.weight.to(*args)
-        return self
 
 class LoRANetwork(torch.nn.Module):
-    def __init__(self, name, state_dict, composed=False) -> None:
+    def __init__(self, name, state_dict) -> None:
         super().__init__()
         self.net_name = "lora:" + name.rsplit(".",1)[0].rsplit(os.path.sep,1)[-1]
-        self.build_modules(state_dict, composed)
+        self.build_modules(state_dict)
         self.load_state_dict(state_dict, strict=False)
 
-    def build_modules(self, state_dict, composed=False):
+        self.decomposition = {}
+
+    def build_modules(self, state_dict):
         names = set([k.split(".")[0] for k in state_dict])
         if any([".hada_" in k for k in state_dict]):
             raise RuntimeError("LoHA models are not supported")
@@ -92,19 +77,15 @@ class LoRANetwork(torch.nn.Module):
             raise RuntimeError("CP-Decomposition is not supported")
 
         for name in names:
-            if not composed:
-                up = state_dict[name+".lora_up.weight"]
-                down = state_dict[name+".lora_down.weight"]
+            up = state_dict[name+".lora_up.weight"]
+            down = state_dict[name+".lora_down.weight"]
 
-                alpha = None
-                if name+".alpha" in state_dict:
-                    alpha = state_dict[name+".alpha"].numpy()
+            alpha = None
+            if name+".alpha" in state_dict:
+                alpha = state_dict[name+".alpha"].numpy()
 
-                lora = LoRAModule(self.net_name, name, up, down, alpha)
-                self.add_module(name, lora)
-            else:
-                lora = LoRAWeight(self.net_name, name, state_dict[name+".weight"])
-                self.add_module(name, lora)
+            lora = LoRAModule(self.net_name, name, up, down, alpha)
+            self.add_module(name, lora)
 
     def compose(self):
         state_dict = {}
@@ -115,9 +96,12 @@ class LoRANetwork(torch.nn.Module):
             state_dict[module.name] = module.get_weight().to(torch.float16)
         self.to(torch.device("cpu"), torch.float16)
         return state_dict
+    
+    def precompute_decomposition(self, device, callback=None):
+        if self.decomposition:
+            return
 
-    def decompose(state_dict, rank, conv_rank, callback=None):
-        out_state_dict = {}
+        state_dict = self.compose()
 
         iter = tqdm.tqdm(state_dict)
         for k in iter:
@@ -125,11 +109,11 @@ class LoRANetwork(torch.nn.Module):
                 callback(iter.format_dict)
 
             mat = state_dict[k].float()
+            size = mat.size()
 
-            conv2d = (len(mat.size()) == 4)
-            kernel_size = None if not conv2d else mat.size()[2:4]
+            conv2d = (len(size) == 4)
+            kernel_size = None if not conv2d else size[2:4]
             conv2d_3x3 = conv2d and kernel_size != (1, 1)
-            out_dim, in_dim = mat.size()[0:2]
 
             if conv2d:
                 if conv2d_3x3:
@@ -137,36 +121,50 @@ class LoRANetwork(torch.nn.Module):
                 else:
                     mat = mat.squeeze()
 
-            module_new_rank = conv_rank if conv2d_3x3 else rank
-            module_new_rank = min(module_new_rank, in_dim, out_dim)    
-
+            if max(mat.shape) > 4096:
+                mat = mat.to(device)
+            
             U, S, Vh = torch.linalg.svd(mat)
 
-            U = U[:, :module_new_rank]
-            S = S[:module_new_rank]
-            U = U @ torch.diag(S)
+            U = U[:, :256].to("cpu").contiguous()
+            S = S[:256].to("cpu").contiguous()
+            Vh = Vh[:256, :].to("cpu").contiguous()
 
-            Vh = Vh[:module_new_rank, :]
+            self.decomposition[k] = (U,S,Vh,size)
 
-            dist = torch.cat([U.flatten(), Vh.flatten()])
-            hi_val = torch.quantile(dist, 0.99)
-            low_val = -hi_val
+    def get_key_at_rank(decomposition, rank, conv_rank):
+        U, S, Vh, size = decomposition
 
-            U = U.clamp(low_val, hi_val)
-            Vh = Vh.clamp(low_val, hi_val)
+        conv2d = (len(size) == 4)
+        kernel_size = None if not conv2d else size[2:4]
+        conv2d_3x3 = conv2d and kernel_size != (1, 1)
+        out_dim, in_dim = size[0:2]
 
-            if conv2d:
-                U = U.reshape(out_dim, module_new_rank, 1, 1)
-                Vh = Vh.reshape(module_new_rank, in_dim, kernel_size[0], kernel_size[1])
+        module_new_rank = conv_rank if conv2d_3x3 else rank
+        module_new_rank = min(module_new_rank, in_dim, out_dim)
 
-            up_weight = U
-            down_weight = Vh
+        U = U[:, :module_new_rank].float()
+        S = S[:module_new_rank].float()
+        U = U @ torch.diag(S)
 
-            out_state_dict[k + '.lora_up.weight'] = up_weight.to("cpu").contiguous().half()
-            out_state_dict[k + '.lora_down.weight'] = down_weight.to("cpu").contiguous().half()
-            out_state_dict[k + '.alpha'] = torch.tensor(module_new_rank).half()
-        
-        return out_state_dict
+        Vh = Vh[:module_new_rank, :].float()
+
+        dist = torch.cat([U.flatten(), Vh.flatten()])
+        hi_val = torch.quantile(dist, 0.99)
+        low_val = -hi_val
+
+        U = U.clamp(low_val, hi_val)
+        Vh = Vh.clamp(low_val, hi_val)
+
+        if conv2d:
+            U = U.reshape(out_dim, module_new_rank, 1, 1)
+            Vh = Vh.reshape(module_new_rank, in_dim, kernel_size[0], kernel_size[1])
+
+        up = U.to("cpu").contiguous().half()
+        down = Vh.to("cpu").contiguous().half()
+        alpha = torch.tensor(module_new_rank).half()
+
+        return up, down, alpha
 
     def attach(self, model, static):
         if static:
@@ -188,7 +186,7 @@ class LoRANetwork(torch.nn.Module):
     
     def to(self, *args):
         for _, module in self.named_modules():
-            if type(module) in {LoRAModule, LoRAWeight}:
+            if type(module) in {LoRAModule}:
                 module.to(*args)
         return self
 
