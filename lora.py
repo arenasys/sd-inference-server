@@ -121,7 +121,7 @@ class LoRANetwork(torch.nn.Module):
                 else:
                     mat = mat.squeeze()
 
-            if max(mat.shape) > 4096:
+            if max(mat.shape) > 4096 or torch.get_num_threads() < 6:
                 mat = mat.to(device)
             
             U, S, Vh = torch.linalg.svd(mat)
