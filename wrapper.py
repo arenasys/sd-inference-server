@@ -982,7 +982,7 @@ class GenerationParameters():
             data[k] = list(self.storage.files[k].keys())
 
         data["hr_upscaler"] = list(UPSCALERS_LATENT.keys()) + list(UPSCALERS_PIXEL.keys()) + data["SR"]
-        data["img2img_upscaler"] = list(UPSCALERS_PIXEL.keys()) + list(UPSCALERS_LATENT.keys()) + data["SR"]
+        data["img2img_upscaler"] = list(UPSCALERS_PIXEL.keys()) + data["SR"]
 
         available = attention.get_available()
         data["attention"] = [k for k,v in CROSS_ATTENTION.items() if v in available]
