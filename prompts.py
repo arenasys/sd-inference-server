@@ -10,13 +10,17 @@ prompt_grammar = lark.Lark(r"""
 prompt: (emphasis | deemphasis | numeric | scheduled | alternate | plain | addnet | WHITESPACE)*
 emphasis: "(" prompt ")"
 deemphasis: "[" prompt "]"
-numeric: "(" prompt ":" [_WHITESPACE] NUMBER [_WHITESPACE]")"
-scheduled: "[" [prompt ":"] prompt ":" [_WHITESPACE] specifier [_WHITESPACE]"]"
-specifier: NUMBER | HR
+numeric: "(" prompt ":" [_WHITESPACE] strength_specifier [_WHITESPACE]")"
+strength_specifier: NUMBER | strength_schedule
+strength_schedule: "[" [strength_specifier ":"] strength_specifier ":" [_WHITESPACE] step_specifier [_WHITESPACE]"]"
+scheduled: "[" [prompt ":"] prompt ":" [_WHITESPACE] step_specifier [_WHITESPACE]"]"
+step_specifier: NUMBER | HR
 alternate: "[" prompt ("|" prompt)+ "]"
-addnet: "<" [ local ] net_type ":" filename [ ":" [_WHITESPACE] strength [_WHITESPACE] [ ":" [_WHITESPACE] NUMBER [_WHITESPACE] ]] ">"
+addnet: "<" [ local ] net_type ":" filename [ ":" [_WHITESPACE] block_weight_specifier [_WHITESPACE] [ ":" [_WHITESPACE] strength_specifier [_WHITESPACE] ]] ">"
 net_type: LORA | HN
-strength: NUMBER | LIST
+block_weight: [_WHITESPACE] strength_specifier [_WHITESPACE] "," [_WHITESPACE] strength_specifier [_WHITESPACE] ("," [_WHITESPACE] strength_specifier [_WHITESPACE])*
+block_weight_specifier: NUMBER | block_weight | block_weight_schedule
+block_weight_schedule: "[" [block_weight_specifier ":"] block_weight_specifier ":" [_WHITESPACE] step_specifier [_WHITESPACE]"]"
 local: "@"
 HR: "HR"
 LORA: "lora"
@@ -25,7 +29,6 @@ WHITESPACE: /\s+/
 _WHITESPACE: /\s+/
 plain: /([^\\\[\]()<>:|]|\\.)+/
 filename: /([^<>:]|\\.)+/
-LIST: [_WHITESPACE] NUMBER [_WHITESPACE] "," [_WHITESPACE] NUMBER [_WHITESPACE] ("," [_WHITESPACE] NUMBER [_WHITESPACE])*
 %import common.SIGNED_NUMBER -> NUMBER
 """, tree_class=WeightedTree)
 
@@ -33,37 +36,49 @@ def parse_prompt(prompt, steps, HR=False):
     if not prompt:
         return [(steps, [["", 1.0]])]
 
-    def extract(tree, step, HR=False):
-        def resolve_strength(node, step, HR, weight):
+    def extract(tree, step, total, HR=False):
+        def triggered(specifier, step, total, HR):
+            if specifier == "HR":
+                return HR
+            
+            specifier = float(specifier)
+
+            comparison = step
+            if specifier < 1.0:
+                comparison = step/total
+            
+            return specifier < comparison
+        
+        def resolve_strength(node, step, total, HR):
             strength = node.children[0]
 
-            if strength.type == "NUMBER":
-                return float(strength)
-            elif strength.type == "LIST":
-                return [float(s.strip()) for s in strength.split(",")]
+            if type(strength) == lark.Token:
+                if strength.type == "NUMBER":
+                    return float(strength)
+            else:
+                if strength.data in {"strength_schedule", "block_weight_schedule"}:
+                    specifier = strength.children[2].children[0]
+                    active = strength.children[1 if triggered(specifier, step, total, HR) else 0]
+                    return resolve_strength(active, step, total, HR)
+                elif strength.data == "block_weight":
+                    return [resolve_strength(c, step, total, HR) for c in strength.children]
+                else:
+                    print(strength)
                         
             return 1.0
-        def propagate(node, output, step, HR, weight):
+
+        def propagate(node, output, step, total, HR, weight):
             if type(node) == WeightedTree:
                 node.weight = weight
                 children = node.children
                 if node.data == "emphasis": node.weight *= 1.1
                 if node.data == "deemphasis": node.weight /= 1.1
                 if node.data == "numeric":
-                    node.weight *= float(node.children[1])
+                    node.weight *= resolve_strength(node.children[1], step, total, HR)
                     children = [node.children[0]]
                 if node.data == "scheduled":
                     specifier = node.children[2].children[0]
-                    if specifier == "HR":
-                        if not HR:
-                            children = [node.children[0]]
-                        else:
-                            children = [node.children[1]]
-                    else:
-                        if step <= float(specifier):
-                            children = [node.children[0]]
-                        else:
-                            children = [node.children[1]]
+                    children = [node.children[1 if triggered(specifier, step, total, HR) else 0]]
                 if node.data == "alternate":
                     children = [children[step%len(children)]]
                 if node.data == "addnet":
@@ -76,9 +91,9 @@ def parse_prompt(prompt, steps, HR=False):
 
                     unet, clip = 1.0, None
                     if children[2]:
-                        unet = resolve_strength(children[2], step, HR, weight)
+                        unet = resolve_strength(children[2], step, total, HR)
                     if children[3]:
-                        clip = resolve_strength(children[3], step, HR, weight)
+                        clip = resolve_strength(children[3], step, total, HR)
                     if clip == None:
                         if type(unet) == list:
                             clip = 1.0
@@ -89,21 +104,21 @@ def parse_prompt(prompt, steps, HR=False):
                     children = []
 
                 for child in children:
-                    propagate(child, output, step, HR, node.weight)
+                    propagate(child, output, step, total, HR, node.weight)
             elif node:
                 if output and type(output[-1]) == list and output[-1][1] == weight:
                     output[-1][0] += str(node)
-                else:
+                elif weight > 0.0:
                     output.append([str(node), weight])
         output = []
-        propagate(tree, output, step, HR, 1.0)
+        propagate(tree, output, step, total, HR, 1.0)
         return output
 
     tree = prompt_grammar.parse(prompt)
 
     schedules = []
     for step in range(steps, 0, -1):
-        scheduled = extract(tree, step, HR)
+        scheduled = extract(tree, step, steps, HR)
         if not schedules or tuple(schedules[-1][1]) != tuple(scheduled):
             schedules += [(step, scheduled)]
     schedules = schedules[::-1]
