@@ -313,14 +313,14 @@ class AdditionalNetworks():
             for hn in self.hns:
                 v = hn(x)
                 for i in range(len(self.parent.strength)):
-                    strength = self.parent.get_strength(i, hn.net_name)
+                    strength = self.parent.get_strength(i, hn.net_name, self.name)
                     if strength:
                         x[i] += ((v[i] * strength)).clone()
             out = self.original_forward(x)
             for lora in self.loras:
                 v = None
                 for i in range(len(self.parent.strength)):
-                    strength = self.parent.get_strength(i, lora.net_name)
+                    strength = self.parent.get_strength(i, lora.net_name, self.name)
                     if strength:
                         if v == None:
                             v = lora(x)
@@ -330,7 +330,7 @@ class AdditionalNetworks():
         def attach_lora(self, module, static):
             if static:
                 weight = module.get_weight()
-                strength =  self.parent.get_strength(0, module.net_name)
+                strength = self.parent.get_strength(0, module.net_name, self.name)
                 self.original_module.weight += weight * strength
             else:
                 self.loras.append(module)
@@ -362,12 +362,21 @@ class AdditionalNetworks():
             self.modules[name].clear()
         self.strength = {}
     
-    def get_strength(self, index, name):
+    def get_strength(self, index, name, key=None):
+        strength = 0.0
         if name in self.strength_override:
-            return self.strength_override[name]
+            strength = self.strength_override[name]
         if name in self.strength[index]:
-            return self.strength[index][name]
-        return 0.0
+            strength = self.strength[index][name]
+
+        if type(strength) == float:
+            return strength
+        elif type(strength) == list:
+            if not key:
+                return tuple(strength)
+            mapping = utils.block_mapping_lora(len(strength))
+            index = mapping["lora_"+key]
+            return strength[index]
 
     def set_strength(self, strength):
         self.strength = strength

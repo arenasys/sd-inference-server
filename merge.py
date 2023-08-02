@@ -12,21 +12,6 @@ import lora
 def base64_encode(obj):
     return base64.b64encode(str(obj).encode('utf-8')).decode('utf-8')
 
-def relative_file(file):
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), file)
-
-def block_mapping(labels):
-    file = "MBW_4_mapping.txt" if labels == 9 else "MBW_12_mapping.txt"
-    mapping = {}
-    labels = []
-    with open(relative_file(os.path.join("mappings", file))) as file:
-        for line in file:
-            src, dst = line.strip().split(" TO ")
-            if not dst in labels:
-                labels += [dst]
-            mapping[src] = labels.index(dst)
-    return mapping
-
 def weighted_sum(a, b, alpha):
     return (alpha * a) + ((1-alpha) * b)
 
@@ -87,7 +72,7 @@ def do_unet_insert_lora(self, inputs, alpha):
 
     key_mapping = None
     if type(alpha) == list:
-        key_mapping = block_mapping(len(alpha))
+        key_mapping = utils.block_mapping(len(alpha))
 
     out_state_dict = {}
 
@@ -150,7 +135,7 @@ def do_unet_merge(self, inputs, alpha, merge_function):
 
     key_mapping = None
     if type(alpha) == list:
-        key_mapping = block_mapping(len(alpha))
+        key_mapping = utils.block_mapping(len(alpha))
 
     out_state_dict = {}
 
@@ -311,16 +296,6 @@ def merge_checkpoint(self, recipe):
 
     return all_lora
 
-def get_lora_key_alpha(key, key_mapping, alpha):
-    key = key.replace("lora_unet_", "")
-    for k in key_mapping:
-        kk = k.rsplit(".",1)[0].replace('.', '_')
-        if kk == key:
-            return alpha[key_mapping[k]]
-
-    print(key)
-    return 0.5
-
 def do_lora_merge(self, name, inputs, rank, conv_rank, alpha, clip_alpha, merge_function):
     arch = set([tuple(sorted(i.state_dict().keys())) for i in inputs])
     if len(arch) != 1:
@@ -333,7 +308,7 @@ def do_lora_merge(self, name, inputs, rank, conv_rank, alpha, clip_alpha, merge_
 
     key_mapping = None
     if type(alpha) == list:
-        key_mapping = block_mapping(len(alpha))
+        key_mapping = utils.block_mapping_lora(len(alpha))
 
     out_state_dict = {}
     out_decomposed = {}
@@ -343,7 +318,12 @@ def do_lora_merge(self, name, inputs, rank, conv_rank, alpha, clip_alpha, merge_
     for k in keys:
         if k.startswith("lora_unet"):
             if key_mapping:
-                key_alpha = get_lora_key_alpha(k, key_mapping, alpha)
+                kk = k.rsplit(".", 1)[0]
+                if kk in key_mapping:
+                    key_alpha = alpha[key_mapping[kk]]
+                else:
+                    print("MISSING", kk)
+                    key_alpha = clip_alpha
             else:
                 key_alpha = alpha
         else:

@@ -17,6 +17,8 @@ except:
 TO_TENSOR = transforms.ToTensor()
 FROM_TENSOR = transforms.ToPILImage()
 
+BLOCK_MAPPINGS = {}
+
 def preprocess_images(images):
     def process(image):
         image = TO_TENSOR(image).to(torch.float32)
@@ -391,3 +393,45 @@ def load_pickle(file, map_location="cpu"):
         return torch.load(file, map_location=map_location, pickle_module=SafeUnpickler)
     except:
         raise RuntimeError(f"Failed to unpickle file, {file}\nIgnored types, {str(SafeUnpickler.ignored)}")
+
+def relative_file(file):
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), file)
+
+def block_mapping(labels):
+    global BLOCK_MAPPINGS
+    name = "MBW_4" if labels == 9 else "MBW_12"
+
+    if name in BLOCK_MAPPINGS:
+        return BLOCK_MAPPINGS[name]
+
+    mapping = {}
+    labels = []
+    with open(relative_file(os.path.join("mappings", f"{name}_mapping.txt"))) as file:
+        for line in file:
+            src, dst = line.strip().split(" TO ")
+            if not dst in labels:
+                labels += [dst]
+            mapping[src] = labels.index(dst)
+            
+    BLOCK_MAPPINGS[name] = mapping
+    return mapping
+
+def block_mapping_lora(labels):
+    global BLOCK_MAPPINGS
+    name = "MBW_4_lora" if labels == 9 else "MBW_12_lora"
+
+    if name in BLOCK_MAPPINGS:
+        return BLOCK_MAPPINGS[name]
+
+    mapping = block_mapping(labels)
+
+    lora_mapping = {}
+
+    for k, v in mapping.items():
+        if k.endswith("bias"):
+            continue
+        kk = "lora_unet_" + k.rsplit(".",1)[0].replace(".", "_")
+        lora_mapping[kk] = v
+            
+    BLOCK_MAPPINGS[name] = lora_mapping
+    return lora_mapping

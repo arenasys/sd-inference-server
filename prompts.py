@@ -12,10 +12,11 @@ emphasis: "(" prompt ")"
 deemphasis: "[" prompt "]"
 numeric: "(" prompt ":" [_WHITESPACE] NUMBER [_WHITESPACE]")"
 scheduled: "[" [prompt ":"] prompt ":" [_WHITESPACE] specifier [_WHITESPACE]"]"
-alternate: "[" prompt ("|" prompt)+ "]"
-addnet: "<" [ local ] net_type ":" filename [ ":" [_WHITESPACE] specifier [_WHITESPACE] [ ":" [_WHITESPACE] specifier [_WHITESPACE] ]] ">"
-net_type: LORA | HN
 specifier: NUMBER | HR
+alternate: "[" prompt ("|" prompt)+ "]"
+addnet: "<" [ local ] net_type ":" filename [ ":" [_WHITESPACE] strength [_WHITESPACE] [ ":" [_WHITESPACE] NUMBER [_WHITESPACE] ]] ">"
+net_type: LORA | HN
+strength: NUMBER | LIST
 local: "@"
 HR: "HR"
 LORA: "lora"
@@ -23,7 +24,8 @@ HN: "hypernet"
 WHITESPACE: /\s+/
 _WHITESPACE: /\s+/
 plain: /([^\\\[\]()<>:|]|\\.)+/
-filename: /([^<>:]|\\.)+/                    
+filename: /([^<>:]|\\.)+/
+LIST: [_WHITESPACE] NUMBER [_WHITESPACE] "," [_WHITESPACE] NUMBER [_WHITESPACE] ("," [_WHITESPACE] NUMBER [_WHITESPACE])*
 %import common.SIGNED_NUMBER -> NUMBER
 """, tree_class=WeightedTree)
 
@@ -32,6 +34,15 @@ def parse_prompt(prompt, steps, HR=False):
         return [(steps, [["", 1.0]])]
 
     def extract(tree, step, HR=False):
+        def resolve_strength(node, step, HR, weight):
+            strength = node.children[0]
+
+            if strength.type == "NUMBER":
+                return float(strength)
+            elif strength.type == "LIST":
+                return [float(s.strip()) for s in strength.split(",")]
+                        
+            return 1.0
         def propagate(node, output, step, HR, weight):
             if type(node) == WeightedTree:
                 node.weight = weight
@@ -65,11 +76,14 @@ def parse_prompt(prompt, steps, HR=False):
 
                     unet, clip = 1.0, None
                     if children[2]:
-                        unet = float(children[2].children[0])
+                        unet = resolve_strength(children[2], step, HR, weight)
                     if children[3]:
-                        clip = float(children[3].children[0])
+                        clip = resolve_strength(children[3], step, HR, weight)
                     if clip == None:
-                        clip = unet
+                        if type(unet) == list:
+                            clip = 1.0
+                        else:
+                            clip = unet
 
                     output.append((name, unet, clip, local))
                     children = []
@@ -341,7 +355,17 @@ class ConditioningSchedule():
             for k, v in network.items():
                 if v[-1]:
                     continue
-                global_networks[k] = max(global_networks.get(k, -10), v[idx])
+
+                a = v[idx]
+                b = global_networks.get(k, -10)
+
+                if type(a) == float and type(b) == float:
+                    global_networks[k] = max(a, b)
+                    continue
+
+                a_avg = sum(a)/len(a) if type(a) == list else a
+                b_avg = sum(b)/len(b) if type(b) == list else b
+                global_networks[k] = a if a_avg > b_avg else b
 
         for k, v in global_networks.items():
             for network in local_networks:

@@ -9,12 +9,9 @@ import safetensors.torch
 
 import utils
 
-def relative_file(file):
-    return os.path.join(os.path.dirname(os.path.abspath(__file__)), file)
-
 def SDv1_convert(state_dict):
     mapping = {}
-    with open(relative_file(os.path.join("mappings", "SDv1_mapping.txt"))) as file:
+    with open(utils.relative_file(os.path.join("mappings", "SDv1_mapping.txt"))) as file:
         for line in file:
             src, dst = line.strip().split(" TO ")
             mapping[src] = dst
@@ -54,7 +51,7 @@ def SDv1_convert(state_dict):
 
 def SDv1_revert(state_dict):
     mapping = {}
-    with open(relative_file(os.path.join("mappings", "SDv1_mapping.txt"))) as file:
+    with open(utils.relative_file(os.path.join("mappings", "SDv1_mapping.txt"))) as file:
         for line in file:
             if line.split('.',1)[0] in {"model", "first_stage_model", "cond_stage_model"}:
                 src, dst = line.strip().split(" TO ")
@@ -77,7 +74,7 @@ def SDv1_revert(state_dict):
 
 def CN_convert(state_dict):
     mapping = {}
-    with open(relative_file(os.path.join("mappings", "CN_mapping.txt"))) as file:
+    with open(utils.relative_file(os.path.join("mappings", "CN_mapping.txt"))) as file:
         for line in file:
             src, dst = line.strip().split(" TO ")
             mapping[src] = dst
@@ -99,7 +96,7 @@ def CN_convert(state_dict):
 
 def SDv2_revert(state_dict):
     mapping = {}
-    with open(relative_file(os.path.join("mappings", "SDv2_mapping.txt"))) as file:
+    with open(utils.relative_file(os.path.join("mappings", "SDv2_mapping.txt"))) as file:
         for line in file:
             src, dst = line.strip().split(" TO ")
             mapping[dst] = src
@@ -135,7 +132,7 @@ def SDv2_revert(state_dict):
 
 def SDv2_convert(state_dict):
     mapping = {}
-    with open(relative_file(os.path.join("mappings", "SDv2_mapping.txt"))) as file:
+    with open(utils.relative_file(os.path.join("mappings", "SDv2_mapping.txt"))) as file:
         for line in file:
             src, dst = line.strip().split(" TO ")
             mapping[src] = dst
@@ -179,7 +176,7 @@ def SDv2_convert(state_dict):
 
 def SDXL_Base_revert(state_dict):
     mapping = {}
-    with open(relative_file(os.path.join("mappings", "SDXL-Base_mapping.txt"))) as file:
+    with open(utils.relative_file(os.path.join("mappings", "SDXL-Base_mapping.txt"))) as file:
         for line in file:
             src, dst = line.strip().split(" TO ")
             mapping[dst] = src
@@ -217,7 +214,7 @@ def SDXL_Base_revert(state_dict):
 
 def SDXL_Base_convert(state_dict):
     mapping = {}
-    with open(relative_file(os.path.join("mappings", "SDXL-Base_mapping.txt"))) as file:
+    with open(utils.relative_file(os.path.join("mappings", "SDXL-Base_mapping.txt"))) as file:
         for line in file:
             src, dst = line.strip().split(" TO ")
             mapping[src] = dst
@@ -257,7 +254,7 @@ def SDXL_Base_convert(state_dict):
 
 def clean_component(state_dict):
     valid = set()
-    with open(relative_file(os.path.join("mappings", "COMP_valid.txt"))) as file:
+    with open(utils.relative_file(os.path.join("mappings", "COMP_valid.txt"))) as file:
         for line in file:
             valid.add(line.strip())
     
