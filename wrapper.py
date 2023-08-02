@@ -260,7 +260,7 @@ class GenerationParameters():
 
     def load_models(self, unet_nets, clip_nets):
         if self.merge_checkpoint_recipe:
-            merge.merge_checkpoint(self, self.merge_checkpoint_recipe, unet_nets, clip_nets)
+            self.merge_lora_sources = merge.merge_checkpoint(self, self.merge_checkpoint_recipe)
         else:
             self.storage.reset_merge(["UNET"])
             if not self.unet or type(self.unet) == str:
@@ -548,6 +548,9 @@ class GenerationParameters():
         else:
             self.storage.reset_merge(["LoRA"])
 
+        if self.merge_lora_sources:
+            keep_models += self.merge_lora_sources
+
         if lora_names:
             self.set_status("Loading LoRAs")
             self.storage.enforce_network_limit(lora_names + keep_models, "LoRA")
@@ -560,7 +563,7 @@ class GenerationParameters():
                 if is_static:
                     lora.to("cpu", torch.float16)
         else:
-            self.storage.enforce_network_limit([], "LoRA")
+            self.storage.enforce_network_limit(keep_models, "LoRA")
 
         if hn_names:
             self.set_status("Loading Hypernetworks")

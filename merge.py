@@ -33,7 +33,114 @@ def weighted_sum(a, b, alpha):
 def add_difference(a, b, c, alpha):
     return a + alpha*(b - c)
 
-def do_checkpoint_merge(self, inputs, alpha, merge_function):
+def add(a, b, alpha):
+    return a + alpha*b
+
+def difference(a, b, alpha):
+    return alpha*(a - b)
+
+def get_result_history(recipe, result_name):
+    index = int(result_name.split("_")[-1])
+    full_op = recipe[index]
+
+    important_keys = ["operation", "alpha", "model_a", "model_b", "model_c", "clip_alpha", "rank", "conv_rank"]
+    operation = {k:full_op[k] for k in important_keys if k in full_op}
+
+    for k in ["model_a", "model_b", "model_c"]:
+        if not k in operation:
+            continue
+        if operation[k].startswith("_result_"):
+            operation[k] = get_result_history(recipe, operation[k])
+    
+    return operation
+
+def get_required_model_names(self, operation, prune=False):
+    name = base64_encode(operation)
+    if name in self.storage.loaded["UNET"] and prune:
+        return [name]
+    names = [name]
+    for k in ["model_a", "model_b", "model_c"]:
+        if not k in operation:
+            continue
+        if type(operation[k]) == dict:
+            names += get_required_model_names(self, operation[k], prune)
+        else:
+            names += [operation[k]]
+    return names
+
+def get_base_model_names(self, operation):
+    names = []
+    for k in ["model_a", "model_b", "model_c"]:
+        if not k in operation:
+            continue
+        if type(operation[k]) == dict:
+            names += get_base_model_names(self, operation[k])
+        else:
+            names += [operation[k]]
+    return names
+
+def do_unet_insert_lora(self, inputs, alpha):
+    base_input, lora_input = inputs
+
+    base_state_dict = base_input.state_dict()
+    lora_state_dict = lora_input.compose()
+
+    key_mapping = None
+    if type(alpha) == list:
+        key_mapping = block_mapping(len(alpha))
+
+    out_state_dict = {}
+
+    self.set_status("Merging")
+
+    for k in base_state_dict:
+        if k.endswith(".weight"):
+            lora_key = "lora_unet_" + k.rsplit(".",1)[0].replace(".","_")
+            if lora_key in lora_state_dict:
+                if key_mapping:
+                    out_state_dict[k] = add(base_state_dict[k], lora_state_dict[lora_key], alpha[key_mapping[k]])
+                else:
+                    out_state_dict[k] = add(base_state_dict[k], lora_state_dict[lora_key], alpha)
+                continue
+        out_state_dict[k] = base_state_dict[k].clone()
+
+    out_state_dict["metadata"] = {
+        "model_type": base_input.model_type,
+        "model_variant": base_input.model_variant,
+        "prediction_type": base_input.prediction_type
+    }
+
+    out = models.UNET.from_model("", out_state_dict, self.storage.dtype)
+    
+    return out
+
+def do_clip_insert_lora(self, inputs, alpha):
+    base_input, lora_input = inputs
+
+    base_state_dict = base_input.state_dict()
+    lora_state_dict = lora_input.compose()
+
+    out_state_dict = {}
+
+    self.set_status("Merging")
+
+    for k in base_state_dict:
+        if k.endswith(".weight"):
+            lora_key = "lora_te_" + k.rsplit(".",1)[0].replace(".","_")
+            if lora_key in lora_state_dict:
+                out_state_dict[k] = add(base_state_dict[k], lora_state_dict[lora_key], alpha)
+                continue
+        out_state_dict[k] = base_state_dict[k].clone()
+
+    out_state_dict["metadata"] = {
+        "model_type": base_input.model_type
+    }
+
+    out = models.CLIP.from_model("", out_state_dict, self.storage.dtype)
+    
+    return out
+
+def do_unet_merge(self, inputs, alpha, merge_function):
     arch = set([(m.model_type, m.model_variant) for m in inputs])
     if len(arch) != 1:
         raise Exception("Incompatible model architectures: " + str(arch))
@@ -65,6 +172,144 @@ def do_checkpoint_merge(self, inputs, alpha, merge_function):
     out = models.UNET.from_model("", out_state_dict, self.storage.dtype)
     
     return out
+
+def do_clip_merge(self, inputs, alpha, merge_function):
+    arch = set([m.model_type for m in inputs])
+    if len(arch) != 1:
+        raise Exception("Incompatible model architectures: " + str(arch))
+    
+    state_dicts = [m.state_dict() for m in inputs]
+
+    out_state_dict = {}
+
+    self.set_status("Merging")
+
+    for k in state_dicts[0]:
+        out_state_dict[k] = merge_function(*[sd[k] for sd in state_dicts], alpha)
+
+    out_state_dict["metadata"] = {
+        "model_type": inputs[0].model_type
+    }
+
+    out = models.CLIP.from_model("", out_state_dict, self.storage.dtype)
+    
+    return out
+
+def do_recursive_checkpoint_merge(self, operation):
+    operation_name = base64_encode(operation)
+
+    if operation_name in self.storage.loaded["UNET"] and operation_name in self.storage.loaded["CLIP"]:
+        return operation_name
+
+    inputs = []
+
+    for k in ["model_a", "model_b", "model_c"]:
+        if not k in operation:
+            continue
+        if type(operation[k]) == dict:
+            name = do_recursive_checkpoint_merge(self, operation[k])
+            inputs += [name]
+        else:
+            inputs += [operation[k]]   
+
+    for comp in ["UNET", "CLIP"]:
+        input_comps = []
+        for name in inputs:
+            input_comp = comp
+            if "lora"+os.path.sep in name.lower():
+                input_comp = "LoRA"
+            input_comps += [self.storage.get_component(name, input_comp, torch.device("cpu"))]
+        
+        alpha = operation['alpha']
+        clip_alpha = operation.get('clip_alpha', 1.0)
+
+        if comp == "UNET":
+            if operation["operation"] == "Insert LoRA":
+                result = do_unet_insert_lora(self, input_comps, alpha)
+            elif operation["operation"] == "Weighted Sum":
+                result = do_unet_merge(self, input_comps, alpha, weighted_sum)
+            elif operation["operation"] == "Add Difference":
+                result = do_unet_merge(self, input_comps, alpha, add_difference)
+        elif comp == "CLIP":
+            if operation["operation"] == "Insert LoRA":
+                result = do_clip_insert_lora(self, input_comps, clip_alpha)
+            elif operation["operation"] == "Weighted Sum":
+                result = do_clip_merge(self, input_comps, clip_alpha, weighted_sum)
+            elif operation["operation"] == "Add Difference":
+                result = do_clip_merge(self, input_comps, clip_alpha, add_difference)
+        
+        self.storage.add(comp, operation_name, result)
+
+    return operation_name
+
+def merge_checkpoint(self, recipe):
+    self.set_status("Parsing")
+
+    final_result_name = f"_result_{len(recipe)-1}"
+
+    self.set_status("Loading VAE")
+
+    vae_sources = {}
+    for i, op in enumerate(recipe):
+        input_models = [op[k] for k in ["model_a", "model_b", "model_c"] if k in op]
+        output_model = f"_result_{i}"
+        vae_sources[output_model] = input_models[op.get("vae_source", 0)]
+    
+    vae_source = final_result_name
+    while vae_source in vae_sources:
+        vae_source = vae_sources[vae_source]
+    
+    self.vae = self.storage.get_vae(vae_source, self.device)
+    self.vae_name = vae_source
+
+    self.set_status("Loading Sources")
+
+    self.storage.uncap_ram = True
+    
+    op = get_result_history(recipe, final_result_name)
+    result_name = base64_encode(op)
+
+    all = get_required_model_names(self, op, prune=False)
+    required = get_required_model_names(self, op, prune=True)
+
+    all_lora = [r for r in all if "lora"+os.path.sep in r.lower()]
+    required_lora = [r for r in required if "lora"+os.path.sep in r.lower()]
+
+    required = [r for r in required if not r in required]
+
+    for comp in ["UNET", "CLIP"]:
+        useless = []
+        for name in self.storage.loaded[comp]:
+            if not name in required and not name in all:
+                useless += [name]
+                continue
+
+        for name in useless:
+            self.storage.remove(comp, name)
+
+        for name in required:
+            if not "." in name:
+                continue
+            self.storage.get_component(name, comp, torch.device("cpu"))
+
+    for name in required_lora:
+        self.storage.get_component(name, "LoRA", torch.device("cpu"))
+
+    self.set_status("Merging")
+    do_recursive_checkpoint_merge(self, op)
+
+    self.storage.clear_file_cache()
+
+    self.unet = self.storage.get_unet(result_name, self.device)
+    self.unet_name = self.merge_name + ".safetensors"
+
+    self.clip = self.storage.get_clip(result_name, self.device)
+    self.clip.set_textual_inversions(self.storage.get_embeddings(self.device))
+    self.clip_name = self.merge_name + ".safetensors"
+
+    self.storage.uncap_ram = True
+
+    return all_lora
 
 def get_lora_key_alpha(key, key_mapping, alpha):
     key = key.replace("lora_unet_", "")
@@ -129,50 +374,10 @@ def do_lora_merge(self, name, inputs, rank, conv_rank, alpha, clip_alpha, merge_
     
     return out_lora
 
-def get_result_history(recipe, result_name):
-    index = int(result_name.split("_")[-1])
-    full_op = recipe[index]
-
-    important_keys = ["operation", "alpha", "model_a", "model_b", "model_c", "clip_alpha", "rank", "conv_rank"]
-    operation = {k:full_op[k] for k in important_keys if k in full_op}
-
-    for k in ["model_a", "model_b", "model_c"]:
-        if not k in operation:
-            continue
-        if operation[k].startswith("_result_"):
-            operation[k] = get_result_history(recipe, operation[k])
-    
-    return operation
-
-def get_required_model_names(self, operation, prune=False):
-    name = base64_encode(operation)
-    if name in self.storage.loaded["UNET"] and prune:
-        return [name]
-    names = [name]
-    for k in ["model_a", "model_b", "model_c"]:
-        if not k in operation:
-            continue
-        if type(operation[k]) == dict:
-            names += get_required_model_names(self, operation[k], prune)
-        else:
-            names += [operation[k]]
-    return names
-
-def get_base_model_names(self, operation):
-    names = []
-    for k in ["model_a", "model_b", "model_c"]:
-        if not k in operation:
-            continue
-        if type(operation[k]) == dict:
-            names += get_base_model_names(self, operation[k])
-        else:
-            names += [operation[k]]
-    return names
-
-def do_recursive_merge(self, operation, comp="UNET"):
+def do_recursive_lora_merge(self, operation):
     operation_name = base64_encode(operation)
 
-    if operation_name in self.storage.loaded[comp]:
+    if operation_name in self.storage.loaded["LoRA"]:
         return operation_name
 
     inputs = []
@@ -181,12 +386,12 @@ def do_recursive_merge(self, operation, comp="UNET"):
         if not k in operation:
             continue
         if type(operation[k]) == dict:
-            name = do_recursive_merge(self, operation[k])
+            name = do_recursive_lora_merge(self, operation[k])
             inputs += [name]
         else:
             inputs += [operation[k]]
 
-    inputs = [self.storage.get_component(name, comp, torch.device("cpu")) for name in inputs]
+    inputs = [self.storage.get_component(name, "LoRA", torch.device("cpu")) for name in inputs]
 
     alpha = operation['alpha']
 
@@ -196,96 +401,15 @@ def do_recursive_merge(self, operation, comp="UNET"):
     if operation["operation"] == "Add Difference":   
         merge_function = add_difference
 
-    if comp == "UNET":
-        result = do_checkpoint_merge(self, inputs, alpha, merge_function)
-    elif comp == "LoRA":
-        net_name = f"{operation_name}.safetensors"
-        clip_alpha = operation['clip_alpha']
-        rank = operation['rank']
-        conv_rank = operation['conv_rank']
-        result = do_lora_merge(self, net_name, inputs, rank, conv_rank, alpha, clip_alpha, merge_function)
+    net_name = f"{operation_name}.safetensors"
+    clip_alpha = operation['clip_alpha']
+    rank = operation['rank']
+    conv_rank = operation['conv_rank']
+    result = do_lora_merge(self, net_name, inputs, rank, conv_rank, alpha, clip_alpha, merge_function)
     
-    self.storage.add(comp, operation_name, result)
+    self.storage.add("LoRA", operation_name, result)
 
     return operation_name
-
-def merge_checkpoint(self, recipe, unet_nets, clip_nets):
-    self.set_status("Parsing")
-
-    needed_until = {}
-
-    unet_sources = []
-    vae_sources = {}
-    clip_sources = {}
-    
-    for i, op in enumerate(recipe):
-        input_models = [op[k] for k in ["model_a", "model_b", "model_c"] if k in op]
-        output_model = f"_result_{i}"
-        all_models = input_models + [output_model]
-        for m in all_models:
-            if not m in unet_sources and not m.startswith("_result"):
-                unet_sources += [m]
-            needed_until[m] = i
-
-        vae_sources[output_model] = input_models[op["vae_source"]]
-        clip_sources[output_model] = input_models[op["clip_source"]]
-    
-    final_result_name = f"_result_{len(recipe)-1}"
-
-    vae_source = final_result_name
-    while vae_source in vae_sources:
-        vae_source = vae_sources[vae_source]
-
-    clip_source = final_result_name
-    while clip_source in clip_sources:
-        clip_source = clip_sources[clip_source]
-
-    self.storage.uncap_ram = True
-    
-    op = get_result_history(recipe, final_result_name)
-    result_name = base64_encode(op)
-
-    all = get_required_model_names(self, op, prune=False)
-    required = get_required_model_names(self, op, prune=True)
-
-    for comp in ["UNET", "CLIP"]:
-        for name in list(self.storage.loaded[comp].keys()):
-            if name in required:
-                if name == result_name:
-                    self.storage.check_attached_networks(name, comp, unet_nets)
-                else:
-                    self.storage.check_attached_networks(name, comp, {})
-
-    self.set_status("Loading CLIP")
-    self.clip = self.storage.get_clip(clip_source, self.device, clip_nets)
-    self.clip_name = clip_source
-    self.clip.set_textual_inversions(self.storage.get_embeddings(self.device))
-
-    self.set_status("Loading VAE")
-    self.vae = self.storage.get_vae(vae_source, self.device)
-    self.vae_name = vae_source
-
-    self.set_status("Loading Models")
-
-    useless = []
-    for name in self.storage.loaded["UNET"]:
-        if name in required or name in all:
-            continue
-        useless += [name]
-
-    for name in useless:
-        self.storage.remove("UNET", name)
-
-    for name in required:
-        if "." in name:
-            self.storage.get_component(name, "UNET", torch.device("cpu"))
-
-    self.set_status("Merging")
-    do_recursive_merge(self, op, "UNET")
-
-    self.storage.clear_file_cache()
-    self.unet = self.storage.get_unet(result_name, self.device, unet_nets)
-    self.unet_name = self.merge_name + ".safetensors"
 
 def merge_lora(self, recipe):
     self.set_status("Parsing")
@@ -325,7 +449,7 @@ def merge_lora(self, recipe):
             self.storage.get_component(name, "LoRA", torch.device("cpu"))
 
     self.set_status("Merging")
-    result_name = do_recursive_merge(self, op, "LoRA")
+    result_name = do_recursive_lora_merge(self, op)
 
     keep = [n for n in all if n != result_name]
 

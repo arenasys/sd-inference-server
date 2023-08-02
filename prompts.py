@@ -13,7 +13,7 @@ deemphasis: "[" prompt "]"
 numeric: "(" prompt ":" [_WHITESPACE] NUMBER [_WHITESPACE]")"
 scheduled: "[" [prompt ":"] prompt ":" [_WHITESPACE] specifier [_WHITESPACE]"]"
 alternate: "[" prompt ("|" prompt)+ "]"
-addnet: "<" [ local ] net_type ":" plain [ ":" [_WHITESPACE] specifier [_WHITESPACE] [ ":" [_WHITESPACE] specifier [_WHITESPACE] ]] ">"
+addnet: "<" [ local ] net_type ":" filename [ ":" [_WHITESPACE] specifier [_WHITESPACE] [ ":" [_WHITESPACE] specifier [_WHITESPACE] ]] ">"
 net_type: LORA | HN
 specifier: NUMBER | HR
 local: "@"
@@ -23,6 +23,7 @@ HN: "hypernet"
 WHITESPACE: /\s+/
 _WHITESPACE: /\s+/
 plain: /([^\\\[\]()<>:|]|\\.)+/
+filename: /([^<>:]|\\.)+/                    
 %import common.SIGNED_NUMBER -> NUMBER
 """, tree_class=WeightedTree)
 

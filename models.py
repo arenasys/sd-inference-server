@@ -330,7 +330,8 @@ class AdditionalNetworks():
         def attach_lora(self, module, static):
             if static:
                 weight = module.get_weight()
-                self.original_module.weight += weight * self.parent.get_strength(0, module.net_name)
+                strength =  self.parent.get_strength(0, module.net_name)
+                self.original_module.weight += weight * strength
             else:
                 self.loras.append(module)
         
