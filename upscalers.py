@@ -42,12 +42,17 @@ def upscale_super_resolution(images, model, width, height):
 
     with torch.inference_mode():
         for i, image in enumerate(images):
-            while image.size[0] < width or image.size[1] < height:
+            last = -1
+            while last < image.size[0] and (image.size[0] < width or image.size[1] < height):
+                last = image.size[0]
                 img = utils.TO_TENSOR(images[i]).unsqueeze(0)
                 img = img.to(model.device, model.dtype)
                 out = model(img)
                 out = out.clamp_(0, 1)
                 image = utils.FROM_TENSOR(out.squeeze(0))
+            if last >= image.size[0]:
+                raise RuntimeError(f"SR model isnt upscaling ({last} to {image.size[0]})")
+
             images[i] = upscale_single(image, transforms.InterpolationMode.LANCZOS, width, height)
     
     return images
