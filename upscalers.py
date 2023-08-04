@@ -45,7 +45,7 @@ def upscale_super_resolution(images, model, width, height):
             last = -1
             while last < image.size[0] and (image.size[0] < width or image.size[1] < height):
                 last = image.size[0]
-                img = utils.TO_TENSOR(images[i]).unsqueeze(0)
+                img = utils.TO_TENSOR(image).unsqueeze(0)
                 img = img.to(model.device, model.dtype)
                 out = model(img)
                 out = out.clamp_(0, 1)
