@@ -265,9 +265,9 @@ def merge_checkpoint(self, recipe):
     for comp in ["UNET", "CLIP"]:
         useless = []
         for name in self.storage.loaded[comp]:
-            if not name in required and not name in all:
-                useless += [name]
+            if name in required or (name in all and not self.minimal_vram):
                 continue
+            useless += [name]
 
         for name in useless:
             self.storage.remove(comp, name)
@@ -417,7 +417,7 @@ def merge_lora(self, recipe):
 
     useless = []
     for name in self.storage.loaded["LoRA"]:
-        if name in required or name in all:
+        if name in required or (name in all and not self.minimal_vram):
             continue
         useless += [name]
 
