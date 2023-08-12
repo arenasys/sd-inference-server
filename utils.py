@@ -371,7 +371,7 @@ class SafeUnpickler:
     class Unpickler(pickle.Unpickler):
         def is_allowed(self, module, name):
             root = module.split(".",1)[0]
-            if root in {"collections", "torch"}:
+            if root in {"collections", "torch", "_codecs", "numpy"}:
                 return True
             if root in {"__builtin__", "__builtins__"}:
                 if name in {"list", "tuple", "set", "frozenset", "dict"}:
@@ -386,6 +386,7 @@ class SafeUnpickler:
                 return SafeUnpickler.Dummy
     
     def load(*args, **kwargs):
+        SafeUnpickler.ignored = []
         return SafeUnpickler.Unpickler(*args, **kwargs).load()
 
 def load_pickle(file, map_location="cpu"):
