@@ -24,8 +24,6 @@ class GuidedDenoiser():
 
     def get_conditioning(self):
         self.compositions = self.conditioning_schedule.get_compositions(self.dtype, self.device)
-        self.add_time_ids = torch.tensor([(1024,1024) + (0,0) + (1024,1024)], dtype=self.unet.dtype)
-        self.add_time_ids = torch.cat([self.add_time_ids, self.add_time_ids], dim=0)
 
     def set_mask(self, mask, original):
         self.mask = mask.to(self.dtype)

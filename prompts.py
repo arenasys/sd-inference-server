@@ -236,7 +236,7 @@ def encode_tokens(clip, chunks, clip_skip=1):
     # combine all chunk encodings
     encoding = torch.hstack(chunk_encodings)
     if all([p != None for p in pooled_text_embs]):
-        pooled_text_emb = torch.hstack(pooled_text_embs)
+        pooled_text_emb = pooled_text_embs[0]
     else:
         pooled_text_emb = None
     
