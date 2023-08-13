@@ -17,7 +17,7 @@ except:
 TO_TENSOR = transforms.ToTensor()
 FROM_TENSOR = transforms.ToPILImage()
 
-BLOCK_MAPPINGS = {}
+MAPPINGS = {}
 
 def preprocess_images(images):
     def process(image):
@@ -399,11 +399,11 @@ def relative_file(file):
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), file)
 
 def block_mapping(labels):
-    global BLOCK_MAPPINGS
+    global MAPPINGS
     name = "MBW_4" if labels == 9 else "MBW_12"
 
-    if name in BLOCK_MAPPINGS:
-        return BLOCK_MAPPINGS[name]
+    if name in MAPPINGS:
+        return MAPPINGS[name]
 
     mapping = {}
     labels = []
@@ -414,15 +414,15 @@ def block_mapping(labels):
                 labels += [dst]
             mapping[src] = labels.index(dst)
             
-    BLOCK_MAPPINGS[name] = mapping
+    MAPPINGS[name] = mapping
     return mapping
 
 def block_mapping_lora(labels):
-    global BLOCK_MAPPINGS
+    global MAPPINGS
     name = "MBW_4_lora" if labels == 9 else "MBW_12_lora"
 
-    if name in BLOCK_MAPPINGS:
-        return BLOCK_MAPPINGS[name]
+    if name in MAPPINGS:
+        return MAPPINGS[name]
 
     mapping = block_mapping(labels)
 
@@ -434,5 +434,30 @@ def block_mapping_lora(labels):
         kk = "lora_unet_" + k.rsplit(".",1)[0].replace(".", "_")
         lora_mapping[kk] = v
             
-    BLOCK_MAPPINGS[name] = lora_mapping
+    MAPPINGS[name] = lora_mapping
     return lora_mapping
+
+def lora_mapping(key):
+    global MAPPINGS
+    name = "SDXL-Base"
+
+    if not name in MAPPINGS:
+        mapping = {}
+        with open(relative_file(os.path.join("mappings", f"{name}_mapping.txt"))) as file:
+            for line in file:
+                dst, src = line.strip().split(" TO ")
+                if src.startswith("SDXL-Base.UNET.") and src.endswith(".weight"):
+                    dst = "unet." + dst[len("model.diffusion_model."):]
+                    src = "unet." + src[len("SDXL-Base.UNET."):]
+                    dst, src = dst.rsplit(".", 1)[0], src.rsplit(".", 1)[0]
+                    mapping[src] = dst
+        MAPPINGS[name] = mapping
+    
+    for src, dst in MAPPINGS[name].items():
+        if key == src:
+            return dst
+    print("NOMAP", key)
+
+    return key
+    
+

@@ -276,7 +276,9 @@ class LoRA(LoRANetwork):
 
         utils.cast_state_dict(state_dict, dtype)
 
-        model = LoRA("lora:"+name, state_dict)
+        net_name = "lora:" + name.rsplit(".",1)[0].rsplit(os.path.sep,1)[-1]
+        model = LoRA(net_name)
+        model.from_state_dict(state_dict)
         model.to(torch.device("cpu"), dtype)
 
         return model
@@ -352,7 +354,7 @@ class AdditionalNetworks():
         if "CLIP" in model_type:
             self.modules = self.hijack_model(model, 'te', ["CLIPAttention", "CLIPMLP"])
         elif "UNET" in model_type:
-            self.modules = self.hijack_model(model, 'unet', ["Transformer2DModel", "Attention"])
+            self.modules = self.hijack_model(model, 'unet', ["Transformer2DModel", "Attention", "ResnetBlock2D", "Downsample2D", "Upsample2D"])
         else:
             raise ValueError(f"INVALID TARGET {model_type}")
         self.model_type = model_type
@@ -384,13 +386,25 @@ class AdditionalNetworks():
     def set_strength_override(self, name, strength):
         self.strength_override[name] = strength
 
+    def get_name(self, model, key):
+        if type(model) == UNET and model.model_type == "SDXL-Base":
+            key = utils.lora_mapping(key)
+        return key.replace(".", "_")
+
     def hijack_model(self, model, prefix, targets):
         modules = {}
         for module_name, module in model.named_modules():
+            if not module.__class__.__name__ in targets:
+                continue
             for child_name, child_module in module.named_modules():
                 child_class = child_module.__class__.__name__
+                if not child_name:
+                    continue
+
                 if child_class == "Linear" or child_class == "Conv2d":
-                    name = (prefix + '.' + module_name + '.' + child_name).replace('.', '_')
+                    name = self.get_name(model, prefix + '.' + module_name + '.' + child_name)
+                    if name in modules:
+                        continue
                     modules[name] = AdditionalNetworks.AdditionalModule(self, name, child_module)
                     child_module.forward = modules[name].forward
         return modules

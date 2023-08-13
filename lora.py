@@ -7,30 +7,51 @@ import tqdm
 # adapted from Kohyas LoRA code https://github.com/kohya-ss/sd-scripts/blob/main/networks/lora.py
 
 class LoRAModule(torch.nn.Module):
-    def __init__(self, net_name, name, lora_up, lora_down, alpha):
+    def __init__(self, net_name, layer_name, shape, dim, alpha, kernel=None, stride=None, padding=None):
         super().__init__()
         self.net_name = net_name
-        self.name = name
+        self.layer_name = layer_name
 
-        if "unet" in name and ("_proj_" in name or "_conv" in name):
+        if kernel != None:
+            self.lora_down = torch.nn.Conv2d(shape[1], dim, (kernel, kernel), (stride, stride), (padding, padding), bias=False)
+            self.lora_up = torch.nn.Conv2d(dim, shape[0], (1, 1), bias=False)
+        else:
+            self.lora_down = torch.nn.Linear(shape[1], dim, bias=False)
+            self.lora_up = torch.nn.Linear(dim, shape[0], bias=False)
+
+        self.register_buffer("alpha", torch.tensor(alpha))
+        self.register_buffer("dim", torch.tensor(dim), False)
+
+    def from_weights(net_name, layer_name, lora_up, lora_down, alpha):
+        shape = (lora_up.shape[0], lora_down.shape[1])
+        dim = lora_down.shape[0]
+
+        if len(lora_down.shape) > 2:
             kernel = lora_down.shape[2]
             padding = 0
             stride = 1
 
             if kernel == 3:
                 padding = 1
-            if "downsamplers" in name:
+            if "downsamplers" in layer_name:
                 stride = 2
 
-            self.lora_down = torch.nn.Conv2d(lora_down.shape[1], lora_down.shape[0], (kernel, kernel), (stride, stride), (padding, padding), bias=False)
-            self.lora_up = torch.nn.Conv2d(lora_up.shape[1], lora_up.shape[0], (1, 1), bias=False)
+            return LoRAModule(net_name, layer_name, shape, dim, alpha, kernel, stride, padding)
         else:
-            self.lora_down = torch.nn.Linear(lora_down.shape[1], lora_down.shape[0], bias=False)
-            self.lora_up = torch.nn.Linear(lora_up.shape[1], lora_up.shape[0], bias=False)
+            return LoRAModule(net_name, layer_name, shape, dim, alpha)
         
-        
-        self.register_buffer("alpha", torch.tensor(alpha or lora_down.shape[0]))
-        self.register_buffer("dim", torch.tensor(lora_down.shape[0]), False)
+    def from_module(net_name, layer_name, module, dim, alpha):
+        if module.__class__.__name__ == "Conv2d":
+            in_dim = module.in_channels
+            out_dim = module.out_channels
+            kernel = module.kernel_size[0]
+            stride = module.stride[0]
+            padding = module.padding[0]
+            return LoRAModule(net_name, layer_name, (out_dim, in_dim), dim, alpha, kernel, stride, padding)
+        else:
+            in_dim = module.in_features
+            out_dim = module.out_features
+            return LoRAModule(net_name, layer_name, (out_dim, in_dim), dim, alpha)
 
     def get_weight(self):
         f = (self.alpha / self.dim)
@@ -59,13 +80,22 @@ class LoRAModule(torch.nn.Module):
         return self
 
 class LoRANetwork(torch.nn.Module):
-    def __init__(self, name, state_dict) -> None:
+    def __init__(self, net_name) -> None:
         super().__init__()
-        self.net_name = "lora:" + name.rsplit(".",1)[0].rsplit(os.path.sep,1)[-1]
+        self.net_name = net_name
+        self.decomposition = {}
+
+    def from_state_dict(self, state_dict):
         self.build_modules(state_dict)
         self.load_state_dict(state_dict, strict=False)
 
-        self.decomposition = {}
+    def from_modules(self, modules, dim, alpha, conv=True):
+        for name, module in modules.items():
+            is_conv = "resnet" in name or "sample" in name
+            if is_conv and not conv:
+                continue
+            lora = LoRAModule.from_module(self.net_name, name, module, dim, alpha)
+            self.add_module(name, lora)
 
     def build_modules(self, state_dict):
         names = set([k.split(".")[0] for k in state_dict])
@@ -84,16 +114,16 @@ class LoRANetwork(torch.nn.Module):
             if name+".alpha" in state_dict:
                 alpha = state_dict[name+".alpha"].numpy()
 
-            lora = LoRAModule(self.net_name, name, up, down, alpha)
+            lora = LoRAModule.from_weights(self.net_name, name, up, down, alpha)
             self.add_module(name, lora)
 
     def compose(self):
         state_dict = {}
         self.to(torch.device("cpu"), torch.float32)
         for _, module in self.named_modules():
-            if not hasattr(module, "name"):
+            if not hasattr(module, "layer_name"):
                 continue
-            state_dict[module.name] = module.get_weight().to(torch.float16)
+            state_dict[module.layer_name] = module.get_weight().to(torch.float16)
         self.to(torch.device("cpu"), torch.float16)
         return state_dict
     
@@ -173,9 +203,9 @@ class LoRANetwork(torch.nn.Module):
             model.static[self.net_name] = model.get_strength(0, self.net_name)
 
         for _, module in self.named_modules():
-            if not hasattr(module, "name"):
+            if type(module) != LoRAModule:
                 continue
-            name = module.name.replace("lora_", "")
+            name = module.layer_name.replace("lora_", "")
             if name in model.modules:
                 model.modules[name].attach_lora(module, static)
 
