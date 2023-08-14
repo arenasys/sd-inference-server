@@ -33,7 +33,7 @@ class LoRAModule(torch.nn.Module):
 
             if kernel == 3:
                 padding = 1
-            if "downsamplers" in layer_name:
+            if "downsamplers" in layer_name or "op" in layer_name:
                 stride = 2
 
             return LoRAModule(net_name, layer_name, shape, dim, alpha, kernel, stride, padding)
