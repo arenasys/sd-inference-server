@@ -257,7 +257,8 @@ class DPM_2M_SDE(KSampler):
                 elif self.solver_type == 'midpoint':
                     x = x + 0.5 * (-h - eta_h).expm1().neg() * (1 / r) * (denoised - self.old_denoised)
 
-            x = x + self.sample_noise(sigmas[i], sigmas[i + 1]) * sigmas[i + 1] * (-2 * eta_h).expm1().neg().sqrt()# * s_noise
+            if self.eta:
+                x = x + self.sample_noise(sigmas[i], sigmas[i + 1]) * sigmas[i + 1] * (-2 * eta_h).expm1().neg().sqrt()# * s_noise
 
             self.h_last = h
 
