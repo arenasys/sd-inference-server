@@ -6,6 +6,7 @@ import tqdm
 import os
 import time
 import pickle
+import re
 
 DIRECTML_AVAILABLE = False
 try:
@@ -30,6 +31,26 @@ def postprocess_images(images):
         image = (image / 2 + 0.5).clamp(0, 1)
         return FROM_TENSOR(image)
     return [process(i) for i in images]
+
+def blur_areas(areas, blur, expand):
+    if not areas:
+        return []
+    out = []
+    for i in range(len(areas)):
+        o = []
+        for j in range(len(areas[i])):
+            a = areas[i][j]
+            if expand or blur:
+                b = a.copy()
+                if expand:
+                    b = b.filter(PIL.ImageFilter.MaxFilter(int(2*expand + 1)))
+                if blur:
+                    b = b.filter(PIL.ImageFilter.MaxFilter(int(blur*2 + 1)))
+                    b = b.filter(PIL.ImageFilter.GaussianBlur(blur))
+                a = PIL.ImageChops.lighter(a, b)
+            o += [a]
+        out += [o]
+    return out
 
 def preprocess_areas(areas, width, height):
     if not areas:
@@ -343,13 +364,41 @@ class CUDATimer:
         torch.cuda.synchronize()
         print(self.start.elapsed_time(self.end))
 
-def download(url, filename, callback):
-    folder = os.path.dirname(filename)
-    os.makedirs(folder, exist_ok=True)
+def download(url, path, progress_callback=None, started_callback=None, headers={}):
+    if os.path.isdir(path):
+        filename = None
+        folder = path
+    else:
+        filename = path
+        folder = os.path.dirname(path)
+        os.makedirs(folder, exist_ok=True)
+
+    resp = requests.get(url, stream=True, timeout=10, headers=headers, allow_redirects=True)
+    total = int(resp.headers.get('content-length', 0))
+
+    content_length = resp.headers.get("content-length", 0)
+    if not content_length:
+        raise RuntimeError(f"response is empty")
+
+    content_type = resp.headers.get("content-type", "unknown")
+    content_disposition = resp.headers.get("content-disposition", "")
+
+    if not content_type in {"application/zip", "binary/octet-stream", "application/octet-stream", "multipart/form-data"}:
+        if not (content_type == "unknown" and "attachment" in content_disposition):
+            raise RuntimeError(f"{content_type} content type is not supported")
+
+    if not filename:
+        if content_disposition:
+            filename = re.findall("filename=\"(.+)\";?", content_disposition)[0]
+        else:
+            filename = url.rsplit("/",-1)[-1]
+        filename = os.path.join(folder, filename)
+
+    if started_callback:
+        started_callback(filename, resp)
 
     desc = filename.rsplit(os.path.sep)[-1]
-    resp = requests.get(url, stream=True, timeout=10)
-    total = int(resp.headers.get('content-length', 0))
+
     last = None
     with open(filename+".tmp", 'wb') as file, tqdm.tqdm(desc=desc, total=total, unit='iB', unit_scale=True, unit_divisor=1024) as bar:
         for data in resp.iter_content(chunk_size=1024):
@@ -357,7 +406,8 @@ def download(url, filename, callback):
             bar.update(size)
             if not last or time.time() - last > 0.5:
                 last = time.time()
-                callback(bar.format_dict)
+                if progress_callback:
+                    progress_callback(bar.format_dict)
 
     os.rename(filename+".tmp", filename)
 

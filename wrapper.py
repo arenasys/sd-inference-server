@@ -333,7 +333,7 @@ class GenerationParameters():
             allowed += self.cn_annotator
         self.storage.clear_annotators(allowed)
 
-    def check_parameters(self, required, optional):
+    def check_parameters(self):
         for attr, value in DEFAULTS.items():
             if getattr(self, attr) == None:
                 setattr(self, attr, value)
@@ -606,9 +606,7 @@ class GenerationParameters():
     @torch.inference_mode()
     def txt2img(self):
         self.set_status("Configuring")
-        required = "unet, clip, vae, sampler, prompt, width, height, seed, scale, steps".split(", ")
-        optional = "clip_skip, eta, batch_size, hr_steps, hr_factor, hr_upscaler, hr_strength, hr_sampler, hr_eta, area".split(", ")
-        self.check_parameters(required, optional)
+        self.check_parameters()
         self.clear_annotators()
     
         self.set_status("Parsing")
@@ -657,9 +655,10 @@ class GenerationParameters():
         metadata = self.get_metadata("txt2img", self.width, self.height, batch_size, self.prompt, seeds, subseeds)
 
         if self.area:
+            area = utils.blur_areas(self.area, self.mask_blur, self.mask_expand)
             if self.keep_artifacts:
-                self.on_artifact("Area", self.area)
-            area = utils.preprocess_areas(self.area, self.width, self.height)
+                self.on_artifact("Area", area)
+            area = utils.preprocess_areas(area, self.width, self.height)
         else:
             area = []
         
@@ -716,6 +715,7 @@ class GenerationParameters():
                 self.attach_networks(hr_all_networks, *initial_networks, device)
 
         if self.area:
+            area = utils.blur_areas(self.area, self.mask_blur, self.mask_expand)
             area = utils.preprocess_areas(self.area, width, height)
 
         self.set_status("Encoding")
@@ -764,9 +764,7 @@ class GenerationParameters():
     @torch.inference_mode()
     def img2img(self):
         self.set_status("Configuring")
-        required = "unet, clip, vae, sampler, image, prompt, seed, scale, steps, strength".split(", ")
-        optional = "img2img_upscaler, mask, mask_blur, clip_skip, eta, batch_size, padding, width, height".split(", ")
-        self.check_parameters(required, optional)
+        self.check_parameters()
         self.clear_annotators()
 
         self.set_status("Parsing")
@@ -830,6 +828,7 @@ class GenerationParameters():
             for i in range(len(self.area)):
                 if self.mask and self.mask[i] != None:
                     self.area[i] = self.prepare_images(self.area[i], [extents[i]]*len(self.area[i]), width, height)
+            self.area = utils.blur_areas(self.area, self.mask_blur, self.mask_expand)
             if self.keep_artifacts:
                 self.on_artifact("Area", self.area)
             self.area = utils.preprocess_areas(self.area, width, height)
@@ -912,9 +911,7 @@ class GenerationParameters():
             self.upscale_model = self.storage.get_upscaler(self.img2img_upscaler, self.device)
 
         self.set_status("Configuring")
-        required = "image, img2img_upscaler, width, height".split(", ")
-        optional = "mask, mask_blur, padding".split(", ")
-        self.check_parameters(required, optional)
+        self.check_parameters()
 
         batch_size = self.get_batch_size()
 
@@ -999,7 +996,7 @@ class GenerationParameters():
     @torch.inference_mode()
     def manage(self):
         self.set_status("Configuring")
-        self.check_parameters(["operation"], [])
+        self.check_parameters()
 
         if self.operation == "build":
             self.build(self.file)
