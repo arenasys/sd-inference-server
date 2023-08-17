@@ -16,6 +16,7 @@ import time
 
 import storage
 import wrapper
+import utils
 
 import base64
 from cryptography.hazmat.primitives import hashes
@@ -26,6 +27,7 @@ import random
 
 DEFAULT_PASSWORD = "qDiffusion"
 FRAGMENT_SIZE = 1048576
+UPLOAD_IDS = {}
 
 def log_traceback(label):
     exc_type, exc_value, exc_tb = sys.exc_info()
@@ -75,6 +77,101 @@ def convert_all_paths(j):
             if type(v) == list or type(v) == dict:
                 convert_all_paths(j[k])
 
+def do_download(request, folder, id, callback):
+    type = request["type"]
+    url = request["url"]
+    token = request.get("token", None)
+    
+    def started(callback, label, id):
+        callback({"type":"download", "data":{"status": "started", "label": label}}, id)
+
+    def success(callback, id, label=None):
+        if label:
+            callback({"type":"download", "data":{"status": "success", "label": label}}, id)
+        else:
+            callback({"type":"download", "data":{"status": "success"}}, id)
+    
+    def error(callback, err, id, trace=""):
+        callback({"type":"download", "data":{"status": "error", "message": err, "trace": trace}}, id)
+
+    def gdownload(callback, folder, url, id):
+        try:
+            import gdown
+            parts = url.split("/")
+            g_id = None
+            if len(parts) == 4:
+                g_id = parts[3].split("=",1)[1].split("&",1)[0]
+            elif len(parts) == 7:
+                g_id = parts[5]
+            else:
+                raise Exception("Unknown URL format")
+            
+            started(callback, url, id)
+            file = gdown.download(output=folder+os.path.sep, id=g_id+"&confirm=t")
+            success(callback, id, label=str(file).split(os.path.sep)[-1])
+        except Exception as e:
+            trace = log_traceback("DOWNLOAD")
+            error(callback, str(e), id, trace)
+
+    def megadownload(callback, folder, url, id):
+        try:
+            import mega
+            started(callback, url, id)
+            file = mega.Mega().login().download_url(url, folder)
+            success(callback, id, label=str(file).split(os.path.sep)[-1])
+        except Exception as e:
+            trace = log_traceback("DOWNLOAD")
+            error(callback, str(e), id, trace)
+
+    def requests_download(callback, folder, url, headers, id):
+        def progress_callback(progress):
+            if not progress["rate"]:
+                return
+
+            value = progress["n"] / progress["total"]
+            rate = (progress["rate"] or 1) / (1024*1024)
+            eta = (progress["total"] - progress["n"]) / (progress["rate"] or 1)
+
+            callback({"type":"download", "data":{"status": "progress", "progress": value, "rate": rate, "eta": eta}}, id)
+
+        def started_callback(path, response):
+            filename = path.rsplit(os.path.sep)[-1]
+            started(callback, filename, id)
+        
+        try:
+            utils.download(url, folder, progress_callback, started_callback, headers)
+            success(callback, id)
+        except Exception as e:
+            trace = log_traceback("DOWNLOAD")
+            error(callback, str(e), id, trace)
+
+    folder = os.path.join(folder, type)
+
+    if not os.path.exists(folder):
+        os.mkdir(folder)
+    
+    if 'drive.google' in url:
+        thread = threading.Thread(target=gdownload, args=([callback, folder, url, id]))
+        thread.start()
+        return
+    if 'mega.nz' in url:
+        thread = threading.Thread(target=megadownload, args=([callback, folder, url, id]))
+        thread.start()
+        return
+    if 'civitai.com' in url:
+        if not "civitai.com/api/download/models" in url:
+            error(callback, "Unsupported URL", id)
+            return
+    if 'huggingface' in url:
+        url = url.replace("/blob/", "/resolve/")
+        if token:
+            thread = threading.Thread(target=requests_download, args=([callback, folder, url, {"Authorization": f"Bearer {token}"}, id]))
+            thread.start()
+            return
+    
+    thread = threading.Thread(target=requests_download, args=([callback, folder, url, {}, id]))
+    thread.start()
+
 class Inference(threading.Thread):
     def __init__(self, wrapper, read_only, callback):
         super().__init__()
@@ -89,12 +186,12 @@ class Inference(threading.Thread):
         self.read_only = read_only
         self.owner = None
 
-        self.uploads = {}
-
         self.stay_alive = True
 
-    def got_response(self, response):
-        return self.callback(self.current, response)
+    def got_response(self, response, id=None):
+        if id == None:
+            id = self.current
+        return self.callback(id, response)
 
     def run(self):
         while self.stay_alive:
@@ -134,7 +231,7 @@ class Inference(threading.Thread):
                     self.wrapper.set(**request["data"])
                     self.wrapper.segmentation()
                 elif request["type"] == "download":
-                    self.download(**request["data"])
+                    do_download(request["data"], self.wrapper.storage.path, self.current, self.got_response)
                 elif request["type"] == "chunk":
                     self.upload(**request["data"])
                 elif request["type"] == "ping":
@@ -167,108 +264,29 @@ class Inference(threading.Thread):
                     pass
 
                 self.got_response({"type":"error", "data":{"message":str(e) + additional, "trace": trace}})
-        
-    def download(self, type, url, token=None):
-        import subprocess
-
-        def gdownload(self, folder, url):
-            import gdown
-            try:
-                parts = url.split("/")
-                id = None
-                if len(parts) == 4:
-                    id = parts[3].split("=",1)[1].split("&",1)[0]
-                elif len(parts) == 7:
-                    id = parts[5]
-                else:
-                    raise Exception()
-                gdown.download(output=folder, id=id+"&confirm=t")
-                self.got_response({"type":"downloaded", "data":{"message": "Success: " + url}})
-            except:
-                self.got_response({"type":"downloaded", "data":{"message": "Failed: " + url}})
-
-        def megadownload(self, folder, url):
-            import mega
-            try:
-                mega.Mega().login().download_url(url, folder)
-                self.got_response({"type":"downloaded", "data":{"message": "Success: " + url}})
-            except:
-                self.got_response({"type":"downloaded", "data":{"message": "Failed: " + url}})
-
-        def curldownload(self, folder, url, check=True):
-            if check:
-                r = subprocess.run(["curl", "-IL", url], capture_output=True)
-                content_type = r.stdout.decode('utf-8').split("content-type: ")[-1].split(";",1)[0].split("\n",1)[0].strip()
-                if not content_type in {"application/zip", "binary/octet-stream", "application/octet-stream", "multipart/form-data"}:
-                    self.got_response({"type":"downloaded", "data":{"message": f"Unsupport type ({content_type}): " + url}})
-                    return
-            r = subprocess.run(["curl", "-OJL", url], cwd=folder)
-            if r.returncode == 0:
-                self.got_response({"type":"downloaded", "data":{"message": "Success: " + url}})
-            else:
-                self.got_response({"type":"downloaded", "data":{"message": "Failed: " + url}})
-
-        def hfdownload(self, folder, url, token, check=True):
-            header = f"Authorization: Bearer {token}"
-
-            if check:
-                r = subprocess.run(["curl", "-ILH", header, url], capture_output=True)
-                content_type = r.stdout.decode('utf-8').split("content-type: ")[-1].split(";",1)[0].split("\n",1)[0].strip()
-                if not content_type in {"application/zip", "binary/octet-stream", "application/octet-stream", "multipart/form-data"}:
-                    self.got_response({"type":"downloaded", "data":{"message": f"Unsupport type ({content_type}): " + url}})
-                    return
-            r = subprocess.run(["curl", "-OJLH", header, url], cwd=folder)
-            if r.returncode == 0:
-                self.got_response({"type":"downloaded", "data":{"message": "Success: " + url}})
-            else:
-                self.got_response({"type":"downloaded", "data":{"message": "Failed: " + url}})
-
-        folder = os.path.join(self.wrapper.storage.path, type)
-
-        self.got_response({"type":"downloaded", "data":{"message": "Downloading: " + url + " to " + type}})
-
-        check = True
-        if not os.path.exists(folder):
-            os.mkdir(folder)
-        
-        if 'drive.google' in url:
-            thread = threading.Thread(target=gdownload, args=([self, folder, url]))
-            thread.start()
-            return
-        if 'mega.nz' in url:
-            thread = threading.Thread(target=megadownload, args=([self, folder, url]))
-            thread.start()
-            return
-        if 'civitai.com' in url:
-            check = False
-            if not "civitai.com/api/download/models" in url:
-                self.got_response({"type":"downloaded", "data":{"message": "Failed: " + url}})
-                return
-        if 'huggingface' in url:
-            url = url.replace("/blob/", "/resolve/")
-            if token:
-                thread = threading.Thread(target=hfdownload, args=([self, folder, url, token, check]))
-                thread.start()
-                return
-        
-        thread = threading.Thread(target=curldownload, args=([self, folder, url, check]))
-        thread.start()
-
-    def upload(self, type, name, chunk=None, index=-1):
+    
+    def upload(self, type, name, chunk=None, index=-1, total=0):
+        global UPLOAD_IDS
         rel_file = os.path.join(type, name)
         file = os.path.join(self.wrapper.storage.path, rel_file)
         tmp = file + ".tmp"
+
         if index == 0:
-            self.got_response({"type":"downloaded", "data":{"message": "Uploading: " + name + " to " + rel_file}})
+            id = self.current
+            UPLOAD_IDS[file] = id
+            self.got_response({"type":"download", "data":{"status": "started", "label": rel_file.split(os.path.sep)[-1]}}, id)
             if os.path.exists(tmp):
                 os.remove(tmp)
+
+        id = UPLOAD_IDS[file]
         if chunk:
             with open(tmp, 'ab') as f:
                 f.write(chunk)
+            self.got_response({"type":"download", "data":{"status": "progress", "progress": index/total, "rate": 1, "eta": 0}}, id)
         else:
             if os.path.exists(tmp):
                 os.rename(tmp, file)
-            self.got_response({"type":"downloaded", "data":{"message": "Finished: " + rel_file}})
+            self.got_response({"type":"download", "data":{"status": "success"}}, id)
 
 class Server():
     def __init__(self, wrapper, host, port, password=DEFAULT_PASSWORD, owner=False, read_only=False, monitor=False):
