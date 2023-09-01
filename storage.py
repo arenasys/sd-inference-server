@@ -86,7 +86,7 @@ class ModelStorage():
         for c in self.loaded:
             for m in list(self.loaded[c].keys()):
                 if str(self.loaded[c][m].device) != "cpu":
-                    del self.loaded[c][m]
+                    self.unload(self.loaded[c][m])
         self.do_gc()
 
     def reset(self):
