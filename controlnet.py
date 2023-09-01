@@ -92,8 +92,8 @@ class ControlledUNET:
         self.controlnets = controlnets
         self.controlnet_cond = None
     
-    def set_controlnet_conditioning(self, conditioning):
-        self.controlnet_cond = [(s,cond.to(self.device, self.dtype)) for s,cond in conditioning]
+    def set_controlnet_conditioning(self, conditioning, device):
+        self.controlnet_cond = [(s,cond.to(device, self.dtype)) for s,cond in conditioning]
 
     def __call__(self, latents, timestep, encoder_hidden_states, **kwargs):
         down_samples, mid_sample = None, None

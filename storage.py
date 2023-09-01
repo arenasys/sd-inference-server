@@ -82,6 +82,13 @@ class ModelStorage():
         self.file_cache = {}
         self.do_gc()
 
+    def clear_vram(self):
+        for c in self.loaded:
+            for m in list(self.loaded[c].keys()):
+                if str(self.loaded[c][m].device) != "cpu":
+                    del self.loaded[c][m]
+        self.do_gc()
+
     def reset(self):
         self.embeddings = {}
         for c in self.loaded:
@@ -300,7 +307,8 @@ class ModelStorage():
     def get_unet(self, name, device, nets={}):
         self.check_attached_networks(name, "UNET", nets)
         unet = self.get_component(name, "UNET", device)
-        unet.determine_type()
+        if str(device) != "cpu":
+            unet.determine_type()
         return unet
 
     def get_clip(self, name, device, nets={}):

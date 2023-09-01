@@ -263,21 +263,29 @@ class GenerationParameters():
             self.merge_lora_sources = merge.merge_checkpoint(self, self.merge_checkpoint_recipe)
         else:
             self.storage.reset_merge(["UNET"])
+
+            device = self.device
+
+            if self.vram_mode == "Minimal":
+                device = torch.device("cpu")
+                self.storage.clear_vram()
+
             if not self.unet or type(self.unet) == str:
                 self.unet_name = self.unet or self.model
                 self.set_status("Loading UNET")
-                self.unet = self.storage.get_unet(self.unet_name, self.device, unet_nets)
+                self.unet = self.storage.get_unet(self.unet_name, device, unet_nets)
             
             if not self.clip or type(self.clip) == str:
                 self.clip_name = self.clip or self.model
                 self.set_status("Loading CLIP")
-                self.clip = self.storage.get_clip(self.clip_name, self.device, clip_nets)
+                self.clip = self.storage.get_clip(self.clip_name, device, clip_nets)
                 self.clip.set_textual_inversions(self.storage.get_embeddings(self.device))
             
             if not self.vae or type(self.vae) == str:
                 self.vae_name = self.vae or self.model
                 self.set_status("Loading VAE")
-                self.vae = self.storage.get_vae(self.vae_name, self.device)
+                self.vae = self.storage.get_vae(self.vae_name, device)
+                self.configure_vae()
         
         self.storage.clear_file_cache()
         
@@ -296,32 +304,40 @@ class GenerationParameters():
             if not self.img2img_upscaler in UPSCALERS_LATENT and not self.img2img_upscaler in UPSCALERS_PIXEL:
                 self.set_status("Loading Upscaler")
                 self.upscale_model = self.storage.get_upscaler(self.img2img_upscaler, self.device)
-
-        if self.minimal_vram and self.vae:
-            self.vae.enable_slicing()
-            self.vae.enable_tiling()
-        elif self.vae:
+    
+    def configure_vae(self):
+        if not self.vae:
+            return
+        if self.vram_mode == "Maximal":
             self.vae.disable_slicing()
             self.vae.disable_tiling()
-        
+        else:
+            self.vae.enable_tiling()
+            self.vae.enable_tiling()
+
     def need_models(self, unet, vae, clip):
-        if not self.minimal_vram:
+        if self.vram_mode != "Minimal":
             return
+        
+        if not unet:
+            self.storage.unload(self.unet)
+        
+        if not vae:
+            self.storage.unload(self.vae)
+        
+        if not clip:
+            self.storage.unload(self.clip)
 
         if unet:
             self.storage.load(self.unet, self.device)
-        else:
-            self.storage.unload(self.unet)
+            self.unet.determine_type()
         
         if vae:
             self.storage.load(self.vae, self.device)
-        else:
-            self.storage.unload(self.vae)
+            self.configure_vae()
         
         if clip:
             self.storage.load(self.clip, self.device)
-        else:
-            self.storage.unload(self.clip)
 
     def clear_annotators(self):
         allowed = []
@@ -349,7 +365,7 @@ class GenerationParameters():
         if (self.width or self.height) and not (self.width and self.height):
             raise ValueError("width and height must both be set")
         
-        if self.minimal_vram and self.show_preview == "Full":
+        if self.vram_mode == "Minimal" and self.show_preview == "Full":
             raise ValueError("Full preview is incompatible with minimal VRAM")
 
     def set_device(self):
@@ -623,7 +639,9 @@ class GenerationParameters():
 
         self.set_status("Configuring")
         batch_size = self.get_batch_size()
-        device = self.unet.device
+        device = self.device
+
+        self.need_models(unet=False, vae=False, clip=False)
 
         if self.cn:
             self.unet = controlnet.ControlledUNET(self.unet, self.cn)
@@ -639,7 +657,7 @@ class GenerationParameters():
             cn_cond, cn_outputs = controlnet.preprocess_control(cn_images, cn_annotators, cn_annotator_models, cn_args, cn_scales)
             if self.keep_artifacts:
                 self.on_artifact("Control", [cn_outputs]*batch_size)
-            self.unet.set_controlnet_conditioning(cn_cond)
+            self.unet.set_controlnet_conditioning(cn_cond, device)
 
         seeds, subseeds = self.get_seeds(batch_size)
         
@@ -666,21 +684,23 @@ class GenerationParameters():
         self.attach_networks(all_networks, *initial_networks, device)
 
         self.set_status("Encoding")
+        self.need_models(unet=False, vae=False, clip=True)
         conditioning.encode(self.clip, area)
 
         self.set_status("Preparing")
-        self.need_models(unet=True, vae=True, clip=False)
-        denoiser = guidance.GuidedDenoiser(self.unet, conditioning, self.scale, self.cfg_rescale or 0.0)
+        denoiser = guidance.GuidedDenoiser(self.unet, device, conditioning, self.scale, self.cfg_rescale or 0.0)
         noise = utils.NoiseSchedule(seeds, subseeds, self.width // 8, self.height // 8, device, self.unet.dtype)
         sampler = SAMPLER_CLASSES[self.sampler](denoiser, self.eta)
 
         if self.unet.inpainting: #SDv1-Inpainting, SDv2-Inpainting
+            self.need_models(unet=False, vae=True, clip=False)
             images = torch.zeros((batch_size, 3, self.height, self.width))
             inpainting_masked, inpainting_masks = utils.encode_inpainting(images, None, self.vae, seeds)
             denoiser.set_inpainting(inpainting_masked, inpainting_masks)
         
-        self.set_status("Generating")
+        self.need_models(unet=True, vae=False, clip=False)
 
+        self.set_status("Generating")
         with self.get_autocast_context(self.autocast, device):
             latents = inference.txt2img(denoiser, sampler, noise, self.steps, self.on_step)
 
@@ -701,11 +721,10 @@ class GenerationParameters():
         width = int(self.width * self.hr_factor)
         height = int(self.height * self.hr_factor)
 
-        self.need_models(unet=False, vae=True, clip=True)
-
         sampler = SAMPLER_CLASSES[self.hr_sampler](denoiser, self.hr_eta)
         noise = utils.NoiseSchedule(seeds, subseeds, width // 8, height // 8, device, self.unet.dtype)
 
+        self.need_models(unet=False, vae=False, clip=True)
         conditioning.switch_to_HR(self.hr_steps)
 
         if self.network_mode == "Dynamic":
@@ -741,7 +760,7 @@ class GenerationParameters():
         if self.cn:
             cn_images = upscalers.upscale(self.cn_image, transforms.InterpolationMode.LANCZOS, width, height)
             cn_cond, cn_outputs = controlnet.preprocess_control(cn_images, cn_annotators, cn_annotator_models, cn_args, cn_scales)
-            self.unet.set_controlnet_conditioning(cn_cond)
+            self.unet.set_controlnet_conditioning(cn_cond, device)
             if self.keep_artifacts:
                 self.on_artifact("Control HR", [cn_outputs]*batch_size)
         
@@ -781,7 +800,7 @@ class GenerationParameters():
         
         self.set_status("Preparing")
         batch_size = self.get_batch_size()
-        device = self.unet.device
+        device = self.device
         images = self.image
         masks = (self.mask or []).copy()
         width, height = self.width, self.height
@@ -807,7 +826,7 @@ class GenerationParameters():
 
         seeds, subseeds = self.get_seeds(batch_size)
         metadata = self.get_metadata("img2img",  width, height, batch_size, self.prompt, seeds, subseeds)
-
+        
         if self.cn:
             self.unet = controlnet.ControlledUNET(self.unet, self.cn)
             dtype = self.unet.dtype
@@ -822,7 +841,7 @@ class GenerationParameters():
 
             if self.keep_artifacts:
                 self.on_artifact("Control", [cn_outputs]*batch_size)
-            self.unet.set_controlnet_conditioning(cn_cond)
+            self.unet.set_controlnet_conditioning(cn_cond, device)
 
         if self.area:
             for i in range(len(self.area)):
@@ -842,15 +861,15 @@ class GenerationParameters():
         self.attach_networks(all_networks, *initial_networks, device)
 
         self.set_status("Encoding")
+        self.need_models(unet=False, vae=False, clip=True)
         conditioning.encode(self.clip, self.area)
 
-        self.need_models(unet=True, vae=True, clip=False)
-
-        denoiser = guidance.GuidedDenoiser(self.unet, conditioning, self.scale, self.cfg_rescale or 0.0)
+        denoiser = guidance.GuidedDenoiser(self.unet, device, conditioning, self.scale, self.cfg_rescale or 0.0)
         noise = utils.NoiseSchedule(seeds, subseeds, width // 8, height // 8, device, self.unet.dtype)
         sampler = SAMPLER_CLASSES[self.sampler](denoiser, self.eta)
 
         self.set_status("Upscaling")
+        self.need_models(unet=False, vae=True, clip=False)
         latents, upscaled_images = self.upscale_images(self.vae, images, self.img2img_upscaler, width, height, seeds)
         original_latents = latents
 
@@ -876,16 +895,17 @@ class GenerationParameters():
             inpainting_masked, inpainting_masks = utils.encode_inpainting(upscaled_images, masks or None, self.vae, seeds)
             denoiser.set_inpainting(inpainting_masked, inpainting_masks)
 
-        self.need_models(unet=True, vae=False, clip=False)
-
         self.set_status("Generating")
+
+        self.need_models(unet=True, vae=False, clip=False)
 
         with self.get_autocast_context(self.autocast, device):
             latents = inference.img2img(latents, denoiser, sampler, noise, self.steps, False, self.strength, self.on_step)
 
-        self.need_models(unet=False, vae=True, clip=False)
-
         self.set_status("Decoding")
+        
+        self.need_models(unet=False, vae=True, clip=False)
+        
         images = utils.decode_images(self.vae, latents)
 
         self.need_models(unet=False, vae=False, clip=False)

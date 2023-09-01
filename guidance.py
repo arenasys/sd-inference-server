@@ -1,7 +1,7 @@
 import torch
 
 class GuidedDenoiser():
-    def __init__(self, unet, conditioning_schedule, scale, cfg_rescale):
+    def __init__(self, unet, device, conditioning_schedule, scale, cfg_rescale):
         self.unet = unet
         self.conditioning_schedule = conditioning_schedule
         self.conditioning = None
@@ -11,7 +11,7 @@ class GuidedDenoiser():
         self.mask = None
         self.original = None
 
-        self.device = unet.device
+        self.device = device
         self.dtype = unet.dtype
 
         self.cfg_rescale = cfg_rescale
