@@ -38,6 +38,9 @@ class CustomSDXLCLIP(torch.nn.Module):
         open_clip_input_ids = input_ids
         ldm_clip_input_ids = [49407 if type(i) == int and i == 0 else i for i in input_ids]
 
+        open_clip_input_ids = [i[:1280] if type(i) == torch.Tensor else i for i in open_clip_input_ids]
+        ldm_clip_input_ids = [i[1280:] if type(i) == torch.Tensor else i for i in ldm_clip_input_ids]
+
         open_clip_outputs = self.open_clip.text_model(open_clip_input_ids)
         ldm_clip_outputs = self.ldm_clip.text_model(ldm_clip_input_ids)
 

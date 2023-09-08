@@ -245,6 +245,8 @@ class ModelStorage():
                 vectors = ti['emb_params']
             elif len(ti) == 1:
                 vectors = ti[list(ti.keys())[0]]
+            elif 'clip_g' in ti and 'clip_l' in ti:
+                vectors = torch.cat([ti["clip_g"], ti["clip_l"]], dim=1)
             else:
                 raise Exception("Unknown TI format")
             
