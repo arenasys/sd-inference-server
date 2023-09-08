@@ -19,7 +19,7 @@ class LoRAModule(torch.nn.Module):
             self.lora_down = torch.nn.Linear(shape[1], dim, bias=False)
             self.lora_up = torch.nn.Linear(dim, shape[0], bias=False)
 
-        self.register_buffer("alpha", torch.tensor(alpha))
+        self.register_buffer("alpha", torch.tensor(alpha or dim))
         self.register_buffer("dim", torch.tensor(dim), False)
 
     def from_weights(net_name, layer_name, lora_up, lora_down, alpha):
