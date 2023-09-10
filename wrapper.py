@@ -403,7 +403,6 @@ class GenerationParameters():
             images = upscalers.upscale(images, UPSCALERS_PIXEL[mode], width, height) 
         else:
             images = upscalers.upscale_super_resolution(images, self.upscale_model, width, height)
-        
         self.set_status("Encoding")
         return utils.encode_images(self.vae, seeds, images)
 
@@ -560,7 +559,7 @@ class GenerationParameters():
             merged_name, keep_models = merge.merge_lora(self, self.merge_lora_recipe)
             lora_names += [merged_name]
             for model in [self.unet.additional, self.clip.additional]:
-                model.set_strength_override(f"lora:{merged_name}", 1.0)
+                model.set_strength_override(f"lora:{merged_name}", self.merge_lora_strength)
         else:
             self.storage.reset_merge(["LoRA"])
 
@@ -1231,7 +1230,7 @@ class GenerationParameters():
         self.set_status("Loading")
         self.set_device()
 
-        merged_name, _ = merge.merge_lora(self, self.merge_lora_recipe)
+        merged_name, _, _ = merge.merge_lora(self, self.merge_lora_recipe)
         lora = self.storage.get_lora(merged_name, torch.device("cpu"))
         state_dict = lora.state_dict()
 

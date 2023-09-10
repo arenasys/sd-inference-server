@@ -348,8 +348,8 @@ def do_lora_merge(self, name, inputs, rank, conv_rank, alpha, clip_alpha, merge_
         out_state_dict[k + ".lora_down.weight"] = key_down
         out_state_dict[k + ".alpha"] = key_alpha
 
-
-    out_lora = models.LoRA(name, out_state_dict)
+    out_lora = models.LoRA(name)
+    out_lora.from_state_dict(out_state_dict)
     out_lora.decomposed = out_decomposed
     
     return out_lora
@@ -381,7 +381,7 @@ def do_recursive_lora_merge(self, operation):
     if operation["operation"] == "Add Difference":   
         merge_function = add_difference
 
-    net_name = f"{operation_name}.safetensors"
+    net_name = f"lora:{operation_name}"
     clip_alpha = operation['clip_alpha']
     rank = operation['rank']
     conv_rank = operation['conv_rank']
