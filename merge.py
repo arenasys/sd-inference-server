@@ -297,14 +297,11 @@ def merge_checkpoint(self, recipe):
     return all_lora
 
 def do_lora_merge(self, name, inputs, rank, conv_rank, alpha, clip_alpha, merge_function):
-    arch = set([tuple(sorted(i.state_dict().keys())) for i in inputs])
-    if len(arch) != 1:
-        raise Exception("Incompatible model architectures")
-
+    keys = []
     for i in inputs:
         i.precompute_decomposition(self.device, self.on_decompose)
-    
-    keys = inputs[0].decomposition.keys()
+        if len(i.decomposition.keys()) > len(keys):
+            keys = i.decomposition.keys()
 
     key_mapping = None
     if type(alpha) == list:
@@ -330,13 +327,15 @@ def do_lora_merge(self, name, inputs, rank, conv_rank, alpha, clip_alpha, merge_
             key_alpha = clip_alpha
 
         if True:
-            data = [i.decomposition[k] for i in inputs]
-            U = merge_function(*[d[0] for d in data], key_alpha)
-            S = merge_function(*[d[1] for d in data], key_alpha)
-            Vh = merge_function(*[d[2] for d in data], key_alpha)
-            size = data[0][3]
+            if any([not k in i.decomposition for i in inputs]):
+                U,S,Vh,size = inputs[0].decomposition[k]
+            else:
+                data = [i.decomposition[k] for i in inputs]
+                U = merge_function(*[d[0] for d in data], key_alpha)
+                S = merge_function(*[d[1] for d in data], key_alpha)
+                Vh = merge_function(*[d[2] for d in data], key_alpha)
+                size = data[0][3]
             out_decomposed[k] = (U,S,Vh,size)
-
             key_up, key_down, key_alpha = lora.LoRANetwork.get_key_at_rank(out_decomposed[k], rank, conv_rank)
         else:
             data = [lora.LoRANetwork.get_key_at_rank(i.decomposition[k], rank, conv_rank) for i in inputs]
