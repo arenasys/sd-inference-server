@@ -325,13 +325,13 @@ class AdditionalNetworks():
                     strength = self.parent.get_strength(i, lora.net_name, self.name)
                     if strength:
                         if v == None:
-                            v = lora(x)
+                            v = lora(x, self.original_module)
                         out[i] += v[i] * strength
             return out
 
         def attach_lora(self, module, static):
             if static:
-                weight = module.get_weight()
+                weight = module.get_weight(self.original_module.weight.shape)
                 strength = self.parent.get_strength(0, module.net_name, self.name)
                 self.original_module.weight += weight * strength
             else:
