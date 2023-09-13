@@ -23,8 +23,8 @@ class LoRAModule(nn.Module):
             self.lora_down = nn.Linear(shape[1], dim, bias=False)
             self.lora_up = nn.Linear(dim, shape[0], bias=False)
 
-        self.register_buffer("alpha", torch.tensor(alpha or dim))
-        self.register_buffer("dim", torch.tensor(dim), False)
+        self.register_buffer("alpha", torch.tensor(alpha or dim, dtype=torch.float16))
+        self.register_buffer("dim", torch.tensor(dim, dtype=torch.float16), False)
 
     def from_weights(net_name, layer_name, lora_up, lora_down, alpha):
         shape = (lora_up.shape[0], lora_down.shape[1])
@@ -79,6 +79,8 @@ class LoRAModule(nn.Module):
     def to(self, *args):
         self.lora_down = self.lora_down.to(*args)
         self.lora_up = self.lora_up.to(*args)
+        self.alpha = self.alpha.to(*args)
+        self.dim = self.dim.to(*args)
         return self
     
 class LoHAModule(nn.Module):
