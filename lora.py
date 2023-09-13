@@ -120,7 +120,7 @@ class LoHAModule(nn.Module):
             return F.linear(x, weight)
 
 class LoRANetwork(nn.Module):
-    def __init__(self, net_name) -> None:
+    def __init__(self, net_name="") -> None:
         super().__init__()
         self.net_name = net_name
         self.decomposition = {}

@@ -24,9 +24,10 @@ class UNET(UNet2DConditionModel):
         self.additional = None
 
     def __call__(self, *args, **kwargs):
-        if not 'added_cond_kwargs' in kwargs:
-            kwargs['added_cond_kwargs'] = {}
-        kwargs['cross_attention_kwargs'] = {'upcast_attention': self.upcast_attention}
+        if self.additional:
+            if not 'added_cond_kwargs' in kwargs:
+                kwargs['added_cond_kwargs'] = {}
+            kwargs['cross_attention_kwargs'] = {'upcast_attention': self.upcast_attention}
         return super().__call__(*args, **kwargs)
         
     @staticmethod
@@ -185,6 +186,7 @@ class CLIP(torch.nn.Module):
         self.to(dtype)
         self.tokenizer = Tokenizer(model_type)
         self.additional = None
+        self.textual_inversions = []
 
     def encode(self, input_ids, clip_skip):
         return self.model(input_ids, clip_skip)

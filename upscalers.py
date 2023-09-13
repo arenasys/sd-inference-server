@@ -65,12 +65,15 @@ class SR(RRDBNet):
 
         if "model.0.weight" in state_dict:
             state_dict = SR.convert(state_dict)
+
+        if "RRDB_trunk.0.RDB1.conv1.weight" in state_dict:
+            state_dict = SR.BSRGANConvert(state_dict)
         
         num_block = max([int(k.split(".")[1]) for k in state_dict if k.startswith("body.")] + [0]) + 1
 
         if num_block == 0:
             raise ValueError(f"unknown upscaler format")
-
+        
         model = SR(3, 3, 4, 64, num_block)
         model.load_state_dict(state_dict)
 
@@ -100,6 +103,27 @@ class SR(RRDBNet):
             for s in ["weight", "bias"]:
                 state_dict[KEYS[k]+s] = state_dict[k+s]
                 del state_dict[k+s]
+        
+        return state_dict
+    
+    @staticmethod
+    def BSRGANConvert(state_dict):
+        KEYS = {
+            "rrdb_trunk.": "body.",
+            "trunk_conv.": "conv_body.",
+            "upconv1.": "conv_up1.",
+            "upconv2.": "conv_up2.",
+            "hrconv.": "conv_hr."
+        }
+        
+        for k in list(state_dict.keys()):
+            kk = k.lower()
+            for s in KEYS:
+                if kk.startswith(s):
+                    kk = kk.replace(s, KEYS[s])
+            if kk != k:
+                state_dict[kk] = state_dict[k]
+                del state_dict[k]
         
         return state_dict
 
