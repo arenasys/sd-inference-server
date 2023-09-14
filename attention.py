@@ -12,6 +12,7 @@ except Exception:
 
 ORIGINAL_FORWARD = None
 try:
+    import diffusers.models.attention_processor
     ORIGINAL_FORWARD = diffusers.models.attention_processor.Attention.forward
 except:
     raise Exception("Incompatible Diffusers version")
