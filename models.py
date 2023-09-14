@@ -311,7 +311,7 @@ class AdditionalNetworks():
             self.hns = []
             self.loras = []
 
-        def forward(self, x):
+        def forward(self, x, *args, **kwargs):
             if self.hns:
                 x = x.clone()
             for hn in self.hns:
@@ -356,7 +356,7 @@ class AdditionalNetworks():
         if "CLIP" in model_type:
             self.modules = self.hijack_model(model, 'te', ["CLIPAttention", "CLIPMLP"])
         elif "UNET" in model_type:
-            self.modules = self.hijack_model(model, 'unet', ["Transformer2DModel", "Attention", "ResnetBlock2D", "Downsample2D", "Upsample2D"])
+            self.modules = self.hijack_model(model, 'unet', ["LoRACompatibleLinear", "LoRACompatibleConv", "Transformer2DModel", "Attention", "ResnetBlock2D", "Downsample2D", "Upsample2D"])
         else:
             raise ValueError(f"INVALID TARGET {model_type}")
         self.model_type = model_type
@@ -398,17 +398,24 @@ class AdditionalNetworks():
         for module_name, module in model.named_modules():
             if not module.__class__.__name__ in targets:
                 continue
-            for child_name, child_module in module.named_modules():
-                child_class = child_module.__class__.__name__
-                if not child_name:
-                    continue
 
-                if child_class == "Linear" or child_class == "Conv2d":
-                    name = self.get_name(model, prefix + '.' + module_name + '.' + child_name)
-                    if name in modules:
+            if "LoRA" in module.__class__.__name__:
+                name = self.get_name(model, prefix + '.' + module_name)
+                if name in modules:
+                    continue
+                modules[name] = AdditionalNetworks.AdditionalModule(self, name, module)
+                module.forward = modules[name].forward
+            else:
+                for child_name, child_module in module.named_modules():
+                    child_class = child_module.__class__.__name__
+                    if not child_name:
                         continue
-                    modules[name] = AdditionalNetworks.AdditionalModule(self, name, child_module)
-                    child_module.forward = modules[name].forward
+
+                    if child_class == "Linear" or child_class == "Conv2d":
+                        name = self.get_name(model, prefix + '.' + module_name + '.' + child_name)
+                        modules[name] = AdditionalNetworks.AdditionalModule(self, name, child_module)
+                        child_module.forward = modules[name].forward
+
         return modules
     
 class ControlNet(ControlNetModel):
