@@ -137,6 +137,8 @@ class GuidedDenoiser():
             original_pred = self.predict_original_epsilon(model_input, timestep, sigma, conditioning)
         elif self.unet.prediction_type == "v":
             original_pred = self.predict_original_v(model_input, timestep, sigma, conditioning)
+        else:
+            raise RuntimeError(f"Unknown prediction type: {self.unet.prediction_type}")
 
         composed_pred = self.compose_predictions(original_pred)
         masked_pred = self.mask_original(composed_pred)
