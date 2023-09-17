@@ -1,7 +1,7 @@
 import torch
 
 class GuidedDenoiser():
-    def __init__(self, unet, device, conditioning_schedule, scale, cfg_rescale):
+    def __init__(self, unet, device, conditioning_schedule, scale, cfg_rescale, prediction_type=None):
         self.unet = unet
         self.conditioning_schedule = conditioning_schedule
         self.conditioning = None
@@ -15,12 +15,25 @@ class GuidedDenoiser():
         self.dtype = unet.dtype
 
         self.cfg_rescale = cfg_rescale
+        self.override_prediction_type = prediction_type
 
         self.predictions = None
 
         self.inpainting_input = None
 
         self.get_conditioning()
+
+    def get_prediction_type(self):
+        prediction_type = self.unet.prediction_type
+
+        if self.override_prediction_type:
+            prediction_type = self.override_prediction_type
+
+        if prediction_type == "unknown":
+            self.unet.determine_type()
+            prediction_type = self.unet.prediction_type
+        
+        return prediction_type
 
     def get_conditioning(self):
         self.compositions = self.conditioning_schedule.get_compositions(self.dtype, self.device)
@@ -97,9 +110,11 @@ class GuidedDenoiser():
         model_input = self.get_model_inputs(latents)
         conditioning = self.conditioning
 
-        if self.unet.prediction_type == "epsilon":
+        prediction_type = self.get_prediction_type()
+
+        if prediction_type == "epsilon":
             noise_pred = self.predict_noise_epsilon(model_input, timestep, conditioning, alpha)
-        elif self.unet.prediction_type == "v":
+        elif prediction_type == "v":
             noise_pred = self.predict_noise_v(model_input, timestep, conditioning, alpha)
 
         composed_pred = self.compose_predictions(noise_pred)
@@ -130,15 +145,14 @@ class GuidedDenoiser():
         model_input = self.get_model_inputs(latents)
         conditioning = self.conditioning
 
-        if self.unet.prediction_type == "unknown":
-            self.unet.determine_type()
+        prediction_type = self.get_prediction_type()
 
-        if self.unet.prediction_type == "epsilon":
+        if prediction_type == "epsilon":
             original_pred = self.predict_original_epsilon(model_input, timestep, sigma, conditioning)
-        elif self.unet.prediction_type == "v":
+        elif prediction_type == "v":
             original_pred = self.predict_original_v(model_input, timestep, sigma, conditioning)
         else:
-            raise RuntimeError(f"Unknown prediction type: {self.unet.prediction_type}")
+            raise RuntimeError(f"Unknown prediction type: {prediction_type}")
 
         composed_pred = self.compose_predictions(original_pred)
         masked_pred = self.mask_original(composed_pred)

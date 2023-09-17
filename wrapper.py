@@ -308,12 +308,11 @@ class GenerationParameters():
     def configure_vae(self):
         if not self.vae:
             return
-        if self.vram_mode == "Maximal":
-            self.vae.disable_slicing()
-            self.vae.disable_tiling()
+        self.vae.enable_slicing()
+        if self.tiling_mode == "Enabled":
+            self.vae.enable_tiling()
         else:
-            self.vae.enable_tiling()
-            self.vae.enable_tiling()
+            self.vae.disable_tiling()
 
     def need_models(self, unet, vae, clip):
         if self.vram_mode != "Minimal":
@@ -367,6 +366,9 @@ class GenerationParameters():
         
         if self.vram_mode == "Minimal" and self.show_preview == "Full":
             raise ValueError("Full preview is incompatible with minimal VRAM")
+        
+        if self.prediction_type:
+            self.prediction_type = self.prediction_type.lower()
 
     def set_device(self):
         device = torch.device("cuda")
@@ -505,6 +507,10 @@ class GenerationParameters():
                 m["scale"] = format_float(self.scale)
                 m["sampler"] = self.sampler
                 m["clip_skip"] = self.clip_skip
+                if self.cfg_rescale:
+                    m["cfg_rescale"] = format_float(self.cfg_rescale)
+                if self.prediction_type:
+                    m["prediction_type"] = self.prediction_type.capitalize()
 
             if mode == "img2img":
                 m["strength"] = format_float(self.strength)
@@ -687,7 +693,7 @@ class GenerationParameters():
         conditioning.encode(self.clip, area)
 
         self.set_status("Preparing")
-        denoiser = guidance.GuidedDenoiser(self.unet, device, conditioning, self.scale, self.cfg_rescale or 0.0)
+        denoiser = guidance.GuidedDenoiser(self.unet, device, conditioning, self.scale, self.cfg_rescale or 0.0, self.prediction_type)
         noise = utils.NoiseSchedule(seeds, subseeds, self.width // 8, self.height // 8, device, self.unet.dtype)
         sampler = SAMPLER_CLASSES[self.sampler](denoiser, self.eta)
 
@@ -863,7 +869,7 @@ class GenerationParameters():
         self.need_models(unet=False, vae=False, clip=True)
         conditioning.encode(self.clip, self.area)
 
-        denoiser = guidance.GuidedDenoiser(self.unet, device, conditioning, self.scale, self.cfg_rescale or 0.0)
+        denoiser = guidance.GuidedDenoiser(self.unet, device, conditioning, self.scale, self.cfg_rescale or 0.0, self.prediction_type)
         noise = utils.NoiseSchedule(seeds, subseeds, width // 8, height // 8, device, self.unet.dtype)
         sampler = SAMPLER_CLASSES[self.sampler](denoiser, self.eta)
 

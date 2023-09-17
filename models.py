@@ -115,7 +115,7 @@ class UNET(UNet2DConditionModel):
 
         is_v = (test_pred - 0.5).mean().item() < -1
         self.prediction_type = "v" if is_v else "epsilon"
-        print("USING",self.prediction_type,"PREDICTION")
+        print("DETECTED", self.prediction_type, "PREDICTION")
 
 class VAE(AutoencoderKL):
     def __init__(self, model_type, dtype):
