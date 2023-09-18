@@ -397,7 +397,8 @@ class ConditioningSchedule():
         if self.model_type == "SDXL-Base":
             text_embeds = [p.get_pooled_text_embed_at_step(step) for p in self.positives] + \
                         [n.get_pooled_text_embed_at_step(step) for n in self.negatives]
-            time_ids = [torch.tensor([1024, 1024, 0,0, 1024, 1024]) for _ in self.positives + self.negatives]
+            z = 1024
+            time_ids = [torch.tensor([z, z, 0, 0, z, z]) for _ in self.positives + self.negatives]
             return {"text_embeds": text_embeds, "time_ids": time_ids}
         else:
             return {}

@@ -10,6 +10,7 @@ import shutil
 import tomesd
 import contextlib
 import numpy as np
+import math
 
 DIRECTML_AVAILABLE = False
 try:
@@ -1236,7 +1237,7 @@ class GenerationParameters():
         self.set_status("Loading")
         self.set_device()
 
-        merged_name, _, _ = merge.merge_lora(self, self.merge_lora_recipe)
+        merged_name, _ = merge.merge_lora(self, self.merge_lora_recipe)
         lora = self.storage.get_lora(merged_name, torch.device("cpu"))
         state_dict = lora.state_dict()
 
