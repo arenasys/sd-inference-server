@@ -24,6 +24,9 @@ def add(a, b, alpha):
 def difference(a, b, alpha):
     return alpha*(a - b)
 
+def weighted(a, alpha):
+    return alpha * a
+
 def get_result_history(recipe, result_name):
     index = int(result_name.split("_")[-1])
     full_op = recipe[index]
@@ -379,6 +382,8 @@ def do_recursive_lora_merge(self, operation):
         merge_function = weighted_sum
     if operation["operation"] == "Add Difference":   
         merge_function = add_difference
+    if operation["operation"] == "Modify LoRA":
+        merge_function = weighted
 
     net_name = f"lora:{operation_name}"
     clip_alpha = operation['clip_alpha']
