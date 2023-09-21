@@ -335,8 +335,9 @@ def do_lora_merge(self, name, inputs, rank, conv_rank, alpha, clip_alpha, merge_
             print("UNKNOWN", k)
 
         if True:
-            if any([not k in i.decomposition for i in inputs]):
-                U,S,Vh,size = inputs[0].decomposition[k]
+            data = [i.decomposition[k] for i in inputs if k in i.decomposition]
+            if len(data) != len(inputs):
+                U,S,Vh,size = data[0]
             else:
                 data = [i.decomposition[k] for i in inputs]
                 U = merge_function(*[d[0] for d in data], key_weight)
