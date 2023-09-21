@@ -540,11 +540,11 @@ class GenerationParameters():
                 m["mask_blur"] = self.mask_blur
 
             if self.merge_lora_recipe:
-                m["merge_lora_recipe"] = json.dumps(self.merge_lora_recipe)
+                m["merge_lora_recipe"] = self.merge_lora_recipe
                 m["merge_lora_strength"] = self.merge_lora_strength
                 
             if self.merge_checkpoint_recipe:
-                m["merge_checkpoint_recipe"] = json.dumps(self.merge_checkpoint_recipe)
+                m["merge_checkpoint_recipe"] = self.merge_checkpoint_recipe
 
             metadata += [m]
 
