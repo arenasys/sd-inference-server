@@ -27,6 +27,9 @@ def difference(a, b, alpha):
 def weighted(a, alpha):
     return alpha * a
 
+def combine(a, b, alpha):
+    return a + b
+
 def get_result_history(recipe, result_name):
     index = int(result_name.split("_")[-1])
     full_op = recipe[index]
@@ -320,23 +323,25 @@ def do_lora_merge(self, name, inputs, rank, conv_rank, alpha, clip_alpha, merge_
             if key_mapping:
                 kk = k.rsplit(".", 1)[0]
                 if kk in key_mapping:
-                    key_alpha = alpha[key_mapping[kk]]
+                    key_weight = alpha[key_mapping[kk]]
                 else:
                     print("MISSING", kk)
-                    key_alpha = clip_alpha
+                    key_weight = clip_alpha
             else:
-                key_alpha = alpha
+                key_weight = alpha
+        elif k.startswith("lora_te"):
+            key_weight = clip_alpha
         else:
-            key_alpha = clip_alpha
+            print("UNKNOWN", k)
 
         if True:
             if any([not k in i.decomposition for i in inputs]):
                 U,S,Vh,size = inputs[0].decomposition[k]
             else:
                 data = [i.decomposition[k] for i in inputs]
-                U = merge_function(*[d[0] for d in data], key_alpha)
-                S = merge_function(*[d[1] for d in data], key_alpha)
-                Vh = merge_function(*[d[2] for d in data], key_alpha)
+                U = merge_function(*[d[0] for d in data], key_weight)
+                S = merge_function(*[d[1] for d in data], key_weight)
+                Vh = merge_function(*[d[2] for d in data], key_weight)
                 size = data[0][3]
             out_decomposed[k] = (U,S,Vh,size)
             key_up, key_down, key_alpha = lora.LoRANetwork.get_key_at_rank(out_decomposed[k], rank, conv_rank)
@@ -352,9 +357,74 @@ def do_lora_merge(self, name, inputs, rank, conv_rank, alpha, clip_alpha, merge_
 
     out_lora = models.LoRA(name)
     out_lora.from_state_dict(out_state_dict)
-    out_lora.decomposed = out_decomposed
+    out_lora.decomposition = out_decomposed
     
     return out_lora
+
+def do_lora_extraction(self, name, inputs, rank, conv_rank):
+    self.storage.uncap_ram = True
+    a_unet = self.storage.get_component(inputs[0], "UNET", torch.device("cpu"))
+    a_clip = self.storage.get_component(inputs[0], "CLIP", torch.device("cpu"))
+    b_unet = self.storage.get_component(inputs[1], "UNET", torch.device("cpu"))
+    b_clip = self.storage.get_component(inputs[1], "CLIP", torch.device("cpu"))
+    self.storage.clear_file_cache()
+
+    network = models.LoRA(name)
+
+    modules = list(a_unet.additional.modules.items()) + list(a_clip.additional.modules.items())
+    for name, module in modules:
+        name = "lora_" + name
+        size = module.original_module.weight.shape
+        conv2d = (len(size) == 4)
+        kernel_size = None if not conv2d else size[2:4]
+        conv2d_3x3 = conv2d and kernel_size != (1, 1)
+        is_conv = conv2d_3x3
+        if is_conv and not conv_rank:
+            continue
+        module_rank = conv_rank if is_conv else rank
+
+        lora_module = lora.LoRAModule.from_module(network.net_name, name, module.original_module, module_rank, module_rank)
+        network.add_module(name, lora_module)
+
+    lora_keys = set()
+    for k in network.state_dict():
+        kk = k.split(".")[0]
+        if not kk in lora_keys:
+            lora_keys.add(kk)
+
+    state_dict = {}
+
+    for prefix, comps in [("lora_unet", [a_unet, b_unet]), ("lora_te", [a_clip, b_clip])]:
+        for model in comps:
+            model_state_dict = model.state_dict()
+            for k in model_state_dict:
+                if not k.endswith(".weight"):
+                    continue
+                kk = prefix + "_" + k.rsplit(".", 1)[0].replace(".","_")
+                if kk in lora_keys:
+                    if kk in state_dict:
+                        state_dict[kk] -= model_state_dict[k]
+                    else:
+                        state_dict[kk] = model_state_dict[k]
+    
+    del a_unet, a_clip, b_unet, b_clip
+    for name in inputs:
+        self.storage.remove("UNET", name)
+        self.storage.remove("CLIP", name)
+
+    decomposition = lora.LoRANetwork.decompose(state_dict, self.device, self.on_decompose)
+    state_dict = {}
+    for k in decomposition:
+        key_up, key_down, key_alpha = lora.LoRANetwork.get_key_at_rank(decomposition[k], rank, conv_rank)
+
+        state_dict[k + ".lora_up.weight"] = key_up
+        state_dict[k + ".lora_down.weight"] = key_down
+        state_dict[k + ".alpha"] = key_alpha
+
+    network.load_state_dict(state_dict)
+    network.decomposition = decomposition
+
+    return network
 
 def do_recursive_lora_merge(self, operation):
     operation_name = base64_encode(operation)
@@ -373,23 +443,30 @@ def do_recursive_lora_merge(self, operation):
         else:
             inputs += [operation[k]]
 
-    inputs = [self.storage.get_component(name, "LoRA", torch.device("cpu")) for name in inputs]
+    if operation["operation"] != "Extract LoRA":
+        inputs = [self.storage.get_component(name, "LoRA", torch.device("cpu")) for name in inputs]
 
-    alpha = operation['alpha']
+    alpha = operation.get('alpha', None)
+    clip_alpha = operation.get('clip_alpha', None)
 
     merge_function = None
     if operation["operation"] == "Weighted Sum":
         merge_function = weighted_sum
     if operation["operation"] == "Add Difference":   
         merge_function = add_difference
-    if operation["operation"] == "Modify LoRA":
+    if operation["operation"] in "Modify LoRA":
         merge_function = weighted
+    if operation["operation"] == "Combine LoRA":
+        merge_function = combine
 
     net_name = f"lora:{operation_name}"
-    clip_alpha = operation['clip_alpha']
     rank = operation['rank']
     conv_rank = operation['conv_rank']
-    result = do_lora_merge(self, net_name, inputs, rank, conv_rank, alpha, clip_alpha, merge_function)
+
+    if operation["operation"] == "Extract LoRA":
+        result = do_lora_extraction(self, net_name, inputs, rank, conv_rank)
+    else:
+        result = do_lora_merge(self, net_name, inputs, rank, conv_rank, alpha, clip_alpha, merge_function)
     
     self.storage.add("LoRA", operation_name, result)
 
@@ -417,7 +494,7 @@ def merge_lora(self, recipe):
     all = get_required_model_names(self, op, prune=False)
     required = get_required_model_names(self, op, prune=True)
 
-    self.set_status("Loading LoRAs")
+    self.set_status("Loading Sources")
 
     useless = []
     for name in self.storage.loaded["LoRA"]:
@@ -428,9 +505,12 @@ def merge_lora(self, recipe):
     for name in useless:
         self.storage.remove("LoRA", name)
 
-    for name in required:
-        if "." in name:
-            self.storage.get_component(name, "LoRA", torch.device("cpu"))
+    #for name in required:
+    #    if "." in name:
+    #        if name.lower().startswith("lora"):
+    #            self.storage.get_component(name, "LoRA", torch.device("cpu"))
+    #        else:
+    #            self.storage.get_component(name, "UNET", torch.device("cpu"))
 
     self.set_status("Merging")
     result_name = do_recursive_lora_merge(self, op)

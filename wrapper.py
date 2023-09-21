@@ -11,6 +11,7 @@ import tomesd
 import contextlib
 import numpy as np
 import math
+import json
 
 DIRECTML_AVAILABLE = False
 try:
@@ -537,6 +538,13 @@ class GenerationParameters():
                 if self.padding:
                     m["padding"] = self.padding
                 m["mask_blur"] = self.mask_blur
+
+            if self.merge_lora_recipe:
+                m["merge_lora_recipe"] = json.dumps(self.merge_lora_recipe)
+                m["merge_lora_strength"] = self.merge_lora_strength
+                
+            if self.merge_checkpoint_recipe:
+                m["merge_checkpoint_recipe"] = json.dumps(self.merge_checkpoint_recipe)
 
             metadata += [m]
 

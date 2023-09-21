@@ -45,7 +45,7 @@ class LoRAModule(nn.Module):
             return LoRAModule(net_name, layer_name, shape, dim, alpha)
         
     def from_module(net_name, layer_name, module, dim, alpha):
-        if module.__class__.__name__ == "Conv2d":
+        if "Conv" in module.__class__.__name__:
             in_dim = module.in_channels
             out_dim = module.out_channels
             kernel = module.kernel_size[0]
@@ -184,12 +184,8 @@ class LoRANetwork(nn.Module):
         self.to(torch.device("cpu"), torch.float16)
         return state_dict
     
-    def precompute_decomposition(self, device, callback=None):
-        if self.decomposition:
-            return
-
-        state_dict = self.compose()
-
+    def decompose(state_dict, device, callback=None):
+        decomposition = {}
         iter = tqdm.tqdm(state_dict)
         for k in iter:
             if callback:
@@ -216,8 +212,15 @@ class LoRANetwork(nn.Module):
             U = U[:, :256].to("cpu").contiguous()
             S = S[:256].to("cpu").contiguous()
             Vh = Vh[:256, :].to("cpu").contiguous()
+            decomposition[k] = (U,S,Vh,size)
+        return decomposition
 
-            self.decomposition[k] = (U,S,Vh,size)
+    def precompute_decomposition(self, device, callback=None):
+        if self.decomposition:
+            return
+
+        state_dict = self.compose()
+        self.decomposition = LoRANetwork.decompose(state_dict, device, callback)
 
     def get_key_at_rank(decomposition, rank, conv_rank):
         U, S, Vh, size = decomposition

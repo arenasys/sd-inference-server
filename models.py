@@ -335,7 +335,7 @@ class AdditionalNetworks():
             if static:
                 weight = module.get_weight(self.original_module.weight.shape)
                 strength = self.parent.get_strength(0, module.net_name, self.name)
-                self.original_module.weight += weight * strength
+                self.original_module.weight += weight.to(self.original_module.weight.device) * strength
             else:
                 self.loras.append(module)
         
