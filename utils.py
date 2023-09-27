@@ -7,6 +7,9 @@ import os
 import time
 import pickle
 import re
+import math
+
+import numpy as np
 
 DIRECTML_AVAILABLE = False
 try:
@@ -510,4 +513,123 @@ def lora_mapping(key):
 
     return key
     
+def get_tile_mask(size, radius):
+    width, height = size
+    width, height = int(width), int(height)
 
+    radius_x, radius_y = radius
+    radius_x, radius_y = int(radius_x), int(radius_y)
+
+    mask = np.ones((height, width), dtype=np.float32)
+
+    radius_x, radius_y = radius
+
+    for i in range(height//2):
+        for j in range(width//2):
+            weight_x, weight_y = 1, 1
+            if i < radius_y:
+                weight_y = (i / radius_y)
+            if j < radius_x:
+                weight_x = (j / radius_x)        
+            weight = min(weight_x, weight_y) ** 2
+            if weight == 1:
+                continue
+            mask[i, j] = weight
+            mask[i, width-j-1] = weight
+            mask[height-i-1, j] = weight
+            mask[height-i-1, width-j-1] = weight
+    
+    return PIL.Image.fromarray(np.uint8(mask*255), mode="L")
+
+def get_tiles(images, tile_size, upscale):
+    base_size = int(tile_size)
+
+    tile_positions = []
+    tile_images = []
+    tile_masks = []
+
+    for img in images:
+        img_width, img_height = img.size
+
+        tile_size = int(tile_size / upscale)
+        tile_size = int(tile_size - (tile_size % 8))
+
+        if tile_size > min(img_height, img_width):
+            tile_size = min(img_height, img_width)
+
+        overlap = tile_size / 4
+
+        count_x = math.ceil(img_width/(tile_size-overlap/2))
+        count_y = math.ceil(img_height/(tile_size-overlap/2))
+        
+        match_width = tile_size == img_width
+        match_height = tile_size == img_height
+
+        if match_width and match_height:
+            count_x, count_y = 2, 2
+            tile_size = int((tile_size + overlap)/2)
+        elif match_width:
+            count_x = 1
+        elif match_height:
+            count_y = 1
+        else:
+            size_x = ((overlap*(count_x-1)) + img_width)/count_x
+            size_y = ((overlap*(count_y-1)) + img_height)/count_y
+            tile_size = int(max(size_x, size_y))
+
+        interval_x = 0 if count_x == 1 else tile_size - ((count_x*tile_size)-img_width)/(count_x-1)
+        interval_y = 0 if count_y == 1 else tile_size - ((count_y*tile_size)-img_height)/(count_y-1)
+
+        positions = []
+        tiles = []
+        for x in range(count_x):
+            for y in range(count_y):
+                position_x = int(x*interval_x)
+                position_y = int(y*interval_y)
+                position = (position_x, position_y, position_x+tile_size, position_y+tile_size)
+                positions += [position]
+                tiles += [img.crop(position).resize((base_size, base_size))]
+
+        tile_positions += [positions]
+        tile_images += [tiles]
+
+        radius_x = (tile_size - interval_x)//2
+        radius_y = (tile_size - interval_y)//2
+
+        mask = get_tile_mask((tile_size, tile_size), (radius_x, radius_y))
+        tile_masks += [mask]
+    
+    return tile_images, tile_positions, tile_masks
+
+def assemble_tiles(original_images, tile_images, tile_positions, tile_masks):
+    data = zip(original_images, tile_images, tile_positions, tile_masks)
+    assembled = []
+    for img, tiles, positions, mask in data:
+        img_width, img_height = img.size
+        img_tensor = TO_TENSOR(img)
+        mask_tensor = TO_TENSOR(mask)
+
+        inv_mask = torch.zeros((1, img_height, img_width))
+        for (x1, y1, x2, y2) in positions:
+            inv_mask[:,y1:y2,x1:x2] += mask_tensor
+        inv_mask = 1 - inv_mask.clamp(0,1)
+
+        over_mask = torch.zeros((1, img_height, img_width))
+        for (x1, y1, x2, y2) in positions:
+            over_mask[:,y1:y2,x1:x2] += mask_tensor + inv_mask[:,y1:y2,x1:x2]
+        over_mask = 1 / over_mask.clamp(1,None)
+
+        output = torch.zeros_like(img_tensor)
+
+        for i, ((x1, y1, x2, y2), tile) in enumerate(zip(positions, tiles)):
+            w, h = x2-x1, y2-y1
+            tile = tile.resize((w,h))
+            tile_tensor = TO_TENSOR(tile)
+            mask = (mask_tensor + inv_mask[:,y1:y2,x1:x2]) * over_mask[:,y1:y2,x1:x2]
+            #masked = torch.cat([tile_tensor, mask])
+            #FROM_TENSOR(masked).save(f"{i}.png")
+            output[:,y1:y2,x1:x2] += tile_tensor * mask
+        
+        assembled += [FROM_TENSOR(output)]#.save(f"out.png")
+
+    return assembled

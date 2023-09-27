@@ -410,24 +410,14 @@ class GenerationParameters():
         self.set_status("Encoding")
         return utils.encode_images(self.vae, seeds, images)
 
-    def upscale_images(self, vae, images, mode, width, height, seeds):
+    def upscale_images(self, images, mode, width, height):
         if mode in UPSCALERS_LATENT:
-            latents = utils.get_latents(vae, seeds, images)
-            latents = upscalers.upscale_single(latents, UPSCALERS_LATENT[mode], width//8, height//8)
-
-            if type(latents) == list:
-                latents = torch.stack(latents)
-
-            return latents, None
-        
-        if mode in UPSCALERS_PIXEL:
+            raise ValueError(f"cannot use latent upscaler")
+        elif mode in UPSCALERS_PIXEL:
             images = upscalers.upscale(images, UPSCALERS_PIXEL[mode], width, height)
         else:
             images = upscalers.upscale_super_resolution(images, self.upscale_model, width, height)
-
-        self.set_status("Encoding")
-        latents = utils.get_latents(vae, seeds, images)
-        return latents, images
+        return images
 
     def get_seeds(self, batch_size):
         (seeds,) = self.listify(self.seed)
@@ -796,6 +786,9 @@ class GenerationParameters():
 
     @torch.inference_mode()
     def img2img(self):
+        if self.tile_size:
+            return self.tiled_img2img()
+        
         self.set_status("Configuring")
         self.check_parameters()
         self.clear_annotators()
@@ -884,19 +877,18 @@ class GenerationParameters():
 
         self.set_status("Upscaling")
         self.need_models(unet=False, vae=True, clip=False)
-        latents, upscaled_images = self.upscale_images(self.vae, images, self.img2img_upscaler, width, height, seeds)
-        original_latents = latents
-
+        upscaled_images = self.upscale_images(images, self.img2img_upscaler, width, height)
         if self.keep_artifacts:
-            if not upscaled_images:
-                upscaled_images = utils.decode_images(self.vae, latents)
             self.on_artifact("Input", upscaled_images)
 
-        if self.mask:
-            self.set_status("Preparing")
+        self.set_status("Encoding")
+        latents = utils.get_latents(self.vae, seeds, upscaled_images)
+        original_latents = latents
 
-            original_mask_latents = utils.get_masks(device, original_masks)
+        if masks:
+            self.set_status("Preparing")
             if self.mask_fill == "Noise":
+                original_mask_latents = utils.get_masks(device, original_masks)
                 latents = latents * ((original_mask_latents * self.strength) + (1-self.strength))
             
             mask_latents = utils.get_masks(device, masks)
@@ -931,6 +923,102 @@ class GenerationParameters():
             images = [outputs[i] if self.mask[i] else images[i] for i in range(len(images))]
 
         self.on_complete(images, metadata)
+        return images
+    
+    @torch.inference_mode()
+    def tiled_img2img(self):
+
+        tile_size = self.tile_size
+        tile_upscale = self.tile_upscale
+        tile_strength = self.tile_strength
+
+        self.set_status("Configuring")
+        self.check_parameters()
+        self.clear_annotators()
+
+        self.set_status("Parsing")
+        conditioning = prompts.BatchedConditioningSchedules(self.prompt, self.steps, self.clip_skip)
+        initial_networks = conditioning.get_initial_networks() if self.network_mode == "Static" else ({},{})
+        all_networks = conditioning.get_all_networks()
+
+        self.set_status("Loading")
+        self.set_device()
+        self.set_attention()
+
+        if tile_strength:
+            self.cn = ["Tile"]
+        else:
+            self.cn = None
+        
+        self.load_models(*initial_networks)
+
+        self.attach_tome()
+        
+        self.set_status("Preparing")
+        batch_size = self.get_batch_size()
+        device = self.device
+        images = self.image
+        width, height = self.width, self.height
+
+        seeds, subseeds = self.get_seeds(batch_size)
+        metadata = self.get_metadata("img2img",  width, height, batch_size, self.prompt, seeds, subseeds)
+
+        if tile_strength:
+            self.unet = controlnet.ControlledUNET(self.unet, self.cn)
+
+        self.set_status("Attaching")
+        self.attach_networks(all_networks, *initial_networks, device)
+
+        self.set_status("Encoding")
+        self.need_models(unet=False, vae=False, clip=True)
+        conditioning.encode(self.clip, [])
+
+        denoiser = guidance.GuidedDenoiser(self.unet, device, conditioning, self.scale, self.cfg_rescale or 0.0, self.prediction_type)
+        sampler = SAMPLER_CLASSES[self.sampler](denoiser, self.eta)
+
+        self.set_status("Upscaling")
+        self.need_models(unet=False, vae=True, clip=False)
+        upscaled_images = upscalers.upscale(images, UPSCALERS_PIXEL[self.img2img_upscaler], width, height)
+
+        tile_images, tile_positions, tile_masks = utils.get_tiles(upscaled_images, tile_size, tile_upscale)
+
+        self.set_status("Encoding")
+
+        tile_latents = []
+        for i in range(len(tile_images)):
+            tile_latents += [[]]
+            for j in range(len(tile_images[i])):
+                tile_latents[i] += [utils.get_latents(self.vae, [seeds[i]], [tile_images[i][j]])[0]]
+
+        self.set_status("Generating")
+
+        self.need_models(unet=True, vae=False, clip=False)
+
+        self.current_step = 0
+        self.total_steps = (int(self.steps * self.strength) + 1) * sum([len(a) for a in tile_latents])
+
+        with self.get_autocast_context(self.autocast, device):
+            for i in range(len(tile_latents)):  
+                noise = utils.NoiseSchedule([seeds[i]], [subseeds[i]], tile_size // 8, tile_size // 8, device, self.unet.dtype)
+                for j in range(len(tile_latents[i])):
+                    if tile_strength:
+                        cond, _ = controlnet.annotate(tile_images[i][j], None, None, None)
+                        self.unet.set_controlnet_conditioning([(tile_strength,cond)], device)
+                    tile_latents[i][j] = inference.img2img(tile_latents[i][j], denoiser, sampler, noise, self.steps, False, self.strength, self.on_step)
+
+        self.set_status("Decoding")
+        
+        self.need_models(unet=False, vae=True, clip=False)
+        
+        for i in range(len(tile_latents)):
+            for j in range(len(tile_latents[i])):
+                tile_images[i][j] = utils.decode_images(self.vae, tile_latents[i][j])[0]
+
+        assembled = utils.assemble_tiles(upscaled_images, tile_images, tile_positions, tile_masks)
+
+        self.need_models(unet=False, vae=False, clip=False)
+
+        self.on_complete(assembled, metadata)
         return images
     
     @torch.inference_mode()
