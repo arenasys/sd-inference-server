@@ -978,7 +978,7 @@ class GenerationParameters():
 
         self.set_status("Upscaling")
         self.need_models(unet=False, vae=True, clip=False)
-        upscaled_images = upscalers.upscale(images, UPSCALERS_PIXEL[self.img2img_upscaler], width, height)
+        upscaled_images = self.upscale_images(images, self.img2img_upscaler, width, height)
 
         tile_images, tile_positions, tile_masks = utils.get_tiles(upscaled_images, tile_size, tile_upscale)
 
