@@ -93,6 +93,8 @@ CROSS_ATTENTION = {
     "XFormers": attention.use_xformers_attention
 }
 
+FP32_DEVICES = ["1660", "1650", "1630", "T500", "T550", "T600", "MX550", "MX450", "CMP 30HX"]
+
 def format_float(x):
     return f"{x:.4f}".rstrip('0').rstrip('.')
 
@@ -223,7 +225,7 @@ class GenerationParameters():
             
     def reset(self):
         for attr in list(self.__dict__.keys()):
-            if not attr in ["storage", "device", "device_names", "callback", "last_models_modified", "last_models_config"]:
+            if not attr in ["storage", "device", "device_names", "callback", "last_models_modified", "last_models_config", "dataset"]:
                 delattr(self, attr)
 
     def __getattr__(self, item):
@@ -384,7 +386,10 @@ class GenerationParameters():
                 self.storage.dtype = torch.float16
             else:
                 device = torch.device(idx)
-                self.storage.dtype = torch.float16
+                if any([" " + name in self.device_name for name in FP32_DEVICES]):
+                    self.storage.dtype = torch.float32
+                else:
+                    self.storage.dtype = torch.float16
         self.device = device
     
     def set_attention(self):
@@ -1083,7 +1088,7 @@ class GenerationParameters():
         self.clear_annotators()
 
         device = self.device
-        dtype = torch.float16
+        dtype = self.storage.dtype
 
         self.set_status("Annotating")
         annotator = self.storage.get_controlnet_annotator(self.cn_annotator[0], device, dtype, self.on_download)
