@@ -583,7 +583,7 @@ class UNET(nn.Module):
         self.conv_act = nn.SiLU()
         self.conv_out = nn.Conv2d(320, 4, kernel_size=3, padding=1)
 
-    def forward(self, sample, timestep, encoder_hidden_states):
+    def forward(self, sample, timestep, encoder_hidden_states, *args, **kwargs):
         timesteps = timestep.expand(sample.shape[0])
         t_emb = self.time_proj(timesteps).to(sample.dtype)
         emb = self.time_embedding(t_emb)
@@ -599,9 +599,13 @@ class UNET(nn.Module):
         sample = self.mid_block(sample, emb, encoder_hidden_states=encoder_hidden_states)
         
         sample = self.up_blocks[0](s0=s4_2, s1=s4_1, s2=s3_3, hidden_states=sample, temb=emb)
+        del s4_2, s4_1, s3_3
         sample = self.up_blocks[1](s0=s3_2, s1=s3_1, s2=s2_3, hidden_states=sample, temb=emb, encoder_hidden_states=encoder_hidden_states)
+        del s3_2, s3_1, s2_3
         sample = self.up_blocks[2](s0=s2_2, s1=s2_1, s2=s1_3, hidden_states=sample, temb=emb, encoder_hidden_states=encoder_hidden_states)
+        del s2_2, s2_1, s1_3
         sample = self.up_blocks[3](s0=s1_2, s1=s1_1, s2=s0, hidden_states=sample, temb=emb, encoder_hidden_states=encoder_hidden_states)
+        del s1_2, s1_1, s0
 
         sample = self.conv_norm_out(sample)
         sample = self.conv_act(sample)

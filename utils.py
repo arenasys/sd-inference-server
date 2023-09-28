@@ -355,6 +355,9 @@ class DisableInitialization:
         torch.nn.init._no_grad_normal_ = self.init_no_grad_normal
 
 class CUDATimer:
+    def __init__(self, label):
+        self.label = label
+    
     def __enter__(self):
         self.start = torch.cuda.Event(enable_timing=True)
         self.end = torch.cuda.Event(enable_timing=True)
@@ -363,9 +366,8 @@ class CUDATimer:
     
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.end.record()
-
         torch.cuda.synchronize()
-        print(self.start.elapsed_time(self.end))
+        print(self.label, self.start.elapsed_time(self.end))
 
 def download(url, path, progress_callback=None, started_callback=None, headers={}):
     if os.path.isdir(path):

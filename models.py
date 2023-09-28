@@ -62,6 +62,7 @@ class UNET(UNet2DConditionModel):
                 layers_per_block=2,
                 cross_attention_dim=768,
                 attention_head_dim=8,
+                use_linear_projection=True
             )
         elif model_type == "SDv2":
             config = dict(
@@ -327,7 +328,11 @@ class AdditionalNetworks():
                     strength = self.parent.get_strength(i, lora.net_name, self.name)
                     if strength:
                         if v == None:
-                            v = lora(x, self.original_module)
+                            if "_proj" in lora.layer_name and type(lora.lora_up) == torch.nn.Conv2d:
+                                v = lora(x.T, self.original_module).T
+                            else:
+                                v = lora(x, self.original_module)
+        
                         out[i] += v[i] * strength
             return out
 
@@ -335,6 +340,10 @@ class AdditionalNetworks():
             if static:
                 weight = module.get_weight(self.original_module.weight.shape)
                 strength = self.parent.get_strength(0, module.net_name, self.name)
+                
+                if "_proj" in module.layer_name and type(module.lora_up) == torch.nn.Conv2d:
+                    weight = weight.squeeze()
+
                 self.original_module.weight += weight.to(self.original_module.weight.device) * strength
             else:
                 self.loras.append(module)

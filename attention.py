@@ -23,7 +23,6 @@ def do_attention(self, hidden_states, encoder_hidden_states=None, attention_mask
         return ORIGINAL_FORWARD(self, hidden_states, encoder_hidden_states=encoder_hidden_states, attention_mask=attention_mask, temb=temb)
 
     residual = hidden_states
-
     if self.spatial_norm is not None:
         hidden_states = self.spatial_norm(hidden_states, temb)
 
@@ -39,10 +38,10 @@ def do_attention(self, hidden_states, encoder_hidden_states=None, attention_mask
     hidden_states = CURRENT_FORWARD(self, hidden_states, encoder_hidden_states, attention_mask, **cross_attention_kwargs)
 
     if input_ndim == 4:
-            hidden_states = hidden_states.transpose(-1, -2).reshape(batch_size, channel, height, width)
+        hidden_states = hidden_states.transpose(-1, -2).reshape(batch_size, channel, height, width)
 
     if self.residual_connection:
-        hidden_states = hidden_states+ residual
+        hidden_states = hidden_states + residual
 
     hidden_states = hidden_states / self.rescale_output_factor
 

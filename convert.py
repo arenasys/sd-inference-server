@@ -48,6 +48,11 @@ def SDv1_convert(state_dict):
     for k in state_dict:
         if ".VAE." in k and k.endswith(".weight") and "mid_block.attentions.0." in k:
             state_dict[k] = state_dict[k].squeeze()
+    
+    # 1x1 conv2d to linear
+    for k in state_dict:
+        if k.endswith(".weight") and "proj_" in k:
+            state_dict[k] = state_dict[k].squeeze()
 
 def SDv1_revert(state_dict):
     mapping = {}
@@ -59,6 +64,10 @@ def SDv1_revert(state_dict):
 
     for k in state_dict:
         if ".VAE." in k and k.endswith(".weight") and "mid_block.attentions.0." in k and len(state_dict[k].shape) == 2:
+            state_dict[k] = state_dict[k].unsqueeze(-1).unsqueeze(-1)
+
+    for k in state_dict:
+        if k.endswith(".weight") and "proj_" in k:
             state_dict[k] = state_dict[k].unsqueeze(-1).unsqueeze(-1)
 
     for k in list(state_dict.keys()):
