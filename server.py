@@ -18,10 +18,11 @@ import storage
 import wrapper
 import utils
 
-import base64
+import secrets
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.exceptions import InvalidTag
 
 import random
 
@@ -44,15 +45,24 @@ def get_scheme(password):
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
         length=32,
-        salt=h.finalize()[:16], #lol
+        salt=h.finalize()[:16],
         iterations=480000,
     )
-    key = base64.urlsafe_b64encode(kdf.derive(password))
-    return Fernet(key)
+    return AESGCM(kdf.derive(password))
+
+def encrypt(scheme, data):
+    if scheme:
+        nonce = secrets.token_bytes(16)
+        data = nonce + scheme.encrypt(nonce, data, b"")
+    return data
+
+def decrypt(scheme, data):
+    if scheme:
+        data = scheme.decrypt(data[:16], data[16:], b"")
+    return data
 
 def get_id():
     return random.SystemRandom().randint(1, 2**31 - 1)
-
 
 SEP = os.path.sep
 INV_SEP = {"\\": '/', '/':'\\'}[os.path.sep]
@@ -352,8 +362,7 @@ class Server():
                     id, response = self.clients[client_id].get()
                     if id in mapping: id = mapping[id]
                     response["id"] = id
-                    data = bson.dumps(response)
-                    data = base64.urlsafe_b64decode(self.scheme.encrypt(data))
+                    data = encrypt(self.scheme, bson.dumps(response))
                     data = [data[i:min(i+FRAGMENT_SIZE,len(data))] for i in range(0, len(data), FRAGMENT_SIZE)]
                     connection.send(data)
                 else:
@@ -373,8 +382,7 @@ class Server():
                     request = None
                     if type(data) in {bytes, bytearray}:
                         try:
-                            if self.scheme:
-                                data = self.scheme.decrypt(base64.urlsafe_b64encode(bytes(data)))
+                            data = decrypt(self.scheme, bytes(data))
                             try:
                                 request = bson.loads(data)
                             except:
