@@ -13,22 +13,27 @@ import storage
 import wrapper
 import string
 import time
+import urllib.parse
 from server import Server
 
 model_folder = sys.argv[1]
 endpoint = "127.0.0.1:28888"
 
+password = ''.join(random.SystemRandom().choice(string.ascii_letters + string.digits) for _ in range(8))
+print("PASSWORD:", password)
+
+url = "ws://"+endpoint
+if len(sys.argv) > 2:
+  url = sys.argv[2]
+web = "https://arenasys.github.io/?" + urllib.parse.urlencode({'endpoint': url, "password": password})
+print("WEB:", web)
+
 model_storage = storage.ModelStorage(model_folder, torch.float16, torch.float32)
 params = wrapper.GenerationParameters(model_storage, torch.device("cuda"))
-
-password = ''.join(random.SystemRandom().choice(string.ascii_letters + string.digits) for _ in range(8))
 
 ip, port = endpoint.split(':')
 server = Server(params, ip, port, password)
 server.start()
-
-print("BIND:", endpoint)
-print("PASSWORD:", password)
 
 try:
     try:
