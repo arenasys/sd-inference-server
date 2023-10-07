@@ -447,7 +447,7 @@ if __name__ == "__main__":
     parser.add_argument('--password', type=str, help='password to derive encryption key from', default=DEFAULT_PASSWORD)
     parser.add_argument('--models', type=str, help='models folder', default="../../models")
     parser.add_argument('--cache', type=int, help='number of models allowed to be cached in RAM', default=0)
-    parser.add_argument('-r', '--read-only', help='disable filesystem changes', action='store_const')
+    parser.add_argument('-r', '--read-only', help='disable filesystem changes', action='store_true')
     parser.add_argument('-o', '--owner', help='first client is the owner, bypassing read-only', action='store_true')
     parser.add_argument('-m', '--monitor', help='send all generations to the owner', action='store_true')
     parser.add_argument('-p', '--public', help='configure for multiple users (disables a few actions)', action='store_true')
