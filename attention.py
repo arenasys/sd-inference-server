@@ -14,8 +14,8 @@ ORIGINAL_FORWARD = None
 try:
     import diffusers.models.attention_processor
     ORIGINAL_FORWARD = diffusers.models.attention_processor.Attention.forward
-except:
-    raise Exception("Incompatible Diffusers version")
+except:   
+    raise Exception("Incompatible Diffusers version: " + diffusers.__file__)
 CURRENT_FORWARD = ORIGINAL_FORWARD
 
 def do_attention(self, hidden_states, encoder_hidden_states=None, attention_mask=None, temb=None, **cross_attention_kwargs):
