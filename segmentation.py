@@ -2,6 +2,7 @@ import os
 import utils
 import numpy as np
 import PIL
+import torch
 
 SEGMENT_AVAILABLE = False
 try:
@@ -28,7 +29,7 @@ def get_predictor(name, folder, callback):
     return sam
 
 def segment(model, image, points, labels):
-    predictor = SamPredictor(model)
+    predictor = SamPredictor(model.to(torch.float32))
     predictor.set_image(np.array(image))
 
     masks, scores, _ = predictor.predict(points, labels, multimask_output=True)

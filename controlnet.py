@@ -7,7 +7,7 @@ import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 
 import utils
-from annotator import shuffle
+from annotator import shuffle, canny
 
 CONTROLNET_MODELS = {
     "Canny": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11p_sd15_canny.pth",
@@ -23,7 +23,8 @@ CONTROLNET_MODELS = {
     "Inpaint": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11p_sd15_inpaint.pth",
     "Normal": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11p_sd15_normalbae.pth",
     "Scribble": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11p_sd15_scribble.pth",
-    "Segmentation": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11p_sd15_seg.pth"
+    "Segmentation": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11p_sd15_seg.pth",
+    "QR": "https://huggingface.co/DionTimmer/controlnet_qrcode-control_v1p_sd15/resolve/main/control_v1p_sd15_qrcode.safetensors"
 }
 
 def cv2_to_pil(img):
@@ -36,6 +37,8 @@ def annotate(img, annotator, model, arg, mask=None):
     img = pil_to_cv2(img)
     if annotator == "Invert":
         img = 255 - img
+    elif annotator == "Canny":
+        img = canny(img, *arg)
     elif annotator == "Shuffle":
         img = shuffle(img)
     elif annotator == "Pose":

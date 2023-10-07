@@ -22,20 +22,20 @@ MODEL_FOLDERS = {
 }
 
 class ModelStorage():
-    def __init__(self, path, dtype, vae_dtype=None):
+    def __init__(self, path, dtype, vae_dtype=None, cache=0):
         self.dtype = dtype
         self.vae_dtype = vae_dtype or dtype
 
         self.path = None
         self.set_folder(path)
 
-        self.classes = {"UNET": models.UNET, "CLIP": models.CLIP, "VAE": models.VAE, "SR": upscalers.SR, "LoRA": models.LoRA, "HN": models.HN, "CN": models.ControlNet}
+        self.classes = {"UNET": models.UNET, "CLIP": models.CLIP, "VAE": models.VAE, "SR": upscalers.SR, "LoRA": models.LoRA, "HN": models.HN, "CN": models.ControlNet, "AN": torch.nn.Module}
         self.vram_limits = {"UNET": 1, "CLIP": 1, "VAE": 1, "SR": 1}
-        self.ram_limits = {"UNET": 0, "CLIP": 0, "VAE": 0, "SR": 0}
-        self.annotators = {}
+        self.ram_limits = {"UNET": cache, "CLIP": cache, "VAE": cache, "SR": cache, "LoRA": cache, "HN": cache, "CN": cache, "AN": cache}
 
         self.files = {k:{} for k in self.classes}
         self.loaded = {k:{} for k in self.classes}
+        self.order = {k:[] for k in self.classes}
         self.file_cache = {}
 
         self.uncap_ram = False
@@ -85,7 +85,12 @@ class ModelStorage():
     def clear_vram(self):
         for c in self.loaded:
             for m in list(self.loaded[c].keys()):
+                if not m in self.loaded[c]:
+                    continue
                 if str(self.loaded[c][m].device) != "cpu":
+                    if c in self.ram_limits:
+                        self.enforce_limit(c, m, "cpu")
+                    #print("CLEAR", c, m, "TO RAM")
                     self.unload(self.loaded[c][m])
         self.do_gc()
 
@@ -98,9 +103,9 @@ class ModelStorage():
         self.do_gc()
         self.find_all()
 
-    def enforce_limit(self, current, comp, device):
-        allowed_vram = self.vram_limits[comp]
-        allowed_ram = self.ram_limits[comp]
+    def enforce_limit(self, comp, current, device):
+        allowed_vram = self.vram_limits.get(comp, 0)
+        allowed_ram = self.ram_limits.get(comp, 0)
 
         found_vram = 0
         found_ram = 0
@@ -109,22 +114,28 @@ class ModelStorage():
             found_ram += 1
         else:
             found_vram += 1
-
-        for m in list(self.loaded[comp].keys()):
+        
+        for m in self.order[comp]:
+            if not m in self.loaded[comp]:
+                continue
+            
             in_ram = str(self.loaded[comp][m].device) == "cpu"
             if m == current:
                 continue
 
             if found_vram >= allowed_vram and not in_ram:
                 if found_ram < allowed_ram:
+                    #print("ENFORCE", comp, m, "TO RAM")
                     self.loaded[comp][m] = self.loaded[comp][m].to("cpu")
                     found_ram += 1
                 else:
+                    #print("ENFORCE", comp, m, "TO DISK")
                     del self.loaded[comp][m]
                 self.do_gc()
                 continue
 
             if found_ram >= allowed_ram and in_ram and not self.uncap_ram:
+                #print("ENFORCE", comp, m, "TO DISK")
                 del self.loaded[comp][m]
                 self.do_gc()
                 continue
@@ -138,14 +149,20 @@ class ModelStorage():
         # networks cant have a hard limit since you can use an arbitrary number of them
         # so they are "decayed" from gpu -> cpu -> disk as they are left unused
         for m in list(self.loaded[comp].keys()):
+            if str(self.loaded[comp][m].device) == "cpu":
+                continue
             if any([os.path.sep+u+"." in m or m == u for u in used]):
                 continue
+            #print("NET ENFORCE", m, "TO DISK")
             del self.loaded[comp][m]
             self.do_gc()
 
     def enforce_controlnet_limit(self, used):
         for m in list(self.loaded["CN"].keys()):
+            if str(self.loaded["CN"][m].device) == "cpu":
+                continue
             if not m in used:
+                #print("CN ENFORCE", m, "TO DISK")
                 del self.loaded["CN"][m]
                 self.do_gc()
 
@@ -159,9 +176,12 @@ class ModelStorage():
         self.clear_file_cache()
 
     def clear_annotators(self, allowed=[]):
-        for k in list(self.annotators.keys()):
-            if not k in allowed:
-                del self.annotators[k]
+        for m in list(self.loaded["AN"].keys()):
+            if str(self.loaded["AN"][m].device) == "cpu":
+                continue
+            if not m in allowed:
+                #print("AN ENFORCE", m, "TO DISK")
+                del self.loaded["AN"][m]
                 self.do_gc()
 
     def load(self, model, device):
@@ -169,14 +189,18 @@ class ModelStorage():
         self.do_gc()
 
     def unload(self, model):
-        model.to("cpu")
+        model.to("cpu", self.dtype)
         self.do_gc()
 
     def add(self, comp, name, model):
         self.loaded[comp][name] = model
+        if name in self.order[comp]:
+            self.order[comp].remove(name)
+        self.order[comp].insert(0, name)
 
     def remove(self, comp, name):
         if name in self.loaded[comp]:
+            #print("REMOVE", comp, name, "TO DISK")
             del self.loaded[comp][name]
         self.do_gc()
 
@@ -195,7 +219,7 @@ class ModelStorage():
         model = model.to(device, dtype)
 
         if comp in self.vram_limits:
-            self.enforce_limit(name, comp, device)
+            self.enforce_limit(comp, name, device)
 
         return model
 
@@ -282,8 +306,8 @@ class ModelStorage():
             model = self.classes[comp].from_model(name, self.file_cache[file][comp], dtype)
         else:
             raise ValueError(f"model doesnt contain a {comp}: {name}")
-
-        self.loaded[comp][name] = model
+        
+        self.add(comp, name, model)
         return self.move(model, name, comp, device)
 
     def get_state_dict(self, file, comp):
@@ -356,7 +380,7 @@ class ModelStorage():
             raise ValueError(f"model doesnt contain a CN: {file}")
         
         model = models.ControlNet.from_model(name, state_dict["CN"], self.dtype)
-        self.loaded["CN"][name] = model
+        self.add("CN", name, model)
 
         return self.move(model, name, "CN", device)
     
@@ -367,18 +391,24 @@ class ModelStorage():
         def download(url, file):
             utils.download(url, file, callback)
 
-        if not name in self.annotators:
+        if not name in self.loaded["AN"]:
             print(f"LOADING {name} ANNOTATOR...")
-            self.annotators[name] = annotator.annotators[name](os.path.join(self.path, "CN", "annotators"), download)
-        return self.annotators[name].to(device, dtype)
+            model = annotator.annotators[name](os.path.join(self.path, "CN", "annotators"), download).to(device, dtype)
+            self.add("AN", name, model)
+        else:
+            model = self.loaded["AN"][name]
+        
+        return self.move(model, name, "AN", device)
     
     def get_segmentation_annotator(self, name, device, callback):
-        if not name in self.annotators:
+        if not name in self.loaded["AN"]:
             print(f"LOADING {name} ANNOTATOR...")
             folder = os.path.join(self.path, "SEGMENTATION")
-            predictor = segmentation.get_predictor(name, folder, callback)
-            self.annotators[name] = predictor
-        return self.annotators[name].to(device)
+            model = segmentation.get_predictor(name, folder, callback)
+            self.add("AN", name, model)
+        else:
+            model = self.loaded["AN"][name]
+        return self.move(model, name, "AN", device)
     
     def load_file(self, file, comp):
         if not comp == "TI":
@@ -393,7 +423,7 @@ class ModelStorage():
         else:
             out = {comp: utils.load_pickle(file)}
 
-        if comp in out and comp == "CN":
+        if comp in out and comp == "CN" and not "qrcode" in file:
             out[comp] = convert.CN_convert(out[comp])
             
         return out

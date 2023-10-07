@@ -183,7 +183,7 @@ def do_download(request, folder, id, callback):
     thread.start()
 
 class Inference(threading.Thread):
-    def __init__(self, wrapper, read_only, callback):
+    def __init__(self, wrapper, read_only, public, callback):
         super().__init__()
         
         self.wrapper = wrapper
@@ -194,6 +194,7 @@ class Inference(threading.Thread):
         self.current = None
 
         self.read_only = read_only
+        self.public = public
         self.owner = None
 
         self.stay_alive = True
@@ -249,31 +250,30 @@ class Inference(threading.Thread):
                 self.requests.task_done()
             except queue.Empty:
                 time.sleep(0.01)
-                pass
             except Exception as e:
                 self.requests.task_done()
                 if str(e) == "Read-only":
                     self.got_response({"type":"error", "data":{"message": "Server is read-only"}})
-                    continue
-                if str(e) == "Aborted":
+                elif str(e) == "Aborted":
                     self.got_response({"type":"aborted", "data":{}})
-                    continue
-                additional = ""
-                trace = ""
-                try:
-                    trace = log_traceback("SERVER")
-                    s = traceback.extract_tb(e.__traceback__).format()
-                    s = [e for e in s if not "venv" in e][-1]
-                    s = s.split(", ")
-                    file = s[0].split(os.path.sep)[-1][:-1]
-                    line = s[1].split(" ")[1]
-                    additional = f" ({file}:{line})"
-                except Exception as a:
-                    trace = log_traceback("LOGGING")
-                    additional = " THEN " + str(a)
-                    pass
-
-                self.got_response({"type":"error", "data":{"message":str(e) + additional, "trace": trace}})
+                else:
+                    additional = ""
+                    trace = ""
+                    try:
+                        trace = log_traceback("SERVER")
+                        s = traceback.extract_tb(e.__traceback__).format()
+                        s = [e for e in s if not "venv" in e][-1]
+                        s = s.split(", ")
+                        file = s[0].split(os.path.sep)[-1][:-1]
+                        line = s[1].split(" ")[1]
+                        additional = f" ({file}:{line})"
+                    except Exception as a:
+                        trace = log_traceback("LOGGING")
+                        additional = " THEN " + str(a)
+                    self.got_response({"type":"error", "data":{"message":str(e) + additional, "trace": trace}})
+            
+            if self.public:
+                self.wrapper.storage.clear_vram()
     
     def upload(self, type, name, chunk=None, index=-1, total=0):
         global UPLOAD_IDS
@@ -299,7 +299,7 @@ class Inference(threading.Thread):
             self.got_response({"type":"download", "data":{"status": "success"}}, id)
 
 class Server():
-    def __init__(self, wrapper, host, port, password=DEFAULT_PASSWORD, owner=False, read_only=False, monitor=False):
+    def __init__(self, wrapper, host, port, password=DEFAULT_PASSWORD, owner=False, read_only=False, monitor=False, public=False):
         self.stopping = False
 
         self.requests = {}
@@ -312,8 +312,9 @@ class Server():
         self.monitor = monitor
         self.read_only = read_only
         self.owner = None if owner else "disabled"
+        self.public = public
 
-        self.inference = Inference(wrapper, read_only, callback=self.on_response)
+        self.inference = Inference(wrapper, read_only, public, callback=self.on_response)
         self.server = websockets.sync.server.serve(self.handle_connection, host=host, port=int(port), max_size=None)
         self.serve = threading.Thread(target=self.serve_forever)
 
@@ -445,18 +446,23 @@ if __name__ == "__main__":
     parser.add_argument('--bind', type=str, help='address (ip:port) to listen on', default="127.0.0.1:28888")
     parser.add_argument('--password', type=str, help='password to derive encryption key from', default=DEFAULT_PASSWORD)
     parser.add_argument('--models', type=str, help='models folder', default="../../models")
-    parser.add_argument('-r', '--read-only', help='disable filesystem changes', action='store_true')
+    parser.add_argument('--cache', type=int, help='number of models allowed to be cached in RAM', default=0)
+    parser.add_argument('-r', '--read-only', help='disable filesystem changes', action='store_const')
     parser.add_argument('-o', '--owner', help='first client is the owner, bypassing read-only', action='store_true')
     parser.add_argument('-m', '--monitor', help='send all generations to the owner', action='store_true')
-    
+    parser.add_argument('-p', '--public', help='configure for multiple users (disables a few actions)', action='store_true')
+
     args = parser.parse_args()
 
     ip, port = args.bind.rsplit(":",1)
 
-    model_storage = storage.ModelStorage(args.models, torch.float16, torch.float32)
+    model_storage = storage.ModelStorage(args.models, torch.float16, torch.float32, args.cache)
     params = wrapper.GenerationParameters(model_storage, torch.device("cuda"))
 
-    server = Server(params, ip, port, args.password, args.owner, args.read_only, args.monitor)
+    if args.public:
+        params.switch_public()
+
+    server = Server(params, ip, port, args.password, args.owner, args.read_only, args.monitor, args.public)
     server.start()
     
     try:

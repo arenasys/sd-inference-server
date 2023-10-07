@@ -1,7 +1,6 @@
 import cv2
 import numpy as np
 
-import annotator.canny
 import annotator.hed
 import annotator.lineart
 import annotator.lineart_anime
@@ -11,7 +10,6 @@ import annotator.mlsd
 import annotator.normalbae
 
 annotators = {
-    "Canny": annotator.canny.CannyDetector,
     "Softedge": annotator.hed.HEDdetector,
     "Lineart": annotator.lineart.LineartDetector,
     "Anime": annotator.lineart_anime.LineartAnimeDetector,
@@ -38,3 +36,6 @@ def shuffle(img, f=256):
     y = make_noise_disk(h, w, 1, f) * float(h - 1)
     flow = np.concatenate([x, y], axis=2).astype(np.float32)
     return cv2.remap(img, flow, None, cv2.INTER_LINEAR)
+
+def canny(img, low_threshold=0.4, high_threshold=0.8):
+    return cv2.Canny(img, int(low_threshold*255), int(high_threshold*255))

@@ -45,7 +45,9 @@ TYPES = {
     float: ["scale", "eta", "hr_factor", "hr_eta"],
 }
 
-SAMPLER_CLASSES = { # lol
+STATIC = ["storage", "device", "device_names", "callback", "last_models_modified", "last_models_config", "dataset", "public"]
+
+SAMPLER_CLASSES = {
     "Euler": samplers_k.Euler,
     "Euler a": samplers_k.Euler_a,
     "DDIM": samplers_ddpm.DDIM,
@@ -106,6 +108,8 @@ class GenerationParameters():
         self.storage = storage
         self.device = device
 
+        self.public = False
+
         self.device_names = []
         for i in range(torch.cuda.device_count()):
             original = torch.cuda.get_device_name(i)
@@ -124,6 +128,9 @@ class GenerationParameters():
         self.last_models_config = None
 
         self.callback = None
+
+    def switch_public(self):
+        self.public = True
 
     def set_status(self, status):
         if self.callback:
@@ -225,7 +232,7 @@ class GenerationParameters():
             
     def reset(self):
         for attr in list(self.__dict__.keys()):
-            if not attr in ["storage", "device", "device_names", "callback", "last_models_modified", "last_models_config", "dataset"]:
+            if not attr in STATIC:
                 delattr(self, attr)
 
     def __getattr__(self, item):
@@ -259,7 +266,8 @@ class GenerationParameters():
                                 value[i][j] = value[i][j].split()[-1]
                             else:
                                 value[i][j] = value[i][j].convert("L")
-            
+            if key in STATIC:
+                continue
             setattr(self, key, value)
 
     def load_models(self, unet_nets, clip_nets):
@@ -371,11 +379,22 @@ class GenerationParameters():
         if self.vram_mode == "Minimal" and self.show_preview == "Full":
             raise ValueError("Full preview is incompatible with minimal VRAM")
         
+        if self.public:
+            self.device_name = "Default"
+            self.vram_mode = "Default"
+            if self.merge_lora_recipe or self.merge_checkpoint_recipe:
+                raise Exception("Merging is disabled")
+        
         if self.prediction_type:
             self.prediction_type = self.prediction_type.lower()
 
     def set_device(self):
         device = torch.device("cuda")
+
+        if self.public:
+            self.device = device
+            return
+
         if self.device_name in self.device_names:
             idx = self.device_names.index(self.device_name)
             if self.device_name == "CPU":
@@ -392,7 +411,7 @@ class GenerationParameters():
                     self.storage.dtype = torch.float16
         self.device = device
     
-    def set_attention(self):
+    def set_attention(self):       
         if self.attention and self.attention in CROSS_ATTENTION:
             CROSS_ATTENTION[self.attention](self.device)
 
@@ -1111,11 +1130,15 @@ class GenerationParameters():
         data["hr_upscaler"] = list(UPSCALERS_LATENT.keys()) + list(UPSCALERS_PIXEL.keys()) + data["SR"]
         data["img2img_upscaler"] = list(UPSCALERS_PIXEL.keys()) + data["SR"]
 
-        available = attention.get_available()
+        available = attention.get_available() 
         data["attention"] = [k for k,v in CROSS_ATTENTION.items() if v in available]
+
         data["TI"] = list(self.storage.embeddings_files.keys())
         data["device"] = self.device_names
-        
+
+        if self.public:
+            data["device"] = ["Default"]
+
         if self.callback:
             if not self.callback({"type": "options", "data": data}):
                 raise RuntimeError("Aborted")
