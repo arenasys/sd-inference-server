@@ -89,17 +89,18 @@ def CN_convert(state_dict):
             mapping[src] = dst
 
     for k in list(state_dict.keys()):
-        if not k in mapping:
+        t = k
+        if not t.startswith("control_model."):
+            t = "control_model." + t
+        if t in mapping:
+            kk = mapping[t]
+            state_dict[kk] = state_dict[k]
             del state_dict[k]
-
-    for k in state_dict:
-        if state_dict[k].dtype in {torch.float32, torch.float64, torch.bfloat16}:
-            state_dict[k] = state_dict[k].to(torch.float16)
-
-    for src, dst in mapping.items():
-        if src in state_dict:
-            state_dict[dst] = state_dict[src]
-            del state_dict[src]
+            if state_dict[kk].dtype in {torch.float32, torch.float64, torch.bfloat16}:
+                state_dict[kk] = state_dict[kk].to(torch.float16)
+        else:
+            print(k)
+            del state_dict[k]
     
     return state_dict
 

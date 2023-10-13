@@ -414,7 +414,7 @@ class ModelStorage():
         if not comp == "TI":
             print(f"LOADING {file.rsplit(os.path.sep, 1)[-1]}...")
 
-        if comp in ["UNET", "CLIP", "VAE"]:
+        if comp in ["UNET", "CLIP", "VAE", "Checkpoint"]:
             state_dict, metadata = convert.convert(file)
             return self.parse_model(state_dict, metadata)
         
@@ -423,7 +423,7 @@ class ModelStorage():
         else:
             out = {comp: utils.load_pickle(file)}
 
-        if comp in out and comp == "CN" and not "qrcode" in file:
+        if comp in out and comp == "CN":
             out[comp] = convert.CN_convert(out[comp])
             
         return out
