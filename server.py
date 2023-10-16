@@ -241,6 +241,12 @@ class Inference(threading.Thread):
                 elif request["type"] == "segmentation":
                     self.wrapper.set(**request["data"])
                     self.wrapper.segmentation()
+                elif request["type"] == "train_lora":
+                    self.wrapper.set(**request["data"])
+                    self.wrapper.train_lora()
+                elif request["type"] == "train_upload":
+                    self.wrapper.set(**request["data"])
+                    self.wrapper.train_upload()
                 elif request["type"] == "download":
                     do_download(request["data"], self.wrapper.storage.path, self.current, self.got_response)
                 elif request["type"] == "chunk":

@@ -12,6 +12,8 @@ import contextlib
 import numpy as np
 import math
 import json
+import itertools
+import tqdm
 
 DIRECTML_AVAILABLE = False
 try:
@@ -34,6 +36,8 @@ import controlnet
 import preview
 import segmentation
 import merge
+import models
+import train
 
 DEFAULTS = {
     "strength": 0.75, "sampler": "Euler a", "clip_skip": 1, "eta": 1,
@@ -142,7 +146,7 @@ class GenerationParameters():
             if not self.callback({"type": "progress", "data": progress}):
                 raise RuntimeError("Aborted")
 
-    def on_step(self, progress, latents):
+    def on_step(self, progress, latents=None):
         step = self.current_step
         total = self.total_steps
         rate = progress["rate"]
@@ -195,6 +199,34 @@ class GenerationParameters():
             self.last =  progress["n"]
             progress = {"current": progress["n"], "total": progress["total"], "rate": (progress["rate"] or 1), "unit": "it/s"}
             self.set_progress(progress)
+
+    def on_training_step(self, progress, epoch, losses):       
+        rate = progress["rate"] or 1
+        total = progress["total"]
+        current = progress["n"]
+
+        elapsed = progress["elapsed"]
+        remaining = (total - current)/rate
+
+        progress = {"stage": "Training", "current": current, "total": total, "rate": rate, "elapsed": elapsed, "remaining": remaining, "epoch": epoch, "losses": losses}
+
+        if self.callback:
+            if not self.callback({"type": "training_progress", "data": progress}):
+                raise RuntimeError("Aborted")
+
+    def on_caching_step(self, progress):
+        rate = progress["rate"] or 1
+        total = progress["total"]
+        current = progress["n"]
+
+        elapsed = progress["elapsed"]
+        remaining = (total - current)/rate
+
+        progress = {"stage": "Caching", "current": current, "total": total, "rate": rate, "elapsed": elapsed, "remaining": remaining}
+
+        if self.callback:
+            if not self.callback({"type": "training_progress", "data": progress}):
+                raise RuntimeError("Aborted")
 
     def on_artifact(self, name, images):
         if self.callback:
@@ -679,7 +711,6 @@ class GenerationParameters():
             cn_scales = [o["scale"] for o in self.cn_opts]
             cn_args = [o["args"] for o in self.cn_opts]
             cn_annotator_models = [self.storage.get_controlnet_annotator(a, device, dtype, self.on_download) for a in cn_annotators]
-
             cn_images = upscalers.upscale(self.cn_image, transforms.InterpolationMode.LANCZOS, self.width, self.height)
 
             cn_cond, cn_outputs = controlnet.preprocess_control(cn_images, cn_annotators, cn_annotator_models, cn_args, cn_scales)
@@ -709,6 +740,7 @@ class GenerationParameters():
             area = []
         
         self.set_status("Attaching")
+
         self.attach_networks(all_networks, *initial_networks, device)
 
         self.set_status("Encoding")
@@ -1408,3 +1440,175 @@ class GenerationParameters():
         if self.callback:
             if not self.callback({"type": "segmentation", "data": {"images": [data]}}):
                 raise RuntimeError("Aborted")
+
+    def train_lora(self):
+        import diffusers
+
+        self.set_status("Configuring")
+        self.check_parameters()
+        self.storage.reset()
+        self.set_device()
+
+        steps = self.steps
+        learning_schedule = self.learning_schedule
+        learning_rate = self.learning_rate
+        batch_size = self.batch_size
+        image_size = self.image_size
+        clip_skip = self.clip_skip
+
+        device = self.device
+        dtype = torch.float16
+
+        self.set_status("Loading")
+
+        model = os.path.join(self.storage.path, self.base_model)
+        state_dict = self.storage.load_file(model, "Checkpoint")
+        state_dict = utils.cast_state_dict(state_dict, torch.float16)
+
+        model_type, model_variant, prediction_type = "SDv1", "", "epsilon"
+
+        unet = models.UNET(model_type, model_variant, prediction_type, dtype)
+        unet.load_state_dict(state_dict["UNET"], strict=False)
+        unet.to(device, dtype)
+        unet.train(False)
+
+        clip = models.CLIP(model_type, dtype)
+        clip.model.load_state_dict(state_dict["CLIP"], strict=False)
+        clip.to(device, dtype)
+        clip.train(False)
+
+        vae = models.VAE(model_type, dtype)
+        vae.load_state_dict(state_dict["VAE"], strict=False)
+        vae.to(device, torch.float32)
+
+        del state_dict
+
+        if self.folders:
+            dataset = train.Dataset()
+            for folder in self.folders:
+                dataset.add_path(folder)
+        elif self.dataset != None:
+            dataset = self.dataset
+        else:
+            raise RuntimeError("No dataset specified")
+
+        self.set_status("Preparing")
+
+        dataset.configure(vae, clip, batch_size, image_size)
+        dataset.calculate_buckets()
+        dataset.build_cache(callback=self.on_caching_step)
+        dataset.calculate_batches()
+
+        del vae
+        self.storage.do_gc()
+        
+        rank = int(self.lora_rank)
+        conv_rank = int(self.lora_conv_rank)
+        alpha = int(self.lora_alpha)
+
+        network, modules = train.build_lora(rank, conv_rank, alpha, unet, clip)
+        network = network.to(device, torch.float32)
+
+        parameters = []
+        for name, module in modules.items():
+            parameters += [module.lora_module.lora_down.parameters()]
+            parameters += [module.lora_module.lora_up.parameters()]
+        parameters = itertools.chain(*parameters)
+        network.train(True)
+
+        epochs = dataset.total_epochs(steps)
+        num_warmup_steps = int(self.warmup * steps)
+
+        optimizer = torch.optim.AdamW(parameters, lr=learning_rate)
+        noise_scheduler = diffusers.DDPMScheduler(
+            beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", num_train_timesteps=1000, clip_sample=False
+        )
+
+        if self.learning_schedule == "Cosine":
+            lr_scheduler = diffusers.optimization.get_cosine_with_hard_restarts_schedule_with_warmup(
+                optimizer, num_warmup_steps, steps, self.restarts
+            )
+        elif self.learning_schedule == "Linear":
+            lr_scheduler = diffusers.optimization.get_linear_schedule_with_warmup(
+                optimizer, num_warmup_steps, steps
+            )
+        elif self.learning_schedule == "Constant":
+            lr_scheduler = diffusers.optimization.get_constant_schedule_with_warmup(
+                optimizer, num_warmup_steps, steps
+            )
+        
+        step = 0
+
+        progress = tqdm.tqdm(total=steps, desc=f"TRAINING", disable=False)
+
+        self.set_status("Training")
+        loss_window = []
+        loss_last = []
+        
+        last_time = 0
+        for epoch in range(1, epochs+1):
+            dataset.calculate_batches()
+            for i, latents, tokens in dataset:
+                with torch.no_grad():
+                    latents = latents.to(device)
+                    noise = torch.randn_like(latents, device=device, dtype=torch.float32)
+                    timesteps = torch.randint(0, 1000, (batch_size,), device=device).long()
+                    noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
+                    latents = latents.to(torch.device("cpu"))
+
+                with torch.cuda.amp.autocast():
+                    conditioning = torch.cat(train.encode_tokens(clip, tokens, clip_skip))
+                    prediction = unet(noisy_latents, timesteps, encoder_hidden_states=conditioning).sample
+                    loss = torch.nn.functional.mse_loss(prediction, noise, reduction="mean")
+
+                loss.backward()
+
+                torch.nn.utils.clip_grad_norm(parameters, 1.0)
+
+                optimizer.step()
+                lr_scheduler.step()
+
+                optimizer.zero_grad(set_to_none=True)
+
+                step += 1
+                loss_window.insert(0, loss.item())
+                if len(loss_window) > len(dataset):
+                    loss_window.pop()
+                current_loss = sum(loss_window)/len(loss_window)
+                loss_last += [current_loss]
+                
+                progress.update(1)
+                progress.set_postfix({"loss": current_loss})
+
+                if time.time() - last_time > 1:
+                    last_time = time.time()
+                    self.on_training_step(progress.format_dict, len(dataset), loss_last)
+                    loss_last = []
+
+                if step % 1000 == 0 or step == steps:
+                    self.set_status("Saving")
+                    state_dict = train.get_state_dict(network)
+
+                    filename = f"{self.name}_{step}.safetensors"
+                    folder = os.path.join(self.storage.path, "LoRA", self.name)
+                    os.makedirs(folder, exist_ok=True)
+
+                    safetensors.torch.save_file(state_dict, os.path.join(folder, filename))
+                    self.set_status("Training")
+                
+                if step == steps:
+                    break
+
+        self.storage.reset()
+
+        if not self.callback({"type": "done", "data": {}}):
+            raise RuntimeError("Aborted")
+        
+    def train_upload(self):
+        if self.index == 0:
+            self.dataset = train.Dataset()
+        self.dataset.add_image(self.image[0], self.prompt[0])
+
+        print(self.index)
+        if not self.callback({"type": "training_upload", "data": {"index": self.index}}):
+            raise RuntimeError("Aborted")
