@@ -266,6 +266,7 @@ class LoRANetwork(nn.Module):
             if not type(module) in {LoRAModule, LoHAModule}:
                 continue
             name = module.layer_name.replace("lora_", "")
+
             if name in model.modules:
                 model.modules[name].attach_lora(module, static)
 
