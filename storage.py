@@ -57,20 +57,27 @@ class ModelStorage():
 
     def get_models(self, folder, ext, recursive=True):
         files = []
-        diff = []
+        diffusers = []
         for f in MODEL_FOLDERS[folder]:
+            tmp = []
             path = os.path.abspath(os.path.join(self.path, f))
             if recursive:
                 for e in ext:
-                    files += glob.glob(os.path.join(path, "**" + os.sep + e), recursive=True)
+                    tmp += glob.glob(os.path.join(path, "**" + os.sep + e), recursive=True)
                 if folder == "SD":
                     folders = glob.glob(os.path.join(path, "**" + os.sep + "model_index.json"), recursive=True)
-                    diff += [f.rsplit(os.path.sep, 1)[0] for f in folders]
+                    diffusers += [f.rsplit(os.path.sep, 1)[0] for f in folders]
             else:
                 for e in ext:
-                    files += glob.glob(os.path.join(path, e))
-        files = [f for f in files if not os.path.sep + "_" in f]
-        files = [f for f in files if not any([d + os.path.sep in f for d in diff])] + diff
+                    tmp += glob.glob(os.path.join(path, e))
+            
+            for file in tmp:
+                rel = os.path.relpath(file, path)
+                if rel.startswith("_") or os.path.sep + "_" in rel:
+                   continue
+                files += [file]
+        
+        files = [f for f in files if not any([d + os.path.sep in f for d in diffusers])] + diffusers
         return files
 
     def do_gc(self):
