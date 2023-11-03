@@ -85,15 +85,17 @@ def do_unet_insert_lora(self, inputs, alpha):
     self.set_status("Merging")
 
     for k in base_state_dict:
+        base_value = base_state_dict[k]
         if k.endswith(".weight"):
             lora_key = "lora_unet_" + k.rsplit(".",1)[0].replace(".","_")
             if lora_key in lora_state_dict:
+                lora_value = lora_state_dict[lora_key].reshape(base_value.shape)
                 if key_mapping:
-                    out_state_dict[k] = add(base_state_dict[k], lora_state_dict[lora_key], alpha[key_mapping[k]])
+                    out_state_dict[k] = add(base_value, lora_value, alpha[key_mapping[k]])
                 else:
-                    out_state_dict[k] = add(base_state_dict[k], lora_state_dict[lora_key], alpha)
+                    out_state_dict[k] = add(base_value, lora_value, alpha)
                 continue
-        out_state_dict[k] = base_state_dict[k].clone()
+        out_state_dict[k] = base_value.clone()
 
     out_state_dict["metadata"] = {
         "model_type": base_input.model_type,
@@ -116,12 +118,14 @@ def do_clip_insert_lora(self, inputs, alpha):
     self.set_status("Merging")
 
     for k in base_state_dict:
+        base_value = base_state_dict[k]
         if k.endswith(".weight"):
             lora_key = "lora_te_" + k.rsplit(".",1)[0].replace(".","_")
             if lora_key in lora_state_dict:
-                out_state_dict[k] = add(base_state_dict[k], lora_state_dict[lora_key], alpha)
+                lora_value = lora_state_dict[lora_key].reshape(base_value.shape)
+                out_state_dict[k] = add(base_value, lora_value, alpha)
                 continue
-        out_state_dict[k] = base_state_dict[k].clone()
+        out_state_dict[k] = base_value.clone()
 
     out_state_dict["metadata"] = {
         "model_type": base_input.model_type
