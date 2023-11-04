@@ -54,6 +54,11 @@ def SDv1_convert(state_dict):
         if k.endswith(".weight") and "proj_" in k:
             state_dict[k] = state_dict[k].squeeze()
 
+    # fix clip
+    if "SDv1.CLIP.text_model.embeddings.position_embedding.weight" in state_dict:
+        position_ids = torch.Tensor([list(range(77))]).to(torch.int64)
+        state_dict["SDv1.CLIP.text_model.embeddings.position_ids"] = position_ids
+
 def SDv1_revert(state_dict):
     mapping = {}
     with open(utils.relative_file(os.path.join("mappings", "SDv1_mapping.txt"))) as file:
