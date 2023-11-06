@@ -41,7 +41,8 @@ import train
 
 DEFAULTS = {
     "strength": 0.75, "sampler": "Euler a", "clip_skip": 1, "eta": 1,
-    "hr_upscaler": "Latent (nearest)", "hr_strength": 0.7, "img2img_upscaler": "Lanczos", "mask_blur": 4
+    "hr_upscaler": "Latent (nearest)", "hr_strength": 0.7, "img2img_upscaler": "Lanczos", "mask_blur": 4,
+    "attention": "Default", "vram_mode": "Default"
 }
 
 TYPES = {
