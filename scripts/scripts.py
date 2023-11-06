@@ -144,7 +144,8 @@ class Connection():
             self.on_request(request)
         while True:
             response = self.responses.get(block=True)
-            if response["type"] in {"error", "remote_error", "aborted", "done"}:
-                raise Exception(response)
             if response["type"] == response_type:
                 return response
+            if response["type"] in {"error", "remote_error", "aborted", "done"}:
+                raise Exception(response)
+            
