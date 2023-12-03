@@ -61,6 +61,8 @@ SAMPLER_CLASSES = {
     "DPM++ 2S a": samplers_k.DPM_2S_a,
     "DPM++ SDE": samplers_k.DPM_SDE,
     "DPM++ 2M SDE": samplers_k.DPM_2M_SDE,
+    "DPM++ 3M SDE": samplers_k.DPM_3M_SDE,
+    "LCM": samplers_k.LCM,
 
     "Euler Karras": samplers_k.Euler_Karras,
     "Euler a Karras": samplers_k.Euler_a_Karras,
@@ -68,6 +70,8 @@ SAMPLER_CLASSES = {
     "DPM++ 2S a Karras": samplers_k.DPM_2S_a_Karras,
     "DPM++ SDE Karras": samplers_k.DPM_SDE_Karras,
     "DPM++ 2M SDE Karras": samplers_k.DPM_2M_SDE_Karras,
+    "DPM++ 3M SDE Karras": samplers_k.DPM_3M_SDE_Karras,
+    "LCM Karras": samplers_k.LCM_Karras,
 
     "Euler Exponential": samplers_k.Euler_Exponential,
     "Euler a Exponential": samplers_k.Euler_a_Exponential,
@@ -75,6 +79,8 @@ SAMPLER_CLASSES = {
     "DPM++ 2S a Exponential": samplers_k.DPM_2S_a_Exponential,
     "DPM++ SDE Exponential": samplers_k.DPM_SDE_Exponential,
     "DPM++ 2M SDE Exponential": samplers_k.DPM_2M_SDE_Exponential,
+    "DPM++ 3M SDE Exponential": samplers_k.DPM_3M_SDE_Exponential,
+    "LCM Exponential": samplers_k.LCM_Exponential
 }
 
 UPSCALERS_LATENT = {

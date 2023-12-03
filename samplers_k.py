@@ -265,6 +265,86 @@ class DPM_2M_SDE(KSampler):
         self.old_denoised = denoised
         return x
 
+class DPM_3M_SDE(KSampler):
+    def __init__(self, model, eta=1.0, scheduler=None):
+        super().__init__(model, scheduler, eta)
+        self.old_denoised_1, self.old_denoised_2 = None, None
+        self.h_last_1, self.h_last_2 = None, None
+        self.reset()
+
+    def reset(self):
+        self.noise_samplers = []
+        self.noise_states = []
+
+    def initialize_noise(self, x, sigma_min, sigma_max, noise):
+        seeds = noise.seeds
+        shape = x[0][None,:]
+
+        for i in range(len(seeds)):
+            torch.manual_seed(seeds[i])
+            noise_sampler = BrownianTreeNoiseSampler(shape, sigma_min, sigma_max)
+            self.noise_samplers += [noise_sampler]
+            self.noise_states += [torch.get_rng_state()]
+
+    def sample_noise(self, t0, t1):
+        noises = []
+        for i in range(len(self.noise_samplers)):
+            torch.set_rng_state(self.noise_states[i])
+            noise = self.noise_samplers[i](t0, t1)
+            noises += [noise]
+            self.noise_states[i] = torch.get_rng_state()
+        
+        noises = torch.cat(noises)
+        return noises
+    
+    def step(self, x, sigmas, i, noise):
+        """DPM-Solver++(3M) SDE."""
+
+        sigma_min, sigma_max = sigmas[sigmas > 0].min(), sigmas.max()
+        if not self.noise_samplers:
+            self.initialize_noise(x, sigma_min, sigma_max, noise)
+
+        denoised_1, denoised_2 = self.old_denoised_1, self.old_denoised_2
+        h_1, h_2 = self.h_last_1, self.h_last_2
+
+        denoised = self.predict(x, sigmas[i])
+
+        if sigmas[i + 1] == 0:
+            # Denoising step
+            x = denoised
+        else:
+            t, s = -sigmas[i].log(), -sigmas[i + 1].log()
+            h = s - t
+            h_eta = h * (self.eta + 1)
+
+            x = torch.exp(-h_eta) * x + (-h_eta).expm1().neg() * denoised
+
+            if h_2 is not None:
+                r0 = h_1 / h
+                r1 = h_2 / h
+                d1_0 = (denoised - denoised_1) / r0
+                d1_1 = (denoised_1 - denoised_2) / r1
+                d1 = d1_0 + (d1_0 - d1_1) * r0 / (r0 + r1)
+                d2 = (d1_0 - d1_1) / (r0 + r1)
+                phi_2 = h_eta.neg().expm1() / h_eta + 1
+                phi_3 = phi_2 / h_eta - 0.5
+                x = x + phi_2 * d1 - phi_3 * d2
+            elif h_1 is not None:
+                r = h_1 / h
+                d = (denoised - denoised_1) / r
+                phi_2 = h_eta.neg().expm1() / h_eta + 1
+                x = x + phi_2 * d
+
+            if self.eta:
+                x = x + self.sample_noise(sigmas[i], sigmas[i + 1]) * sigmas[i + 1] * (-2 * h * self.eta).expm1().neg().sqrt()# * s_noise
+
+            h_1, h_2 = h, h_1
+            self.h_last_1, self.h_last_2 = h_1, h_2
+
+        denoised_1, denoised_2 = denoised, denoised_1
+        self.old_denoised_1, self.old_denoised_2 = denoised_1, denoised_2
+        return x
+
 class Euler(KSampler):
     def __init__(self, model, eta=1.0, scheduler=None):
         super().__init__(model, scheduler, eta)
@@ -305,6 +385,16 @@ class Euler_a(KSampler):
         if sigmas[i + 1] > 0:
             x = x + noise * sigma_up
 
+        return x
+    
+class LCM(KSampler):
+    def __init__(self, model, eta=1.0, scheduler=None):
+        super().__init__(model, scheduler, eta)
+
+    def step(self, x, sigmas, i, noise):
+        x = self.predict(x, sigmas[i])
+        if sigmas[i + 1] > 0:
+            x = x + (sigmas[i + 1] * noise())
         return x
     
 class SchedulerKarras(KScheduler):
@@ -373,6 +463,26 @@ class DPM_2M_SDE_Karras(DPM_2M_SDE):
         super().__init__(model, eta, scheduler)
 
 class DPM_2M_SDE_Exponential(DPM_2M_SDE):
+    def __init__(self, model, eta=1, scheduler=None):
+        scheduler = scheduler or SchedulerExponential().to(model.device, model.dtype)
+        super().__init__(model, eta, scheduler)
+
+class DPM_3M_SDE_Karras(DPM_3M_SDE):
+    def __init__(self, model, eta=1, scheduler=None):
+        scheduler = scheduler or SchedulerKarras().to(model.device, model.dtype)
+        super().__init__(model, eta, scheduler)
+
+class DPM_3M_SDE_Exponential(DPM_3M_SDE):
+    def __init__(self, model, eta=1, scheduler=None):
+        scheduler = scheduler or SchedulerExponential().to(model.device, model.dtype)
+        super().__init__(model, eta, scheduler)
+
+class LCM_Karras(LCM):
+    def __init__(self, model, eta=1, scheduler=None):
+        scheduler = scheduler or SchedulerKarras().to(model.device, model.dtype)
+        super().__init__(model, eta, scheduler)
+
+class LCM_Exponential(LCM):
     def __init__(self, model, eta=1, scheduler=None):
         scheduler = scheduler or SchedulerExponential().to(model.device, model.dtype)
         super().__init__(model, eta, scheduler)
