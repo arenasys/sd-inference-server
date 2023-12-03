@@ -45,6 +45,9 @@ class GuidedDenoiser():
     def set_inpainting(self, masked, masks):
         self.inpainting_input = torch.cat([masks, masked], dim=1).to(self.device, self.dtype)
 
+    def set_scale(self, scale):
+        self.scale = scale
+
     def set_predictions(self, predictions):
         self.predictions = predictions
 

@@ -47,7 +47,7 @@ DEFAULTS = {
 
 TYPES = {
     int: ["width", "height", "steps", "seed", "batch_size", "clip_skip", "mask_blur", "hr_steps", "padding"],
-    float: ["scale", "eta", "hr_factor", "hr_eta"],
+    float: ["scale", "eta", "hr_factor", "hr_eta", "hr_scale"],
 }
 
 STATIC = ["storage", "device", "device_names", "callback", "last_models_modified", "last_models_config", "dataset", "public"]
@@ -585,6 +585,8 @@ class GenerationParameters():
                         m["hr_sampler"] = self.hr_sampler
                     if self.hr_eta and self.hr_eta != self.eta:
                         m["hr_eta"] = format_float(self.hr_eta)
+                    if self.hr_scale and self.hr_scale != self.scale:
+                        m["hr_scale"] = format_float(self.hr_scale)
             
             if mode == "upscale":
                 m["img2img_upscaler"] = model_name(self.img2img_upscaler)
@@ -734,6 +736,7 @@ class GenerationParameters():
             self.hr_steps = self.hr_steps or self.steps
             self.hr_sampler = self.hr_sampler or self.sampler
             self.hr_eta = self.hr_eta or self.eta
+            self.hr_scale = self.hr_scale or self.scale
             self.total_steps += self.hr_steps
 
         metadata = self.get_metadata("txt2img", self.width, self.height, batch_size, self.prompt, seeds, subseeds)
@@ -793,6 +796,7 @@ class GenerationParameters():
 
         self.need_models(unet=False, vae=False, clip=True)
         conditioning.switch_to_HR(self.hr_steps)
+        denoiser.set_scale(self.hr_scale)
 
         if self.network_mode == "Dynamic":
             self.set_status("Attaching")
