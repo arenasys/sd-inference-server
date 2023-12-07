@@ -356,6 +356,17 @@ class GenerationParameters():
                 self.set_status("Loading Upscaler")
                 self.upscale_model = self.storage.get_upscaler(self.img2img_upscaler, self.device)
     
+    def configure_storage(self):
+        if self.precision == "FP32":
+            self.storage.dtype = torch.float32
+        else:
+            self.storage.dtype = torch.float16
+            
+        if self.vae_precision == "FP32":
+            self.storage.vae_dtype = torch.float32
+        else:
+            self.storage.vae_dtype = torch.float16
+
     def configure_vae(self):
         if not self.vae:
             return
@@ -693,6 +704,7 @@ class GenerationParameters():
         self.set_status("Configuring")
         self.check_parameters()
         self.clear_annotators()
+        self.configure_storage()
     
         self.set_status("Parsing")
         conditioning = prompts.BatchedConditioningSchedules(self.prompt, self.steps, self.clip_skip)
@@ -859,6 +871,7 @@ class GenerationParameters():
         self.set_status("Configuring")
         self.check_parameters()
         self.clear_annotators()
+        self.configure_storage()
 
         self.set_status("Parsing")
         conditioning = prompts.BatchedConditioningSchedules(self.prompt, self.steps, self.clip_skip)
@@ -1002,6 +1015,7 @@ class GenerationParameters():
         self.set_status("Configuring")
         self.check_parameters()
         self.clear_annotators()
+        self.configure_storage()
 
         self.set_status("Parsing")
         conditioning = prompts.BatchedConditioningSchedules(self.prompt, self.steps, self.clip_skip)
