@@ -356,12 +356,12 @@ class GenerationParameters():
                 self.set_status("Loading Upscaler")
                 self.upscale_model = self.storage.get_upscaler(self.img2img_upscaler, self.device)
     
-    def configure_storage(self):
+    def set_precision(self):
         if self.precision == "FP32":
             self.storage.dtype = torch.float32
         else:
             self.storage.dtype = torch.float16
-            
+
         if self.vae_precision == "FP32":
             self.storage.vae_dtype = torch.float32
         else:
@@ -445,20 +445,21 @@ class GenerationParameters():
             self.device = device
             return
 
+        force_fp32 = False
         if self.device_name in self.device_names:
             idx = self.device_names.index(self.device_name)
             if self.device_name == "CPU":
                 device = torch.device("cpu")
-                self.storage.dtype = torch.float32
-            elif self.device_name == "DirectML":
-                device = torch_directml.device()
-                self.storage.dtype = torch.float16
+                force_fp32 = True
             else:
                 device = torch.device(idx)
                 if any([" " + name in self.device_name for name in FP32_DEVICES]):
-                    self.storage.dtype = torch.float32
-                else:
-                    self.storage.dtype = torch.float16
+                    force_fp32 = True
+        
+        if force_fp32:            
+            self.precision = "FP32"
+            self.vae_precision = "FP32"
+
         self.device = device
     
     def set_attention(self):       
@@ -704,7 +705,6 @@ class GenerationParameters():
         self.set_status("Configuring")
         self.check_parameters()
         self.clear_annotators()
-        self.configure_storage()
     
         self.set_status("Parsing")
         conditioning = prompts.BatchedConditioningSchedules(self.prompt, self.steps, self.clip_skip)
@@ -713,6 +713,7 @@ class GenerationParameters():
 
         self.set_status("Loading")
         self.set_device()
+        self.set_precision()
         self.set_attention()
         self.load_models(*initial_networks)
 
@@ -871,7 +872,6 @@ class GenerationParameters():
         self.set_status("Configuring")
         self.check_parameters()
         self.clear_annotators()
-        self.configure_storage()
 
         self.set_status("Parsing")
         conditioning = prompts.BatchedConditioningSchedules(self.prompt, self.steps, self.clip_skip)
@@ -880,6 +880,7 @@ class GenerationParameters():
 
         self.set_status("Loading")
         self.set_device()
+        self.set_precision()
         self.set_attention()
         self.load_models(*initial_networks)
 
@@ -1015,8 +1016,6 @@ class GenerationParameters():
         self.set_status("Configuring")
         self.check_parameters()
         self.clear_annotators()
-        self.configure_storage()
-
         self.set_status("Parsing")
         conditioning = prompts.BatchedConditioningSchedules(self.prompt, self.steps, self.clip_skip)
         initial_networks = conditioning.get_initial_networks() if self.network_mode == "Static" else ({},{})
@@ -1024,6 +1023,7 @@ class GenerationParameters():
 
         self.set_status("Loading")
         self.set_device()
+        self.set_precision()
         self.set_attention()
 
         if tile_strength:
