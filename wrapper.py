@@ -146,11 +146,13 @@ class GenerationParameters():
     def set_status(self, status):
         if self.callback:
             if not self.callback({"type": "status", "data": {"message": status}}):
+                self.storage.do_gc()
                 raise RuntimeError("Aborted")
 
     def set_progress(self, progress):
         if self.callback:
             if not self.callback({"type": "progress", "data": progress}):
+                self.storage.do_gc()
                 raise RuntimeError("Aborted")
 
     def on_step(self, progress, latents=None):
@@ -268,6 +270,7 @@ class GenerationParameters():
                 i.save(bytesio, format='PNG')
                 images_data += [bytesio.getvalue()]
             self.callback({"type": "result", "data": {"images": images_data, "metadata": metadata}})
+        self.storage.do_gc()
             
     def reset(self):
         for attr in list(self.__dict__.keys()):
