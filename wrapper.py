@@ -176,7 +176,7 @@ class GenerationParameters():
                 images = preview.cheap_preview(latents, self.vae)
             for i in range(len(images)):
                 bytesio = io.BytesIO()
-                images[i].save(bytesio, format='PNG')
+                images[i].save(bytesio, format='JPEG', quality=80)
                 images[i] = bytesio.getvalue()
             progress["previews"] = images
 
@@ -500,16 +500,7 @@ class GenerationParameters():
     def get_seeds(self, batch_size):
         (seeds,) = self.listify(self.seed)
         if self.subseed:
-            subseeds = []
-            if type(self.subseed[0]) in {tuple, list}:
-                subseeds = self.subseed
-            else:
-                subseeds = [self.subseed]
-            subseeds = [tuple(s) for s in subseeds]
-
-            for i in range(len(subseeds)):
-                a, b = subseeds[i]
-                subseeds[i] = (int(a), float(b))
+            subseeds = [(int(self.subseed), float(self.subseed_strength))]
         else:
             subseeds = [(0,0)]
 
@@ -527,7 +518,7 @@ class GenerationParameters():
         if len(subseeds) < batch_size:
             last_seed, last_strength = subseeds[-1]
             subseeds += [(last_seed + i + 1, last_strength) for i in range(batch_size-len(subseeds))]
-
+        
         return seeds, subseeds
     
     def get_batch_size(self):
@@ -557,8 +548,8 @@ class GenerationParameters():
                     sds += [str(s)]
                     strs += [format_float(r)]
                 if active:
-                    m["subseed"] = ", ".join(sds)
-                    m["subseed_strength"] = ", ".join(strs)
+                    m["subseed"] = sds[i]
+                    m["subseed_strength"] = strs[i]
 
             if self.eta != DEFAULTS["eta"]:
                 m["eta"] = format_float(self.eta)
