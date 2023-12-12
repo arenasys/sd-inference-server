@@ -38,6 +38,9 @@ class GuidedDenoiser():
     def get_conditioning(self):
         self.compositions = self.conditioning_schedule.get_compositions(self.dtype, self.device)
 
+    def set_unet(self, unet):
+        self.unet = unet
+
     def set_mask(self, mask, original):
         self.mask = mask.to(self.dtype)
         self.original = original.to(self.dtype)
@@ -47,6 +50,12 @@ class GuidedDenoiser():
 
     def set_scale(self, scale):
         self.scale = scale
+    
+    def set_cfg_rescale(self, cfg_rescale):
+        self.cfg_rescale = cfg_rescale
+
+    def set_prediction_type(self, prediction_type):
+        self.override_prediction_type = prediction_type
 
     def set_predictions(self, predictions):
         self.predictions = predictions

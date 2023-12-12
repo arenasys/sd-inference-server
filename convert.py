@@ -282,7 +282,7 @@ def clean_component(state_dict):
     return deleted
 
 def convert_checkpoint(in_file):
-    print(f"CONVERTING {in_file.rsplit(os.path.sep,1)[-1]}")
+    #print(f"CONVERTING {in_file.rsplit(os.path.sep,1)[-1]}")
 
     metadata = {}
     name = in_file.split(os.path.sep)[-1].split(".")[0]
@@ -322,19 +322,19 @@ def convert_checkpoint(in_file):
         else:
             if metadata["model_type"] in {"SDXL-Base"} :
                 metadata["prediction_type"] = "epsilon"
-                print("USING", metadata["prediction_type"], "PREDICTION")
+                #print("USING", metadata["prediction_type"], "PREDICTION")
 
     if metadata["model_type"] == "SDv1":
-        print("CONVERTING FROM SDv1")
+        #print("CONVERTING FROM SDv1")
         SDv1_convert(state_dict)
     elif metadata["model_type"] == "SDv2":
-        print("CONVERTING FROM SDv2")
+        #print("CONVERTING FROM SDv2")
         SDv2_convert(state_dict)
     elif metadata["model_type"] == "SDXL-Base":
-        print("CONVERTING FROM SDXL-Base")
+        #print("CONVERTING FROM SDXL-Base")
         SDXL_Base_convert(state_dict)        
 
-    print("DONE")
+    #print("DONE")
 
     return state_dict, metadata
 
@@ -347,7 +347,7 @@ def convert_checkpoint_save(in_file, out_folder):
     safetensors.torch.save_file(state_dict, out_file, metadata)
 
 def convert_diffusers_folder(in_folder):
-    print(f"CONVERTING {in_folder.rsplit(os.path.sep,1)[-1]}")
+    #print(f"CONVERTING {in_folder.rsplit(os.path.sep,1)[-1]}")
     from diffusers import AutoencoderKL, UNet2DConditionModel
     from transformers import CLIPTextModel
     import json
@@ -369,7 +369,7 @@ def convert_diffusers_folder(in_folder):
         "model_variant": ""
     }
 
-    print("CONVERTING FROM", model_type)
+    #print("CONVERTING FROM", model_type)
 
     state_dict = {}
     unet = unet.to(torch.float16).state_dict()
@@ -387,7 +387,7 @@ def convert_diffusers_folder(in_folder):
         state_dict[f"{model_type}.CLIP.{k}"] = clip[k]
         del clip[k]
 
-    print("DONE")
+    #print("DONE")
 
     return state_dict, metadata
 

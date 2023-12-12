@@ -331,9 +331,9 @@ class ConditioningSchedule():
         self.model_type = None
         self.parse()
 
-    def switch_to_HR(self, hr_steps):
-        self.steps = hr_steps
-        self.HR = True
+    def switch_to_HR(self, hr, steps):
+        self.steps = steps
+        self.HR = hr
         self.parse()
 
     def parse(self):
@@ -435,7 +435,7 @@ class BatchedConditioningSchedules():
 
     def switch_to_HR(self, hr_steps):
         for i, b in enumerate(self.batches):
-            b.switch_to_HR(hr_steps)
+            b.switch_to_HR(True, hr_steps)
 
     def parse(self):
         self.batches = []
@@ -446,12 +446,22 @@ class BatchedConditioningSchedules():
         for i, b in enumerate(self.batches):
             a = areas[i] if i < len(areas) else []
             b.encode(clip, a)
+    
+    def get_all_networks(self, hr_steps=None):
+        current_networks = set()
+        hr_networks = set()
 
-    def get_all_networks(self):
-        all_networks = set()
         for b in self.batches:
-            all_networks = all_networks.union(b.get_all_networks())
-        return all_networks
+            current_networks = current_networks.union(b.get_all_networks())
+            if hr_steps != None:
+                b.switch_to_HR(True, hr_steps)
+                hr_networks = hr_networks.union(b.get_all_networks())
+                b.switch_to_HR(False, self.steps)
+
+        if hr_steps != None:
+            return current_networks, hr_networks.union(current_networks)
+
+        return current_networks, current_networks
     
     def get_networks_at_step(self, step, idx=0):
         networks = []

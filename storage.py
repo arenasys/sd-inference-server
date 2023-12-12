@@ -110,6 +110,10 @@ class ModelStorage():
         self.do_gc()
         self.find_all()
 
+    def set_ram_limit(self, count):
+        for comp in {"UNET", "CLIP", "VAE"}:
+            self.ram_limits[comp] = count
+
     def enforce_limit(self, comp, current, device):
         allowed_vram = self.vram_limits.get(comp, 0)
         allowed_ram = self.ram_limits.get(comp, 0)
@@ -209,6 +213,7 @@ class ModelStorage():
         if name in self.loaded[comp]:
             #print("REMOVE", comp, name, "TO DISK")
             del self.loaded[comp][name]
+            
         self.do_gc()
 
     def reset_merge(self, comps):
@@ -335,6 +340,7 @@ class ModelStorage():
                 if not k in allowed or attached[k] != allowed[k]:
                     reset = True
             if reset:
+                #print("RESET", comp, name)
                 self.remove(comp, name) 
 
     def get_unet(self, name, device, nets={}):

@@ -109,14 +109,14 @@ class UNET(UNet2DConditionModel):
 
         test_pred = self(test_latent, test_timestep, encoder_hidden_states=test_cond).sample
         if torch.isnan(test_pred).any():
-            print('UPCASTING ATTENTION')
+            #print('UPCASTING ATTENTION')
             self.upcast_attention = True
             self.model_variant = "SDv2.1"
             test_pred = self(test_latent, test_timestep, encoder_hidden_states=test_cond).sample
 
         is_v = (test_pred - 0.5).mean().item() < -1
         self.prediction_type = "v" if is_v else "epsilon"
-        print("DETECTED", self.prediction_type, "PREDICTION")
+        #print("DETECTED", self.prediction_type, "PREDICTION")
 
 class VAE(AutoencoderKL):
     def __init__(self, model_type, dtype):
