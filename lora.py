@@ -84,33 +84,57 @@ class LoRAModule(nn.Module):
         return self
     
 class LoHAModule(nn.Module):
-    def __init__(self, net_name, layer_name, shape, dim, alpha):
+    def __init__(self, net_name, layer_name, shape, dim, alpha, kernel=None):
         super().__init__()
         self.net_name = net_name
         self.layer_name = layer_name
 
-        self.hada_w1_a = nn.Parameter(torch.empty(shape[0], dim))
-        self.hada_w1_b = nn.Parameter(torch.empty(dim, shape[1]))
-            
-        self.hada_w2_a = nn.Parameter(torch.empty(shape[0], dim))
-        self.hada_w2_b = nn.Parameter(torch.empty(dim, shape[1]))
+        if kernel == None:
+            self.hada_w1_a = nn.Parameter(torch.empty(shape[0], dim))
+            self.hada_w1_b = nn.Parameter(torch.empty(dim, shape[1]))
+
+            self.hada_w2_a = nn.Parameter(torch.empty(shape[0], dim))
+            self.hada_w2_b = nn.Parameter(torch.empty(dim, shape[1]))
+        else:
+            self.hada_w1_a = nn.Parameter(torch.empty(dim, shape[0]))
+            self.hada_w1_b = nn.Parameter(torch.empty(dim, shape[1]))
+            self.hada_t1 = nn.Parameter(torch.empty(dim, dim, kernel[0], kernel[1]))
+
+            self.hada_w2_a = nn.Parameter(torch.empty(dim, shape[0]))
+            self.hada_w2_b = nn.Parameter(torch.empty(dim, shape[1]))
+            self.hada_t2 = nn.Parameter(torch.empty(dim, dim, kernel[0], kernel[1]))
+
 
         self.register_buffer("alpha", torch.tensor(alpha or dim))
         self.register_buffer("dim", torch.tensor(dim), False)
 
-    def from_weights(net_name, layer_name, w1_a, w1_b, w2_a, w2_b, alpha):
-        shape = (w1_a.shape[0], w1_b.shape[1])
-        dim = w1_a.shape[1]
+    def from_weights(net_name, layer_name, w1_a, w1_b, w2_a, w2_b, alpha, t1=None, t2=None):
+        if t1 != None and t2 != None:
+            shape = (w1_a.shape[1], w1_b.shape[1])
+            dim = w1_a.shape[0]
+            kernel = (t1.shape[2], t1.shape[3])
+        else:
+            shape = (w1_a.shape[0], w1_b.shape[1])
+            dim = w1_a.shape[1]
+            kernel = None
 
-        return LoHAModule(net_name, layer_name, shape, dim, alpha)
+        return LoHAModule(net_name, layer_name, shape, dim, alpha, kernel)
 
     def get_weight(self, shape = None):
         f = (self.alpha / self.dim)
-        weight = ((self.hada_w1_a@self.hada_w1_b)*(self.hada_w2_a@self.hada_w2_b)) * f
+
+        if hasattr(self, "hada_t1"):
+            rebuild1 = torch.einsum("i j k l, j r, i p -> p r k l", self.hada_t1, self.hada_w1_b, self.hada_w1_a)
+            rebuild2 = torch.einsum("i j k l, j r, i p -> p r k l", self.hada_t2, self.hada_w2_b, self.hada_w2_a)
+            weight = rebuild1 * rebuild2 * f
+        else:
+            weight = ((self.hada_w1_a@self.hada_w1_b)*(self.hada_w2_a@self.hada_w2_b)) * f
+
         if shape:
             weight = weight.reshape(shape)
         else:
             raise RuntimeError("LoHAs cannot currently be merged")
+        
         return weight
     
     def forward(self, x, original):
@@ -158,11 +182,14 @@ class LoRANetwork(nn.Module):
                 w2_a = state_dict[name+".hada_w2_a"]
                 w2_b = state_dict[name+".hada_w2_b"]
 
+                t1 = state_dict.get(name+".hada_t1", None)
+                t2 = state_dict.get(name+".hada_t2", None)
+
                 alpha = None
                 if name+".alpha" in state_dict:
                     alpha = state_dict[name+".alpha"].numpy()
                 
-                lora = LoHAModule.from_weights(self.net_name, name, w1_a, w1_b, w2_a, w2_b, alpha)
+                lora = LoHAModule.from_weights(self.net_name, name, w1_a, w1_b, w2_a, w2_b, alpha, t1, t2)
             else:
                 up = state_dict[name+".lora_up.weight"]
                 down = state_dict[name+".lora_down.weight"]
