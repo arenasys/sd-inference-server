@@ -456,20 +456,23 @@ class GenerationParameters():
             self.device = device
             return
 
-        force_fp32 = False
+        forced = None
         if self.device_name in self.device_names:
             idx = self.device_names.index(self.device_name)
             if self.device_name == "CPU":
                 device = torch.device("cpu")
-                force_fp32 = True
+                forced = "FP32"
+            elif self.device_name == "DirectML":
+                device = torch_directml.device()
+                forced = "FP16"
             else:
                 device = torch.device(idx)
                 if any([" " + name in self.device_name for name in FP32_DEVICES]):
                     force_fp32 = True
         
-        if force_fp32:            
-            self.precision = "FP32"
-            self.vae_precision = "FP32"
+        if forced:            
+            self.precision = forced
+            self.vae_precision = forced
 
         self.device = device
     
