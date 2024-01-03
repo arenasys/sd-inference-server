@@ -468,7 +468,7 @@ class GenerationParameters():
             else:
                 device = torch.device(idx)
                 if any([" " + name in self.device_name for name in FP32_DEVICES]):
-                    force_fp32 = True
+                    forced = "FP32"
         
         if forced:            
             self.precision = forced
