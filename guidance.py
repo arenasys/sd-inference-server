@@ -6,6 +6,7 @@ class GuidedDenoiser():
         self.conditioning_schedule = conditioning_schedule
         self.conditioning = None
         self.additional_conditioning = None
+        self.additional_kwargs = None
         self.scale = scale
 
         self.mask = None
@@ -63,7 +64,9 @@ class GuidedDenoiser():
     def predict(self, latents, timestep, conditioning):
         timestep = torch.ceil_(timestep)
         inputs = self.get_additional_inputs(latents)
-        return self.unet(inputs, timestep, encoder_hidden_states=conditioning, added_cond_kwargs=self.additional_conditioning).sample
+        return self.unet(inputs, timestep, encoder_hidden_states=conditioning,
+                         added_cond_kwargs=self.additional_conditioning,
+                         added_cross_kwargs=self.additional_kwargs).sample
 
     def predict_noise_epsilon(self, latents, timestep, conditioning, alpha):
         noise_pred = self.predict(latents, timestep, conditioning)
@@ -173,6 +176,7 @@ class GuidedDenoiser():
     def set_step(self, step):
         self.conditioning = self.conditioning_schedule.get_conditioning_at_step(step, self.dtype, self.device)
         self.additional_conditioning = self.conditioning_schedule.get_additional_conditioning_at_step(step, self.dtype, self.device)
+        self.additional_kwargs = self.conditioning_schedule.get_additional_attention_kwargs_at_step(step)
         self.unet.additional.set_strength(self.conditioning_schedule.get_networks_at_step(step))
         
     def reset(self):

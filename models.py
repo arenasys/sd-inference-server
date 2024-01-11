@@ -28,6 +28,12 @@ class UNET(UNet2DConditionModel):
             if not 'added_cond_kwargs' in kwargs:
                 kwargs['added_cond_kwargs'] = {}
             kwargs['cross_attention_kwargs'] = {'upcast_attention': self.upcast_attention}
+
+            if 'added_cross_kwargs' in kwargs:
+                for k,v in kwargs['added_cross_kwargs'].items():
+                    kwargs['cross_attention_kwargs'][k] = v
+                del kwargs['added_cross_kwargs']
+
         return super().__call__(*args, **kwargs)
         
     @staticmethod

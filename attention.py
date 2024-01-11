@@ -129,7 +129,13 @@ def use_doggettx_attention(device):
 
         if cross_attention_kwargs.get('upcast_attention', False):
             q, k, v = q.float(), k.float(), v.float()
-    
+ 
+        if inv := cross_attention_kwargs.get("token_inversions", None):
+            b_z = v.shape[0]//len(inv)
+            for b, b_inv in enumerate(inv):
+                for i in b_inv:
+                    v[b*b_z:(b+1)*b_z, i:i+1, :] = -v[b*b_z:(b+1)*b_z, i:i+1, :]
+
         r1 = torch.zeros(q.shape[0], q.shape[1], v.shape[2], device=q.device, dtype=q.dtype)
     
         mem_free_total = get_available_vram(device)
@@ -194,6 +200,12 @@ def use_xformers_attention(device):
 
         if cross_attention_kwargs.get('upcast_attention', False):
             q, k, v = q.float(), k.float(), v.float()
+        
+        if inv := cross_attention_kwargs.get("token_inversions", None):
+            b_z = v.shape[0]//len(inv)
+            for b, b_inv in enumerate(inv):
+                for i in b_inv:
+                    v[b*b_z:(b+1)*b_z, i:i+1, :] = -v[b*b_z:(b+1)*b_z, i:i+1, :]
 
         out = xformers.ops.memory_efficient_attention(q, k, v, attn_bias=None)
 
@@ -241,6 +253,12 @@ def use_split_attention(device):
 
         if cross_attention_kwargs.get('upcast_attention', False):
             q, k, v = q.float(), k.float(), v.float()
+        
+        if inv := cross_attention_kwargs.get("token_inversions", None):
+            b_z = v.shape[0]//len(inv)
+            for b, b_inv in enumerate(inv):
+                for i in b_inv:
+                    v[b*b_z:(b+1)*b_z, i:i+1, :] = -v[b*b_z:(b+1)*b_z, i:i+1, :]
 
         r1 = torch.zeros(q.shape[0], q.shape[1], v.shape[2], device=q.device, dtype=q.dtype)
         for i in range(0, q.shape[0], 2):
@@ -369,6 +387,12 @@ def use_flash_attention(device):
 
         if cross_attention_kwargs.get('upcast_attention', False):
             q, k, v = q.float(), k.float(), v.float()
+        
+        if inv := cross_attention_kwargs.get("token_inversions", None):
+            b_z = v.shape[0]//len(inv)
+            for b, b_inv in enumerate(inv):
+                for i in b_inv:
+                    v[b*b_z:(b+1)*b_z, i:i+1, :] = -v[b*b_z:(b+1)*b_z, i:i+1, :]
 
         out = flash_func.apply(q, k, v, attention_mask, False, q_bucket_size, k_bucket_size)
 
@@ -409,6 +433,12 @@ def use_sdp_attention(device):
 
         if cross_attention_kwargs.get('upcast_attention', False):
             q, k, v = q.float(), k.float(), v.float()
+
+        if inv := cross_attention_kwargs.get("token_inversions", None):
+            b_z = v.shape[0]//len(inv)
+            for b, b_inv in enumerate(inv):
+                for i in b_inv:
+                    v[b*b_z:(b+1)*b_z, i:i+1, :] = -v[b*b_z:(b+1)*b_z, i:i+1, :]
 
         # the output of sdp = (batch, num_heads, seq_len, head_dim)
         hidden_states = torch.nn.functional.scaled_dot_product_attention(
