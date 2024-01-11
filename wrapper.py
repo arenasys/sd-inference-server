@@ -393,15 +393,15 @@ class GenerationParameters():
             self.storage.unload(self.clip)
 
         if unet:
-            self.storage.load(self.unet, self.device)
+            self.storage.load(self.unet, self.device, self.storage.dtype)
             self.unet.determine_type()
         
         if vae:
-            self.storage.load(self.vae, self.device)
+            self.storage.load(self.vae, self.device, self.storage.vae_dtype)
             self.configure_vae()
         
         if clip:
-            self.storage.load(self.clip, self.device)
+            self.storage.load(self.clip, self.device, self.storage.dtype)
 
     def clear_annotators(self):
         allowed = []

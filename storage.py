@@ -195,12 +195,15 @@ class ModelStorage():
                 del self.loaded["AN"][m]
                 self.do_gc()
 
-    def load(self, model, device):
-        model.to(device)
+    def load(self, model, device, dtype=None):
+        if dtype:
+            model.to(device, dtype)
+        else:
+            model.to(device)
         self.do_gc()
 
     def unload(self, model):
-        model.to("cpu", self.dtype)
+        model.to("cpu")
         self.do_gc()
 
     def add(self, comp, name, model):
