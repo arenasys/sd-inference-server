@@ -287,7 +287,7 @@ class ModelStorage():
             elif 'clip_g' in ti and 'clip_l' in ti:
                 vectors = torch.cat([ti["clip_g"], ti["clip_l"]], dim=1)
             else:
-                raise Exception("Unknown TI format")
+                raise Exception(f"Unknown TI format in {name}")
             
             vectors.requires_grad = False
             self.embeddings[activation] = vectors
