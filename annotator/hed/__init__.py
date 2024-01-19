@@ -61,10 +61,10 @@ class HEDdetector:
         self.netNetwork = ControlNetHED_Apache2().float().cuda().eval()
         self.netNetwork.load_state_dict(torch.load(model_path))
 
-    def to(self, device, dtype):
+    def to(self, device, dtype=None):
         self.device = device
-        self.dtype = dtype
-        self.netNetwork.to(device, dtype)
+        self.dtype = dtype if dtype else self.dtype
+        self.netNetwork.to(self.device, self.dtype)
         return self
 
     def __call__(self, input_image, safe=False):

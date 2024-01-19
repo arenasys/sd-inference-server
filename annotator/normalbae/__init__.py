@@ -44,10 +44,10 @@ class NormalBaeDetector:
         self.model = model
         self.norm = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 
-    def to(self, device, dtype):
-        self.model.to(device, dtype)
+    def to(self, device, dtype=None):
         self.device = device
-        self.dtype = dtype
+        self.dtype = dtype if dtype else self.dtype
+        self.model.to(self.device, self.dtype)
         return self
 
     def __call__(self, input_image):

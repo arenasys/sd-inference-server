@@ -59,12 +59,12 @@ class OpenposeDetector:
         self.hand_estimation = Hand(hand_modelpath)
         self.face_estimation = Face(face_modelpath)
 
-    def to(self, device, dtype):
+    def to(self, device, dtype=None):
         self.device = device
-        self.dtype = dtype
-        self.body_estimation.model.to(device, dtype)
-        self.hand_estimation.model.to(device, dtype)
-        self.face_estimation.model.to(device, dtype)
+        self.dtype = dtype if dtype else self.dtype
+        self.body_estimation.model.to(self.device, self.dtype)
+        self.hand_estimation.model.to(self.device, self.dtype)
+        self.face_estimation.model.to(self.device, self.dtype)
         return self
 
 

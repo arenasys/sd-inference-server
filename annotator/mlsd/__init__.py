@@ -22,10 +22,10 @@ class MLSDdetector:
         model.load_state_dict(torch.load(model_path), strict=True)
         self.model = model.cuda().eval()
 
-    def to(self, device, dtype):
+    def to(self, device, dtype=None):
         self.device = device
-        self.dtype = dtype
-        self.model.to(device, dtype)
+        self.dtype = dtype if dtype else self.dtype
+        self.model.to(self.device, self.dtype)
         return self
 
     def __call__(self, input_image, thr_v=0.1, thr_d=0.1):

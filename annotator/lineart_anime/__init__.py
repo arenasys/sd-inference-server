@@ -130,10 +130,10 @@ class LineartAnimeDetector:
         net.eval()
         self.model = net
 
-    def to(self, device, dtype):
+    def to(self, device, dtype=None):
         self.device = device
-        self.dtype = dtype
-        self.model.to(device, dtype)
+        self.dtype = dtype if dtype else self.dtype
+        self.model.to(self.device, self.dtype)
         return self
 
     def __call__(self, input_image):
