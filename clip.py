@@ -1,7 +1,6 @@
 
 import torch
-from transformers import CLIPTextModel
-from transformers.models.clip.modeling_clip import CLIPTextTransformer, _expand_mask, BaseModelOutputWithPooling
+from transformers.models.clip.modeling_clip import CLIPTextTransformer, _create_4d_causal_attention_mask, BaseModelOutputWithPooling
 
 class CustomCLIP(torch.nn.Module):
     def __init__(self, config, text_projection=False):
@@ -75,8 +74,9 @@ class CustomCLIPTextTransformer(CLIPTextTransformer):
         position_embeddings = self.embeddings.position_embedding(position_ids)
         hidden_states = inputs_embeds + position_embeddings
 
-        bsz, seq_len = hidden_states.shape[:2]
-        causal_attention_mask = self._build_causal_attention_mask(bsz, seq_len, hidden_states.dtype).to(hidden_states.device)
+        causal_attention_mask = _create_4d_causal_attention_mask(
+            input_ids.size(), hidden_states.dtype, device=hidden_states.device
+        )
 
         encoder_outputs = self.encoder(
             inputs_embeds=hidden_states,
