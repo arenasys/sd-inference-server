@@ -12,6 +12,11 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "sd_scripts"))
 from sd_scripts import train_network
 from sd_scripts.library import train_util
 
+def get_step_ckpt_name(args, ext: str, step_no: int):
+    return f"{args.output_name}_{step_no}.{ext}"
+
+train_network.train_util.get_step_ckpt_name = get_step_ckpt_name
+
 class Dataset(train_util.MinimalDataset):
     def __init__(self, tokenizer, max_token_length, resolution, debug_dataset=False):
         super().__init__(tokenizer, max_token_length, resolution, debug_dataset)
@@ -21,15 +26,17 @@ class Dataset(train_util.MinimalDataset):
 
         self.bucket_manager = train_util.BucketManager(True, resolution, int(min(resolution)/2), int(max(resolution)*2), 64)
         self.bucket_manager.make_buckets()
-
+        
+        self.status_callback = None
         self.cache_callback = None
         self.batch_size = None
 
         self.last_time = time.time()
 
-    def configure(self, batch_size, callback):
+    def configure(self, batch_size, status_callback, cache_callback):
         self.batch_size = batch_size
-        self.cache_callback = callback
+        self.status_callback = status_callback
+        self.cache_callback = cache_callback
 
     def add_pair(self, image, caption):
         name = f"MEMORY-{len(self.dataset)}"
@@ -67,12 +74,15 @@ class Dataset(train_util.MinimalDataset):
         self.cache = {}
 
         start = time.time()
+
+        self.status_callback("Caching")
+
         for i, name in enumerate(tqdm.tqdm(self.dataset, "caching", smoothing=0)):
             if self.cache_callback:
                 now = time.time()
                 if now - self.last_time >= 2:
                     values = {
-                        "n": i,
+                        "n": i+1,
                         "total": len(self.dataset),
                         "elapsed": time.time() - start,
                     }
@@ -94,6 +104,8 @@ class Dataset(train_util.MinimalDataset):
             self.cache[name] = latents
         
         self.get_batches()
+
+        self.status_callback("Preparing")
     
     def get_batches(self):
         self.batches = []
@@ -130,6 +142,8 @@ class Trainer(train_network.NetworkTrainer):
 
         self.last_time = time.time()
         self.last_losses = []
+        self.global_step = 0
+        self.was_saving = False
 
     def assert_extra_args(self, args, train_dataset_group):
         self.dataset = train_dataset_group
@@ -142,16 +156,29 @@ class Trainer(train_network.NetworkTrainer):
             for image, caption in self.pairs:
                 self.dataset.add_pair(image, caption)
 
-        self.dataset.configure(self.batch_size, self.cache_callback)
+        self.dataset.configure(self.batch_size, self.status_callback, self.cache_callback)
 
     def log(self, values: dict, step: int | None = None, log_kwargs: dict | None = {}):
         if not "loss/current" in values:
             return
         
-        self.last_losses += [values["loss/average"]]
+        if step == 1:
+            self.status_callback("Training")
+            self.start = time.time()
+
+        self.global_step = step
+        if self.args.save_every_n_steps:
+            if self.args.max_train_steps - step < self.args.save_every_n_steps:
+                self.args.save_every_n_steps = None
         
+        if self.was_saving:
+            self.status_callback("Training")
+            self.was_saving = False
+
+        self.last_losses += [values["loss/average"]]
+
         now = time.time()
-        if now-self.last_time >= 2:
+        if now-self.last_time >= 2 or step == self.args.max_train_steps or step == 1:
             values = {
                 "losses": self.last_losses.copy(),
                 "n": step,
@@ -168,8 +195,7 @@ class Trainer(train_network.NetworkTrainer):
         s = args[0]
         if "saving checkpoint" in s:
             self.status_callback("Saving")
-        if "epoch" in s:
-            self.status_callback("Training")
+            self.was_saving = True
         
     def sample_images(self, accelerator, args, epoch, global_step, device, vae, tokenizer, text_encoder, unet):
         if not self.args:
@@ -179,8 +205,6 @@ class Trainer(train_network.NetworkTrainer):
             args.logging_dir = True
             accelerator.log = self.log
             accelerator.print = self.print
-            
-            self.start = time.time()
 
     def configure(self, params):
         lr_scheduler = params.learning_schedule.lower()
@@ -210,6 +234,7 @@ class Trainer(train_network.NetworkTrainer):
             f"--network_dim={int(params.lora_rank)}",
             f"--network_alpha={int(params.lora_alpha)}",
             "--optimizer_type=AdamW",
+            "--sdpa",
             "--mixed_precision=fp16",
             "--dataset_class=train.Dataset",
             "--cache_latents",

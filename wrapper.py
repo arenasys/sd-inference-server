@@ -208,6 +208,12 @@ class GenerationParameters():
             progress = {"current": progress["n"], "total": progress["total"], "rate": (progress["rate"] or 1), "unit": "it/s"}
             self.set_progress(progress)
 
+    def on_training_status(self, status):
+        if self.callback:
+            if not self.callback({"type": "training_status", "data": {"message": status}}):
+                self.storage.do_gc()
+                raise RuntimeError("Aborted")
+
     def on_training_step(self, progress):
         losses = progress["losses"]
         epoch = progress["epoch"]
@@ -1527,14 +1533,13 @@ class GenerationParameters():
         self.check_parameters()
         self.storage.reset()
         self.set_device()
-        attention.use_sdp_attention(self.device)
 
         import train
 
         self.output_dir = os.path.join(self.storage.path, "LoRA", self.name)
         self.base_model = os.path.join(self.storage.path, self.base_model)
 
-        trainer = train.Trainer(self.set_status, self.on_training_step, self.on_caching_step)
+        trainer = train.Trainer(self.on_training_status, self.on_training_step, self.on_caching_step)
 
         trainer.configure(self)
         self.dataset = None
@@ -1545,6 +1550,8 @@ class GenerationParameters():
             trainer.run()
         except RuntimeError:
             pass
+
+        self.on_training_status("Idle")
 
         del trainer        
         self.storage.reset()
