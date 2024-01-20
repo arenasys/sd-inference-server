@@ -191,7 +191,7 @@ class Trainer(train_network.NetworkTrainer):
         self.pairs = params.dataset
         self.batch_size = params.batch_size
 
-        if not self.folders and not self.dataset:
+        if not self.folders and not self.pairs:
             raise Exception("No data")
 
         self.params = [
@@ -220,7 +220,8 @@ class Trainer(train_network.NetworkTrainer):
             "--shuffle_caption",
             "--weighted_captions",
             "--max_token_length=225",
-            "--save_model_as=safetensors"
+            "--save_model_as=safetensors",
+            "--save_every_n_steps=1000"
         ]
 
     def run(self):
