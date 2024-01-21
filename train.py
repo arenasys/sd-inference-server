@@ -14,7 +14,7 @@ from training import train_network
 from training.library import train_util
 
 def get_step_ckpt_name(args, ext: str, step_no: int):
-    return f"{args.output_name}_{step_no}.{ext}"
+    return f"{args.output_name}_{step_no}{ext}"
 
 train_network.train_util.get_step_ckpt_name = get_step_ckpt_name
 
@@ -214,6 +214,12 @@ class Trainer(train_network.NetworkTrainer):
                 f"conv_alpha={params.lora_conv_alpha}",
             ]
         
+        if params.prediction_type.lower() == "v":
+            self.params += [
+                "--v_parameterization",
+                "--zero_terminal_snr"
+            ]
+        
         self.params += [
             "--optimizer_type=AdamW",
             "--sdpa",
@@ -222,14 +228,13 @@ class Trainer(train_network.NetworkTrainer):
             "--cache_latents",
             "--network_module=networks.lora",
             "--enable_bucket",
-            "--caption_extension=.txt",
-            "--caption_separator=', '",
-            "--shuffle_caption",
             "--weighted_captions",
             "--max_token_length=225",
             "--save_model_as=safetensors",
             "--save_every_n_steps=1000"
         ]
+
+        #"--min_snr_gamma=5.0"
 
     def run(self):
         parser = train_network.setup_parser()
