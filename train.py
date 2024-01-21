@@ -6,11 +6,12 @@ import torch
 import numpy as np
 import time
 import tqdm
+import random
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "sd_scripts"))
+sys.path.append(os.path.join(os.path.dirname(__file__), "training"))
 
-from sd_scripts import train_network
-from sd_scripts.library import train_util
+from training import train_network
+from training.library import train_util
 
 def get_step_ckpt_name(args, ext: str, step_no: int):
     return f"{args.output_name}_{step_no}.{ext}"
@@ -33,10 +34,11 @@ class Dataset(train_util.MinimalDataset):
 
         self.last_time = time.time()
 
-    def configure(self, batch_size, status_callback, cache_callback):
-        self.batch_size = batch_size
-        self.status_callback = status_callback
-        self.cache_callback = cache_callback
+    def configure(self, trainer):
+        self.batch_size = trainer.batch_size
+        self.shuffle = trainer.shuffle
+        self.status_callback = trainer.status_callback
+        self.cache_callback = trainer.cache_callback
 
     def add_pair(self, image, caption):
         name = f"MEMORY-{len(self.dataset)}"
@@ -119,11 +121,19 @@ class Dataset(train_util.MinimalDataset):
                     self.batches += [batch]
                     batch = []
 
+    def get_caption(self, name):
+        caption = self.dataset[name][1]
+        if self.shuffle:
+            caption = [c.strip() for c in caption.split(",")]
+            random.shuffle(caption)
+            caption = ", ".join(caption)
+        return caption
+
     def __getitem__(self, idx):
         names = self.batches[idx]
 
         latents = torch.cat([self.cache[name] for name in names])
-        captions = [self.dataset[name][1] for name in names]
+        captions = [self.get_caption(name) for name in names]
 
         return {
             "latents": latents,
@@ -145,8 +155,8 @@ class Trainer(train_network.NetworkTrainer):
         self.global_step = 0
         self.was_saving = False
 
-    def assert_extra_args(self, args, train_dataset_group):
-        self.dataset = train_dataset_group
+    def configure_dataset(self, dataset):
+        self.dataset = dataset
 
         if self.folders:
             for folder in self.folders:
@@ -156,8 +166,78 @@ class Trainer(train_network.NetworkTrainer):
             for image, caption in self.pairs:
                 self.dataset.add_pair(image, caption)
 
-        self.dataset.configure(self.batch_size, self.status_callback, self.cache_callback)
+        self.dataset.configure(self)
 
+    def configure_accelerator(self, accelerator, args):
+        if not self.args:
+            self.args = args
+            self.accelerator = accelerator
+
+            args.logging_dir = True
+            accelerator.log = self.log
+            accelerator.print = self.print
+
+    def configure(self, params):
+        lr_scheduler = params.learning_schedule.lower()
+        if lr_scheduler == "cosine":
+            lr_scheduler = "cosine_with_restarts"
+
+        self.folders = params.folders
+        self.pairs = params.dataset
+        self.batch_size = params.batch_size
+        self.shuffle = params.shuffle
+
+        if not self.folders and not self.pairs:
+            raise Exception("No data")
+
+        self.params = [
+            f"--pretrained_model_name_or_path={params.base_model}",
+            f"--clip_skip={params.clip_skip}",
+            f"--output_dir={params.output_dir}",
+            f"--output_name={params.name}",
+            f"--lr_scheduler={lr_scheduler}",
+            f"--lr_warmup_steps={int(params.warmup * params.steps)}",
+            f"--lr_scheduler_num_cycles={int(params.restarts)}",
+            f"--resolution={params.image_size}",
+            f"--max_train_steps={params.steps}",
+            f"--learning_rate={params.learning_rate}",
+            f"--unet_lr={params.learning_rate}",
+            f"--text_encoder_lr={params.learning_rate}",
+            f"--network_dim={int(params.lora_rank)}",
+            f"--network_alpha={int(params.lora_alpha)}"
+        ]
+        
+        if params.type == "LoCon":
+            self.params += [
+                "--network_args",
+                f"conv_dim={params.lora_conv_rank}",
+                f"conv_alpha={params.lora_conv_alpha}",
+            ]
+        
+        self.params += [
+            "--optimizer_type=AdamW",
+            "--sdpa",
+            "--mixed_precision=fp16",
+            "--dataset_class=train.Dataset",
+            "--cache_latents",
+            "--network_module=networks.lora",
+            "--enable_bucket",
+            "--caption_extension=.txt",
+            "--caption_separator=', '",
+            "--shuffle_caption",
+            "--weighted_captions",
+            "--max_token_length=225",
+            "--save_model_as=safetensors",
+            "--save_every_n_steps=1000"
+        ]
+
+    def run(self):
+        parser = train_network.setup_parser()
+        args = parser.parse_args(self.params)
+        args = train_network.train_util.read_config_from_file(args, parser)
+        self.train(args)
+
+    # Hooks
     def log(self, values: dict, step: int | None = None, log_kwargs: dict | None = {}):
         if not "loss/current" in values:
             return
@@ -196,61 +276,9 @@ class Trainer(train_network.NetworkTrainer):
         if "saving checkpoint" in s:
             self.status_callback("Saving")
             self.was_saving = True
-        
+
+    def assert_extra_args(self, args, train_dataset_group):
+        self.configure_dataset(train_dataset_group)
+    
     def sample_images(self, accelerator, args, epoch, global_step, device, vae, tokenizer, text_encoder, unet):
-        if not self.args:
-            self.args = args
-            self.accelerator = accelerator
-
-            args.logging_dir = True
-            accelerator.log = self.log
-            accelerator.print = self.print
-
-    def configure(self, params):
-        lr_scheduler = params.learning_schedule.lower()
-        if lr_scheduler == "cosine":
-            lr_scheduler = "cosine_with_restarts"
-
-        self.folders = params.folders
-        self.pairs = params.dataset
-        self.batch_size = params.batch_size
-
-        if not self.folders and not self.pairs:
-            raise Exception("No data")
-
-        self.params = [
-            f"--pretrained_model_name_or_path={params.base_model}",
-            f"--clip_skip={params.clip_skip}",
-            f"--output_dir={params.output_dir}",
-            f"--output_name={params.name}",
-            f"--lr_scheduler={lr_scheduler}",
-            f"--lr_warmup_steps={int(params.warmup * params.steps)}",
-            f"--lr_scheduler_num_cycles={int(params.restarts)}",
-            f"--resolution={params.image_size}",
-            f"--max_train_steps={params.steps}",
-            f"--learning_rate={params.learning_rate}",
-            f"--unet_lr={params.learning_rate}",
-            f"--text_encoder_lr={params.learning_rate}",
-            f"--network_dim={int(params.lora_rank)}",
-            f"--network_alpha={int(params.lora_alpha)}",
-            "--optimizer_type=AdamW",
-            "--sdpa",
-            "--mixed_precision=fp16",
-            "--dataset_class=train.Dataset",
-            "--cache_latents",
-            "--network_module=networks.lora",
-            "--enable_bucket",
-            "--caption_extension=.txt",
-            "--caption_separator=', '",
-            "--shuffle_caption",
-            "--weighted_captions",
-            "--max_token_length=225",
-            "--save_model_as=safetensors",
-            "--save_every_n_steps=1000"
-        ]
-
-    def run(self):
-        parser = train_network.setup_parser()
-        args = parser.parse_args(self.params)
-        args = train_network.train_util.read_config_from_file(args, parser)
-        self.train(args)
+        self.configure_accelerator(accelerator, args)
