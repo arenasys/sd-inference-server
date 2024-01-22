@@ -113,6 +113,9 @@ def format_float(x):
 def model_name(x):
     return x.rsplit('.',1)[0].rsplit(os.path.sep,1)[-1]
 
+class AbortError(RuntimeError):
+    pass
+
 class GenerationParameters():
     def __init__(self, storage: storage.ModelStorage, device):
         self.storage = storage
@@ -146,13 +149,13 @@ class GenerationParameters():
         if self.callback:
             if not self.callback({"type": "status", "data": {"message": status}}):
                 self.storage.do_gc()
-                raise RuntimeError("Aborted")
+                raise AbortError("Aborted")
 
     def set_progress(self, progress):
         if self.callback:
             if not self.callback({"type": "progress", "data": progress}):
                 self.storage.do_gc()
-                raise RuntimeError("Aborted")
+                raise AbortError("Aborted")
 
     def on_step(self, progress, latents=None):
         step = self.current_step
@@ -212,7 +215,7 @@ class GenerationParameters():
         if self.callback:
             if not self.callback({"type": "training_status", "data": {"message": status}}):
                 self.storage.do_gc()
-                raise RuntimeError("Aborted")
+                raise AbortError("Aborted")
 
     def on_training_step(self, progress):
         losses = progress["losses"]
@@ -228,7 +231,7 @@ class GenerationParameters():
 
         if self.callback:
             if not self.callback({"type": "training_progress", "data": progress}):
-                raise RuntimeError("Aborted")
+                raise AbortError("Aborted")
 
     def on_caching_step(self, progress):
         current = progress["n"]
@@ -242,7 +245,7 @@ class GenerationParameters():
 
         if self.callback:
             if not self.callback({"type": "training_progress", "data": progress}):
-                raise RuntimeError("Aborted")
+                raise AbortError("Aborted")
 
     def on_artifact(self, name, images):
         if self.callback:
@@ -1237,7 +1240,7 @@ class GenerationParameters():
         data = bytesio.getvalue()
         if self.callback:
             if not self.callback({"type": "annotate", "data": {"images": [data]}}):
-                raise RuntimeError("Aborted")
+                raise AbortError("Aborted")
     
     def options(self):
         self.storage.find_all()
@@ -1259,7 +1262,7 @@ class GenerationParameters():
 
         if self.callback:
             if not self.callback({"type": "options", "data": data}):
-                raise RuntimeError("Aborted")
+                raise AbortError("Aborted")
     
     @torch.inference_mode()
     def manage(self):
@@ -1295,7 +1298,7 @@ class GenerationParameters():
             raise ValueError(f"unknown operation: {self.operation}")
         
         if not self.callback({"type": "done", "data": {}}):
-            raise RuntimeError("Aborted")
+            raise AbortError("Aborted")
     
     def trash_model(self, model, copy=False, delete=False):
         if delete:
@@ -1526,7 +1529,7 @@ class GenerationParameters():
         data = bytesio.getvalue()
         if self.callback:
             if not self.callback({"type": "segmentation", "data": {"images": [data]}}):
-                raise RuntimeError("Aborted")
+                raise AbortError("Aborted")
 
     def train_lora(self):
         self.set_status("Configuring")
@@ -1548,7 +1551,7 @@ class GenerationParameters():
 
         try:
             trainer.run()
-        except RuntimeError:
+        except AbortError:
             pass
 
         self.on_training_status("Idle")
@@ -1557,11 +1560,11 @@ class GenerationParameters():
         self.storage.reset()
 
         if not self.callback({"type": "done", "data": {}}):
-            raise RuntimeError("Aborted")
+            raise AbortError("Aborted")
         
     def train_upload(self):
         if self.index == 0:
             self.dataset = []
         self.dataset += [(self.image[0], self.prompt[0])]
         if not self.callback({"type": "training_upload", "data": {"index": self.index}}):
-            raise RuntimeError("Aborted")
+            raise AbortError("Aborted")
