@@ -186,6 +186,7 @@ class Trainer(train_network.NetworkTrainer):
         self.pairs = params.dataset
         self.batch_size = params.batch_size
         self.shuffle = params.shuffle
+        self.attention = params.attention
 
         if not self.folders and not self.pairs:
             raise Exception("No data")
@@ -222,7 +223,6 @@ class Trainer(train_network.NetworkTrainer):
         
         self.params += [
             "--optimizer_type=AdamW",
-            "--mem_eff_attn",
             "--sdpa",
             "--mixed_precision=fp16",
             "--dataset_class=train.Dataset",
@@ -241,7 +241,13 @@ class Trainer(train_network.NetworkTrainer):
         parser = train_network.setup_parser()
         args = parser.parse_args(self.params)
         args = train_network.train_util.read_config_from_file(args, parser)
-        self.train(args)
+
+        if self.attention == "Default":
+            self.train(args)
+        else:
+            mem_eff = self.attention == "Efficient"
+            with torch.backends.cuda.sdp_kernel(enable_flash=False, enable_math=True, enable_mem_efficient=mem_eff):
+                self.train(args)
 
     # Hooks
     def log(self, values: dict, step: int | None = None, log_kwargs: dict | None = {}):
