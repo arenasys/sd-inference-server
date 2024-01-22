@@ -222,6 +222,7 @@ class Trainer(train_network.NetworkTrainer):
         
         self.params += [
             "--optimizer_type=AdamW",
+            "--mem_eff_attn",
             "--sdpa",
             "--mixed_precision=fp16",
             "--dataset_class=train.Dataset",
