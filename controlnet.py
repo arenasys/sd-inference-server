@@ -64,7 +64,7 @@ def annotate(img, annotator, model, arg, mask=None):
 
     return c, cv2_to_pil(img)
 
-def preprocess_control(images, annotators, models, args, scales, masks=[]):
+def preprocess_control(images, annotators, models, args, scales, guess, masks=[]):
     conditioning = []
     outputs = []
 
@@ -74,10 +74,10 @@ def preprocess_control(images, annotators, models, args, scales, masks=[]):
         mask = None
 
     for i in range(len(images)):
-        sc, an, md, arg, im = scales[i], annotators[i], models[i], args[i], images[i]
+        sc, gs, an, md, arg, im = scales[i], guess[i], annotators[i], models[i], args[i], images[i]
         cond, out = annotate(im, an, md, arg, mask)
         outputs += [out]
-        conditioning += [(sc,cond)]
+        conditioning += [(sc,gs,cond)]
     return conditioning, outputs
 
 def get_controlnet(name, folder, callback):
@@ -96,19 +96,20 @@ class ControlledUNET:
         self.controlnet_cond = None
     
     def set_controlnet_conditioning(self, conditioning, device):
-        self.controlnet_cond = [(s,cond.to(device, self.dtype)) for s,cond in conditioning]
+        self.controlnet_cond = [(s,guess,cond.to(device, self.dtype)) for s,guess,cond in conditioning]
 
     def __call__(self, latents, timestep, encoder_hidden_states, **kwargs):
         down_samples, mid_sample = None, None
         for i in range(len(self.controlnets)):
-            cn_scale, cn_cond = self.controlnet_cond[i]
+            cn_scale, cn_guess, cn_cond = self.controlnet_cond[i]
 
             down, mid = self.controlnets[i](
                 latents, timestep,
                 encoder_hidden_states=encoder_hidden_states,
                 controlnet_cond=cn_cond,
                 conditioning_scale=cn_scale,
-                return_dict=False
+                return_dict=False,
+                guess_mode=cn_guess,
             )
             if down_samples == None or mid_sample == None:
                 down_samples, mid_sample = down, mid

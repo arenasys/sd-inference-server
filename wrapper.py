@@ -764,10 +764,11 @@ class GenerationParameters():
             cn_annotators = [o["annotator"] for o in self.cn_opts]
             cn_scales = [o["scale"] for o in self.cn_opts]
             cn_args = [o["args"] for o in self.cn_opts]
+            cn_guess = [o["guess"] for o in self.cn_opts]
             cn_annotator_models = [self.storage.get_controlnet_annotator(a, device, dtype, self.on_download) for a in cn_annotators]
             cn_images = upscalers.upscale(self.cn_image, transforms.InterpolationMode.LANCZOS, self.width, self.height)
 
-            cn_cond, cn_outputs = controlnet.preprocess_control(cn_images, cn_annotators, cn_annotator_models, cn_args, cn_scales)
+            cn_cond, cn_outputs = controlnet.preprocess_control(cn_images, cn_annotators, cn_annotator_models, cn_args, cn_scales, cn_guess)
             if self.keep_artifacts:
                 self.on_artifact("Control", [cn_outputs]*batch_size)
             self.unet.set_controlnet_conditioning(cn_cond, device)
@@ -905,7 +906,7 @@ class GenerationParameters():
 
         if self.cn:
             cn_images = upscalers.upscale(self.cn_image, transforms.InterpolationMode.LANCZOS, width, height)
-            cn_cond, cn_outputs = controlnet.preprocess_control(cn_images, cn_annotators, cn_annotator_models, cn_args, cn_scales)
+            cn_cond, cn_outputs = controlnet.preprocess_control(cn_images, cn_annotators, cn_annotator_models, cn_args, cn_scales, cn_guess)
             self.unet.set_controlnet_conditioning(cn_cond, device)
             if self.keep_artifacts:
                 self.on_artifact("Control HR", [cn_outputs]*batch_size)
@@ -984,10 +985,11 @@ class GenerationParameters():
             cn_annotators = [o["annotator"] for o in self.cn_opts]
             cn_scales = [o["scale"] for o in self.cn_opts]
             cn_args = [o["args"] for o in self.cn_opts]
+            cn_guess = [o["guess"] for o in self.cn_opts]
             cn_annotator_models = [self.storage.get_controlnet_annotator(a, device, dtype, self.on_download) for a in cn_annotators]
             cn_images = upscalers.upscale(self.cn_image, transforms.InterpolationMode.LANCZOS, width, height)
 
-            cn_cond, cn_outputs = controlnet.preprocess_control(cn_images, cn_annotators, cn_annotator_models, cn_args, cn_scales, masks=masks)
+            cn_cond, cn_outputs = controlnet.preprocess_control(cn_images, cn_annotators, cn_annotator_models, cn_args, cn_scales, cn_guess, masks=masks)
 
             if self.keep_artifacts:
                 self.on_artifact("Control", [cn_outputs]*batch_size)
@@ -1075,6 +1077,7 @@ class GenerationParameters():
         tile_size = self.tile_size
         tile_upscale = self.tile_upscale
         tile_strength = self.tile_strength
+        tile_guess = self.tile_guess
 
         self.set_status("Configuring")
         self.check_parameters()
@@ -1148,7 +1151,7 @@ class GenerationParameters():
                 for j in range(len(tile_latents[i])):
                     if tile_strength:
                         cond, _ = controlnet.annotate(tile_images[i][j], None, None, None)
-                        self.unet.set_controlnet_conditioning([(tile_strength,cond)], device)
+                        self.unet.set_controlnet_conditioning([(tile_strength,tile_guess,cond)], device)
                     tile_latents[i][j] = inference.img2img(tile_latents[i][j], denoiser, sampler, noise, self.steps, False, self.strength, self.on_step)
 
         self.set_status("Decoding")
