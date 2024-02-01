@@ -184,7 +184,7 @@ def do_download(request, folder, id, callback):
 
 class Inference(threading.Thread):
     def __init__(self, wrapper, read_only, public, callback):
-        super().__init__()
+        super().__init__(daemon=True)
         
         self.wrapper = wrapper
         wrapper.callback = self.got_response
@@ -310,6 +310,7 @@ class Server():
 
         self.requests = {}
         self.clients = {}
+        self.reconnected = {}
 
         self.scheme = None
         if password != None:
@@ -322,7 +323,7 @@ class Server():
 
         self.inference = Inference(wrapper, read_only, public, callback=self.on_response)
         self.server = websockets.sync.server.serve(self.handle_connection, host=host, port=int(port), max_size=None)
-        self.serve = threading.Thread(target=self.serve_forever)
+        self.serve = threading.Thread(target=self.serve_forever, daemon=True)
 
     def start(self):
         print("SERVER: starting")
@@ -361,13 +362,12 @@ class Server():
             self.inference.owner = self.owner
             self.clients[client_id].put((-1, {"type":"owner"}))
 
-        mapping = {}
+        lost = False
         ctr = 0
         try:
             while not self.stopping:
                 if not self.clients[client_id].empty():
                     id, response = self.clients[client_id].get()
-                    if id in mapping: id = mapping[id]
                     response["id"] = id
                     data = encrypt(self.scheme, bson.dumps(response))
                     data = [data[i:min(i+FRAGMENT_SIZE,len(data))] for i in range(0, len(data), FRAGMENT_SIZE)]
@@ -400,33 +400,50 @@ class Server():
                         error = "Invalid request"
                     if request:
                         if request["type"] == "cancel":
-                            id = 0
-                            for k,v in mapping.items():
-                                if v == request["data"]["id"]:
-                                    id = k
-                                    break
+                            id = request["data"]["id"]
                             if id in self.requests and self.requests[id] == client_id:
                                 del self.requests[id]
                                 self.send_response(client_id, id, {'type': 'aborted', 'data': {}})
-
+                        if request["type"] == "reconnect":
+                            old_client_id = request["data"]["id"]
+                            if old_client_id in self.clients:
+                                while not self.clients[old_client_id].empty():
+                                    self.clients[client_id].put(self.clients[old_client_id].get())
+                            self.reconnected[old_client_id] = client_id
+                            for id in list(self.requests.keys()):
+                                if self.requests[id] == old_client_id:
+                                    self.requests[id] = client_id
+                            
                         request_id = get_id()
-                        user_id = request_id
                         if "id" in request:
-                            user_id = request["id"]
+                            request_id = request["id"]
                         self.requests[request_id] = client_id
-                        mapping[request_id] = user_id
 
                         remaining = self.inference.requests.unfinished_tasks
                         self.inference.requests.put((client_id, request_id, request))
-                        self.clients[client_id].put((-1, {"type":"ack", "data":{"id": user_id, "queue": remaining}}))
+                        self.clients[client_id].put((-1, {"type":"ack", "data":{"id": request_id, "queue": remaining}}))
                     else:
                         self.clients[client_id].put((-1, {"type":"error", "data":{"message": error}}))
-        except websockets.exceptions.WebSocketException:
-            del self.clients[client_id]
-        except Exception as e:
-            del self.clients[client_id]
+        except websockets.exceptions.ConnectionClosedOK:
+            pass
+        except websockets.exceptions.ConnectionClosedError as e:
+            if not e.rcvd and not e.sent:
+                lost = True
+        except Exception:
             log_traceback("CLIENT")
-        print(f"SERVER: client disconnected")
+
+        if lost:
+            print(f"SERVER: client lost, waiting...")
+            for _ in range(60):
+                if client_id in self.reconnected:
+                    print(f"SERVER: client found")
+                    break
+                time.sleep(1)
+        else:
+            print(f"SERVER: client disconnected")
+
+        if client_id in self.clients:
+            del self.clients[client_id]
 
     def send_response(self, client, id, response):
         if client in self.clients:
@@ -435,7 +452,6 @@ class Server():
             response = response.copy()
             response["monitor"] = True
             self.clients[self.owner].put((id, response))
-        
 
     def on_response(self, id, response):
         if self.stopping:
