@@ -356,17 +356,22 @@ class ConditioningSchedule():
         self.positives = [PromptSchedule(self, i, p, self.steps, self.HR) for i, p in enumerate(self.prompt)]
         self.negatives = [PromptSchedule(self, i + len(self.positives), p, self.steps, self.HR) for i, p in enumerate(self.negative_prompt)]
 
+    def tokenize(self, clip):
+        for p in self.positives + self.negatives:
+            p.tokenize(clip)
+
+    def max_chunks(self):
+        return max([p.chunks for p in self.positives + self.negatives])
+
+    def pad_to_length(self, max_chunks):
+        for p in self.positives + self.negatives:
+            p.pad_to_length(max_chunks)
+
     def encode(self, clip, areas):
         self.areas = areas
         self.model_type = clip.model_type
 
         for p in self.positives + self.negatives:
-            p.tokenize(clip)
-
-        max_chunks = max([p.chunks for p in self.positives + self.negatives])
-
-        for p in self.positives + self.negatives:
-            p.pad_to_length(max_chunks)
             p.encode(clip, self.clip_skip)
 
     def get_all_networks(self):
@@ -469,6 +474,14 @@ class BatchedConditioningSchedules():
             self.batches += [ConditioningSchedule(positive, negative, self.steps, self.clip_skip)]
     
     def encode(self, clip, areas):
+        max_chunks = 0
+        for b in self.batches:
+            b.tokenize(clip)
+            max_chunks = max(max_chunks, b.max_chunks())
+        
+        for b in self.batches:
+            b.pad_to_length(max_chunks)
+        
         for i, b in enumerate(self.batches):
             a = areas[i] if i < len(areas) else []
             b.encode(clip, a)
