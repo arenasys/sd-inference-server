@@ -90,7 +90,7 @@ def convert_all_paths(j):
 def do_download(request, folder, id, callback):
     type = request["type"]
     url = request["url"]
-    token = request.get("token", None)
+    token = None
     
     def started(callback, label, id):
         callback({"type":"download", "data":{"status": "started", "label": label}}, id)
@@ -164,22 +164,28 @@ def do_download(request, folder, id, callback):
         thread = threading.Thread(target=gdownload, args=([callback, folder, url, id]))
         thread.start()
         return
+    
     if 'mega.nz' in url:
         thread = threading.Thread(target=megadownload, args=([callback, folder, url, id]))
         thread.start()
         return
+    
     if 'civitai.com' in url:
         if not "civitai.com/api/download/models" in url:
             error(callback, "Unsupported URL", id)
             return
+        token = request.get("civitai_token", None) 
+    
     if 'huggingface' in url:
         url = url.replace("/blob/", "/resolve/")
-        if token:
-            thread = threading.Thread(target=requests_download, args=([callback, folder, url, {"Authorization": f"Bearer {token}"}, id]))
-            thread.start()
-            return
+        token = request.get("hf_token", None)
+
+    headers = {}
+    if token:
+        print(token)
+        headers = {"Authorization": f"Bearer {token}"}
     
-    thread = threading.Thread(target=requests_download, args=([callback, folder, url, {}, id]))
+    thread = threading.Thread(target=requests_download, args=([callback, folder, url, headers, id]))
     thread.start()
 
 class Inference(threading.Thread):
