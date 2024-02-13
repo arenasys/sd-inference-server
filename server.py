@@ -310,6 +310,16 @@ class Inference(threading.Thread):
                 os.rename(tmp, file)
             self.got_response({"type":"download", "data":{"status": "success"}}, id)
 
+    def fetch(self, result_id, request_id):
+        def do_fetch(result_id, request_id):
+            result = self.wrapper.fetch(result_id)
+            if not result:
+                return
+            self.got_response(result, request_id)
+
+        thread = threading.Thread(target=do_fetch, args=([result_id, request_id]), daemon=True)
+        thread.start()
+
 class Server():
     def __init__(self, wrapper, host, port, password=DEFAULT_PASSWORD, owner=False, read_only=False, monitor=False, public=False):
         self.stopping = False
@@ -357,7 +367,8 @@ class Server():
         self.server.serve_forever()
 
     def handle_connection(self, connection):
-        print(f"SERVER: client connected")
+        new = True
+
         client_id = get_id()
 
         self.clients[client_id] = queue.Queue()
@@ -405,6 +416,9 @@ class Server():
                     else:
                         error = "Invalid request"
                     if request:
+                        if request["type"] == "options" and new:
+                            print(f"SERVER: client connected")
+                            new = False
                         if request["type"] == "cancel":
                             id = request["data"]["id"]
                             if id in self.requests and self.requests[id] == client_id:
@@ -424,6 +438,10 @@ class Server():
                         if "id" in request:
                             request_id = request["id"]
                         self.requests[request_id] = client_id
+
+                        if request["type"] == "fetch":
+                            self.inference.fetch(request["data"]["id"], request_id)
+                            continue
 
                         remaining = self.inference.requests.unfinished_tasks
                         self.inference.requests.put((client_id, request_id, request))

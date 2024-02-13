@@ -1,19 +1,15 @@
 import torch
 import torchvision.transforms as transforms
 import PIL
+import PIL.Image
 import random
 import io
 import os
 import safetensors.torch
-import time
 import shutil
 import tomesd
 import contextlib
 import numpy as np
-import math
-import json
-import itertools
-import tqdm
 
 DIRECTML_AVAILABLE = False
 try:
@@ -49,7 +45,7 @@ TYPES = {
     float: ["scale", "eta", "hr_factor", "hr_eta", "hr_scale"],
 }
 
-STATIC = ["storage", "device", "device_names", "callback", "last_models_modified", "last_models_config", "dataset", "public"]
+STATIC = ["storage", "device", "device_names", "callback", "last_models_modified", "last_models_config", "dataset", "public", "temporary"]
 
 SAMPLER_CLASSES = {
     "Euler": samplers_k.Euler,
@@ -141,6 +137,7 @@ class GenerationParameters():
         self.last_models_config = None
 
         self.callback = None
+        self.temporary = {}
 
     def switch_public(self):
         self.public = True
@@ -259,7 +256,7 @@ class GenerationParameters():
                             images_data += [bytesio.getvalue()]
                         else:
                             images_data += [None]
-                    self.callback({"type": "artifact", "data": {"name": f"{name} {j+1}", "images": images_data}})
+                    self.callback({"type": "artifact", "data": {"name": f"{name} {j+1}", "images": images_data, "type": "PNG"}})
             else:
                 images_data = []
                 for i in images:
@@ -269,19 +266,46 @@ class GenerationParameters():
                         images_data += [bytesio.getvalue()]
                     else:
                         images_data += [None]
-                self.callback({"type": "artifact", "data": {"name": name, "images": images_data}})
+                self.callback({"type": "artifact", "data": {"name": name, "images": images_data, "type": "PNG"}})
         
     def on_complete(self, images, metadata):
         if self.callback:
             self.set_status("Fetching")
+
+            if self.delay_fetch:
+                id = random.randrange(2147483646)
+                self.temporary[id] = (images, metadata)
+                images_data = []
+                for i in images:
+                    bytesio = io.BytesIO()
+                    im = i.copy()
+                    im.thumbnail((256,256), PIL.Image.Resampling.LANCZOS)
+                    im.save(bytesio, format="JPEG")
+                    images_data += [bytesio.getvalue()]
+                self.callback({"type": "temporary", "data": {"id": id, "images": images_data, "metadata": metadata, "type": "JPEG"}})
+            else:
+                images_data = []
+                for i in images:
+                    bytesio = io.BytesIO()
+                    i.save(bytesio, format="PNG")
+                    images_data += [bytesio.getvalue()]
+                self.callback({"type": "result", "data": {"images": images_data, "metadata": metadata, "type": "PNG"}})
+        self.storage.do_gc()
+
+    def fetch(self, id):
+        if id in self.temporary:
+            images, metadata = self.temporary[id]
+            del self.temporary[id]
+
             images_data = []
             for i in images:
                 bytesio = io.BytesIO()
-                i.save(bytesio, format='PNG')
+                i.save(bytesio, format="PNG")
                 images_data += [bytesio.getvalue()]
-            self.callback({"type": "result", "data": {"images": images_data, "metadata": metadata}})
-        self.storage.do_gc()
             
+            return {"type": "result", "data": {"images": images_data, "metadata": metadata, "type": "PNG"}}
+        return None
+
     def reset(self):
         for attr in list(self.__dict__.keys()):
             if not attr in STATIC:
