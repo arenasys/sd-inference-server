@@ -310,14 +310,14 @@ class Inference(threading.Thread):
                 os.rename(tmp, file)
             self.got_response({"type":"download", "data":{"status": "success"}}, id)
 
-    def fetch(self, result_id, request_id):
-        def do_fetch(result_id, request_id):
+    def fetch(self, result_id, request_id, queue):
+        def do_fetch():
             result = self.wrapper.fetch(result_id)
             if not result:
                 return
-            self.got_response(result, request_id)
+            queue.put((request_id, result))
 
-        thread = threading.Thread(target=do_fetch, args=([result_id, request_id]), daemon=True)
+        thread = threading.Thread(target=do_fetch, args=([]), daemon=True)
         thread.start()
 
 class Server():
@@ -440,7 +440,7 @@ class Server():
                         self.requests[request_id] = client_id
 
                         if request["type"] == "fetch":
-                            self.inference.fetch(request["data"]["id"], request_id)
+                            self.inference.fetch(request["data"]["id"], request_id, self.clients[client_id])
                             continue
 
                         remaining = self.inference.requests.unfinished_tasks
@@ -456,15 +456,16 @@ class Server():
         except Exception:
             log_traceback("CLIENT")
 
-        if lost:
-            print(f"SERVER: client lost, waiting...")
-            for _ in range(60):
-                if client_id in self.reconnected:
-                    print(f"SERVER: client found")
-                    break
-                time.sleep(1)
-        else:
-            print(f"SERVER: client disconnected")
+        if not new:
+            if lost:
+                print(f"SERVER: client lost, waiting...")
+                for _ in range(60):
+                    if client_id in self.reconnected:
+                        print(f"SERVER: client found")
+                        break
+                    time.sleep(1)
+            else:
+                print(f"SERVER: client disconnected")
 
         if client_id in self.clients:
             del self.clients[client_id]
