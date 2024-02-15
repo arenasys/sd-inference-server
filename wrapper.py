@@ -1266,7 +1266,7 @@ class GenerationParameters():
         img.save(bytesio, format='PNG')
         data = bytesio.getvalue()
         if self.callback:
-            if not self.callback({"type": "annotate", "data": {"images": [data]}}):
+            if not self.callback({"type": "annotate", "data": {"images": [data], "type": "PNG"}}):
                 raise AbortError("Aborted")
     
     def options(self):
@@ -1555,7 +1555,7 @@ class GenerationParameters():
         img.save(bytesio, format='PNG')
         data = bytesio.getvalue()
         if self.callback:
-            if not self.callback({"type": "segmentation", "data": {"images": [data]}}):
+            if not self.callback({"type": "segmentation", "data": {"images": [data], "type": "PNG"}}):
                 raise AbortError("Aborted")
 
     def train_lora(self):
