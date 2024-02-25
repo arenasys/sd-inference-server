@@ -3,11 +3,13 @@ import os
 import PIL.Image
 import einops
 import numpy as np
+import math
+import cv2
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 
 import utils
-from annotator import shuffle, canny
+from annotator import shuffle, canny, unpack_pose, draw_pose
 
 CONTROLNET_MODELS = {
     "Canny": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11p_sd15_canny.pth",
@@ -33,8 +35,13 @@ def cv2_to_pil(img):
 def pil_to_cv2(img):
     return np.array(img)
 
-def annotate(img, annotator, model, arg, mask=None):
+#def new_draw(poses, width, height):
+#    canvas = np.zeros(shape=(height, width, 3), dtype=np.uint8)
+#    canvas = draw_bodies(canvas, poses)
+
+def annotate(img, annotator, model, arg, mask=None, standalone=False):
     img = pil_to_cv2(img)
+    pose = None
     if annotator == "Invert":
         img = 255 - img
     elif annotator == "Canny":
@@ -42,7 +49,14 @@ def annotate(img, annotator, model, arg, mask=None):
     elif annotator == "Shuffle":
         img = shuffle(img)
     elif annotator == "Pose":
-        img, pose = model(img, *arg)
+        if standalone or len(arg) == 1:
+            img, pose = model(img, arg[0])
+            pose = unpack_pose(pose)
+        else:
+            pose = arg[1]
+            img = np.zeros(shape=img.shape, dtype=np.uint8)
+            img = draw_pose(img, pose)
+            pose = None
     elif model:
         img = model(img, *arg)
 
@@ -62,7 +76,7 @@ def annotate(img, annotator, model, arg, mask=None):
         img_mask = einops.rearrange(mask[0], "c h w -> h w c").numpy()
         img[img_mask > 0.5] = 0
 
-    return c, cv2_to_pil(img)
+    return c, cv2_to_pil(img), pose
 
 def preprocess_control(images, annotators, models, args, scales, guess, masks=[]):
     conditioning = []
@@ -75,7 +89,7 @@ def preprocess_control(images, annotators, models, args, scales, guess, masks=[]
 
     for i in range(len(images)):
         sc, gs, an, md, arg, im = scales[i], guess[i], annotators[i], models[i], args[i], images[i]
-        cond, out = annotate(im, an, md, arg, mask)
+        cond, out, _ = annotate(im, an, md, arg, mask)
         outputs += [out]
         conditioning += [(sc,gs,cond)]
     return conditioning, outputs

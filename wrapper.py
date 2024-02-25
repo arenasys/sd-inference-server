@@ -1174,7 +1174,7 @@ class GenerationParameters():
                 noise = utils.NoiseSchedule([seeds[i]], [subseeds[i]], tile_size // 8, tile_size // 8, device, self.unet.dtype)
                 for j in range(len(tile_latents[i])):
                     if tile_strength:
-                        cond, _ = controlnet.annotate(tile_images[i][j], None, None, None)
+                        cond, _, _ = controlnet.annotate(tile_images[i][j], None, None, None)
                         self.unet.set_controlnet_conditioning([(tile_strength,tile_guess,cond)], device)
                     tile_latents[i][j] = inference.img2img(tile_latents[i][j], denoiser, sampler, noise, self.steps, False, self.strength, self.on_step)
 
@@ -1259,14 +1259,19 @@ class GenerationParameters():
 
         self.set_status("Annotating")
         annotator = self.storage.get_controlnet_annotator(self.cn_annotator[0], device, dtype, self.on_download)
-        _, img = controlnet.annotate(self.cn_image[0], self.cn_annotator[0], annotator, self.cn_args[0])
+        _, img, pose = controlnet.annotate(self.cn_image[0], self.cn_annotator[0], annotator, self.cn_args[0], None, True)
 
         self.set_status("Fetching")
         bytesio = io.BytesIO()
         img.save(bytesio, format='PNG')
         data = bytesio.getvalue()
+
+        response = {"images": [data], "type": "PNG"}
+        if pose:
+            response["pose"] = pose
+
         if self.callback:
-            if not self.callback({"type": "annotate", "data": {"images": [data], "type": "PNG"}}):
+            if not self.callback({"type": "annotate", "data": response}):
                 raise AbortError("Aborted")
     
     def options(self):
