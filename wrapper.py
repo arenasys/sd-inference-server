@@ -376,12 +376,14 @@ class GenerationParameters():
                 self.configure_vae()
         
         self.storage.clear_file_cache()
+
+        if self.cn and all([type(cn) == str for cn in self.cn]):
+            self.cn_names = [c for c in self.cn]
         
-        self.storage.enforce_controlnet_limit(self.cn or [])
-        if self.cn:
+        self.storage.enforce_controlnet_limit(self.cn_names or [])
+        if self.cn_names:
             self.set_status("Loading ControlNet")
-            self.cn_models = [c for c in self.cn]
-            self.cn = [self.storage.get_controlnet(cn, self.device, self.on_download) for cn in self.cn]
+            self.cn = [self.storage.get_controlnet(cn, self.device, self.on_download) for cn in self.cn_names]
 
         if self.hr_upscaler:
             if not self.hr_upscaler in UPSCALERS_LATENT and not self.hr_upscaler in UPSCALERS_PIXEL:
@@ -905,6 +907,7 @@ class GenerationParameters():
             area = utils.preprocess_areas(self.area, width, height)
 
         self.set_status("Encoding")
+        self.need_models(unet=False, vae=False, clip=True)
         conditioning.encode(self.clip, area)
 
         self.need_models(unet=False, vae=True, clip=False)
@@ -929,6 +932,7 @@ class GenerationParameters():
         self.attach_tome(HR=True)
 
         if self.cn:
+            self.unet = controlnet.ControlledUNET(self.unet, self.cn)
             cn_images = upscalers.upscale(self.cn_image, transforms.InterpolationMode.LANCZOS, width, height)
             cn_cond, cn_outputs = controlnet.preprocess_control(cn_images, cn_annotators, cn_annotator_models, cn_args, cn_scales, cn_guess)
             self.unet.set_controlnet_conditioning(cn_cond, device)
