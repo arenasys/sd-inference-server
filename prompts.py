@@ -229,10 +229,14 @@ def encode_tokens(clip, chunks, clip_skip=1):
         
 
         # keep the mean the same, lets the weighting operation work somewhat
+        # dont normalize small means to avoid fp issues
         original_mean = encoding.mean()
-        encoding = encoding * weights
-        new_mean = encoding.mean()
-        encoding = encoding * (original_mean / new_mean)
+        if abs(original_mean.item()) > 0.01:
+            encoding = encoding * weights
+            new_mean = encoding.mean()
+            encoding = encoding * (original_mean / new_mean)
+        else:
+            encoding = encoding * weights
 
         chunk_encodings += [encoding]
         pooled_text_embs += [pooled_text_emb]
