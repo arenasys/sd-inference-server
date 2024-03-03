@@ -585,6 +585,16 @@ class GenerationParameters():
                 "height": height
             }
 
+            inputs = []
+            if self.mask:
+                inputs += ["mask"]
+            if self.cn:
+                inputs += ["controlnet"]
+            if self.area:
+                inputs += ["subprompt"]
+            if inputs:
+                m["inputs"] = inputs
+
             if subseeds != None:
                 sds = []
                 strs = []
