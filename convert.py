@@ -285,18 +285,23 @@ def convert_checkpoint(in_file):
     #print(f"CONVERTING {in_file.rsplit(os.path.sep,1)[-1]}")
 
     metadata = {}
-    name = in_file.split(os.path.sep)[-1].split(".")[0]
-    if in_file.endswith(".ckpt") or in_file.endswith(".pt"):
-        state_dict = utils.load_pickle(in_file, map_location="cpu")
-        if 'state_dict' in state_dict:
-            state_dict = state_dict['state_dict']
-    elif in_file.endswith(".safetensors"):
-        state_dict = {}
-        with safetensors.safe_open(in_file, framework="pt", device="cpu") as f:
-            metadata = f.metadata() or {}
+
+    if type(in_file) == str:
+        name = in_file.split(os.path.sep)[-1].split(".")[0]
+        if in_file.endswith(".ckpt") or in_file.endswith(".pt"):
+            state_dict = utils.load_pickle(in_file, map_location="cpu")
+            if 'state_dict' in state_dict:
+                state_dict = state_dict['state_dict']
+        elif in_file.endswith(".safetensors"):
             state_dict = {}
-            for k in f.keys():
-                state_dict[k] = f.get_tensor(k)
+            with safetensors.safe_open(in_file, framework="pt", device="cpu") as f:
+                metadata = f.metadata() or {}
+                state_dict = {}
+                for k in f.keys():
+                    state_dict[k] = f.get_tensor(k)
+    elif type(in_file) == dict:
+        state_dict = in_file
+        in_file, name = "", ""
 
     # GUESS MISSING MODEL INFORMATION
     if not "model_type" in metadata:

@@ -142,9 +142,9 @@ class GenerationParameters():
     def switch_public(self):
         self.public = True
 
-    def set_status(self, status):
+    def set_status(self, status, reset=True):
         if self.callback:
-            if not self.callback({"type": "status", "data": {"message": status}}):
+            if not self.callback({"type": "status", "data": {"message": status, "reset": reset}}):
                 self.storage.do_gc()
                 raise AbortError("Aborted")
 
@@ -200,12 +200,11 @@ class GenerationParameters():
 
     def on_merge(self, progress):
         if not progress["rate"]:
-            self.set_status("Merging")
             self.last = None
 
         if self.last != progress["n"]:
             self.last =  progress["n"]
-            progress = {"current": progress["n"], "total": progress["total"], "rate": (progress["rate"] or 1), "unit": "it/s"}
+            progress = {"current": progress["n"], "total": progress["total"], "rate": (progress["rate"] or 1), "unit": "key/s"}
             self.set_progress(progress)
 
     def on_training_status(self, status):

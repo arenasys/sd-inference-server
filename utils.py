@@ -244,11 +244,11 @@ def apply_extents(inputs, extents):
         outputs[i] = inputs[i].crop(extent)
     return outputs
 
-def cast_state_dict(state_dict, dtype):
+def cast_state_dict(state_dict, dtype, device='cpu'):
     for k in state_dict:
         if type(state_dict[k]) == torch.Tensor and state_dict[k].dtype != dtype and state_dict[k].dtype in {torch.float16, torch.float32, torch.bfloat16}:
             tmp = state_dict[k].clone().detach()
-            state_dict[k] = tmp.to('cpu', dtype=dtype)
+            state_dict[k] = tmp.to(device, dtype=dtype)
     return state_dict
 
 class NoiseSchedule():

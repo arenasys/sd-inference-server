@@ -3,11 +3,62 @@ import torch
 import base64
 import os
 import tqdm
+import safetensors
+import contextlib
+import gc
 
 import models
 import utils
 import storage
 import lora
+import convert
+
+block_4_labels = ["DOWN0","DOWN1","DOWN2","DOWN3","MID","UP0","UP1","UP2","UP3"]
+block_4_keys = {
+    "DOWN0": ["time_embed.", "input_blocks.0.", "input_blocks.1.", "input_blocks.2.", "input_blocks.3."],
+    "DOWN1": ["input_blocks.4.", "input_blocks.5.", "input_blocks.6."],
+    "DOWN2": ["input_blocks.7.", "input_blocks.8.", "input_blocks.9."],
+    "DOWN3": ["input_blocks.10.", "input_blocks.11."],
+    "MID": ["middle_block."],
+    "UP0": ["output_blocks.0.", "output_blocks.1.", "output_blocks.2."],
+    "UP1": ["output_blocks.3.", "output_blocks.4.", "output_blocks.5."],
+    "UP2": ["output_blocks.6.", "output_blocks.7.", "output_blocks.8."],
+    "UP3": ["output_blocks.9.", "output_blocks.10.", "output_blocks.11.", "out."]
+}
+block_4_keys_xl = {
+    "DOWN0": ["label_emb.", "time_embed.", "input_blocks.0.", "input_blocks.1.", "input_blocks.2.", "input_blocks.3.", "input_blocks.4."],
+    "DOWN1": ["input_blocks.5.", "input_blocks.6."],
+    "DOWN2": ["input_blocks.7.",],
+    "DOWN3": ["input_blocks.8."],
+    "MID": ["middle_block."],
+    "UP0": ["output_blocks.0.", "output_blocks.1.", "output_blocks.2.", "output_blocks.3.", "output_blocks.4.",],
+    "UP1": ["output_blocks.5.", "output_blocks.6."],
+    "UP2": ["output_blocks.7."],
+    "UP3": ["output_blocks.8.", "out."]
+}
+
+block_12_labels = [
+    "IN00","IN01","IN02","IN03","IN04","IN05","IN06","IN07","IN08","IN09","IN10","IN11",
+    "M00",
+    "OUT00","OUT01","OUT02","OUT03","OUT04","OUT05","OUT06","OUT07","OUT08","OUT09","OUT10","OUT11"
+]
+block_12_keys = {
+    "IN00": ["time_embed.", "input_blocks.0."],
+    "IN01": ["input_blocks.1."], "IN02": ["input_blocks.2."],
+    "IN03": ["input_blocks.3."], "IN04": ["input_blocks.4."],
+    "IN05": ["input_blocks.5."], "IN06": ["input_blocks.6."],
+    "IN07": ["input_blocks.7."], "IN08": ["input_blocks.8."],
+    "IN09": ["input_blocks.9."], "IN10": ["input_blocks.10."],
+    "IN11": ["input_blocks.11."],
+    "M00": ["middle_block."],
+    "OUT00": ["output_blocks.0."], "OUT01": ["output_blocks.1."],
+    "OUT02": ["output_blocks.2."], "OUT03": ["output_blocks.3."],
+    "OUT04": ["output_blocks.4."], "OUT05": ["output_blocks.5."],
+    "OUT06": ["output_blocks.6."], "OUT07": ["output_blocks.7."],
+    "OUT08": ["output_blocks.8."], "OUT09": ["output_blocks.9."],
+    "OUT10": ["output_blocks.10."],
+    "OUT11": ["output_blocks.11.", "out."],
+}
 
 def base64_encode(obj):
     return base64.b64encode(str(obj).encode('utf-8')).decode('utf-8')
@@ -237,61 +288,180 @@ def do_recursive_checkpoint_merge(self, operation):
 
     return operation_name
 
-def merge_checkpoint(self, recipe):
+def get_key_model(key):
+    maps = {
+        "model.diffusion_model.": "unet",
+        "cond_stage_model.": "clip",
+        "conditioner.": "clip",
+        "first_stage_model.": "vae"
+    }
+    for k, v in maps.items():
+        if key.startswith(k):
+            return v
+    return None
+
+def get_key_block_weight(key, weights, is_xl):
+    labels = None
+    prefix = None
+    if len(weights) == 9:
+        labels = block_4_labels
+        if is_xl:
+            prefix = block_4_keys_xl
+        else:
+            prefix = block_4_keys
+    else:
+        labels = block_12_labels
+        prefix = block_12_keys
+        if is_xl:
+            raise Exception("12 Block weighting is not supported for SDXL")
+
+    key = key.replace("model.diffusion_model.", "")
+
+    for i, b in enumerate(labels):
+        for p in prefix[b]:
+            if key.startswith(p):
+                return weights[i], b
+    
+    raise Exception("Unknown key: " + key)
+
+def do_disk_checkpoint_merge(self, operation, device):
     self.set_status("Parsing")
 
-    final_result_name = f"_result_{len(recipe)-1}"
+    operation_name = base64_encode(operation)
+    comps = ["CLIP", "VAE", "UNET"]
 
-    self.set_status("Loading VAE")
+    if all([operation_name in self.storage.loaded[comp] for comp in comps]):
+        return operation_name
 
-    vae_sources = {}
-    for i, op in enumerate(recipe):
-        input_models = [op[k] for k in ["model_a", "model_b", "model_c"] if k in op]
-        output_model = f"_result_{i}"
-        vae_sources[output_model] = input_models[op.get("vae_source", 0)]
-    
-    vae_source = final_result_name
-    while vae_source in vae_sources:
-        vae_source = vae_sources[vae_source]
-    
-    self.vae = self.storage.get_vae(vae_source, self.device)
-    self.vae_name = vae_source
+    state_dict = {}
+    dtype = torch.float16
 
-    self.set_status("Loading Sources")
+    alpha = operation["alpha"]
+    clip_alpha = operation["clip_alpha"]
+    vae_source = operation["vae_source"]
 
-    self.storage.uncap_ram = True
-    
-    op = get_result_history(recipe, final_result_name)
-    result_name = base64_encode(op)
+    model_a = os.path.abspath(os.path.join(self.storage.path, operation["model_a"]))
+    model_b = os.path.abspath(os.path.join(self.storage.path, operation["model_b"]))
+    model_c = os.path.abspath(os.path.join(self.storage.path, operation["model_c"])) if "model_c" in operation else None
 
-    all = get_required_model_names(self, op, prune=False)
-    required = get_required_model_names(self, op, prune=True)
+    op = operation["operation"]
 
-    all_lora = [r for r in all if "lora"+os.path.sep in r.lower()]
-    required_lora = [r for r in required if "lora"+os.path.sep in r.lower()]
+    last_model = None
 
-    required = [r for r in required if not r in required]
+    with contextlib.ExitStack() as stack:
+        a = stack.enter_context(safetensors.safe_open(model_a, framework="pt", device="cpu"))
+        b = stack.enter_context(safetensors.safe_open(model_b, framework="pt", device="cpu"))
+        c = stack.enter_context(safetensors.safe_open(model_c, framework="pt", device="cpu")) if model_c else None
+        
+        is_xl = "conditioner.embedders.1.model.text_projection" in a.keys()
 
-    for comp in ["UNET", "CLIP"]:
-        useless = []
-        for name in self.storage.loaded[comp]:
-            if name in required or (name in all and not self.minimal_vram):
+        iter = tqdm.tqdm(list(enumerate(a.keys())))
+        for i, k in iter:
+            model = get_key_model(k)
+
+            if model != last_model:
+                self.set_status("Merging " + model.upper(), reset=False)
+                last_model = model
+
+            self.on_merge(iter.format_dict)
+
+            at = a.get_tensor(k).to(torch.float32)
+            bt = b.get_tensor(k).to(torch.float32)
+            ct = c.get_tensor(k).to(torch.float32) if c else None
+
+            if model == "vae":
+                state_dict[k] = [at,bt,ct][vae_source].to(device, dtype)
                 continue
-            useless += [name]
+            
+            if model == "unet":
+                w = alpha
+                if type(alpha) == list:
+                    w, _ = get_key_block_weight(k, alpha, is_xl)
+            elif model == "clip":
+                w = clip_alpha
 
-        for name in useless:
-            self.storage.remove(comp, name)
+            if op == "Weighted Sum":
+                state_dict[k] = ((w * at) + ((1-w) * bt)).to(device, dtype)
+            elif op == "Add Difference":
+                state_dict[k] = (at + w*(bt - ct)).to(device, dtype)
 
-        for name in required:
-            if not "." in name:
-                continue
-            self.storage.get_component(name, comp, torch.device("cpu"))
+            if i % 500 == 0:
+                self.storage.do_gc()
+    
+    self.set_status("Converting")
 
-    for name in required_lora:
-        self.storage.get_component(name, "LoRA", torch.device("cpu"))
+    state_dict, metadata = convert.convert_checkpoint(state_dict)
+    sub_state_dict = self.storage.parse_model(state_dict, metadata)
+   
+    for comp in comps:
+        self.set_status("Loading " + comp.upper())
+        comp_dtype = self.storage.vae_dtype if comp == "VAE" else self.storage.dtype
+        model = self.storage.classes[comp].from_model(operation_name, sub_state_dict[comp], comp_dtype, device)
+        self.storage.add(comp, operation_name, model)
+        self.storage.do_gc()
 
-    self.set_status("Merging")
-    do_recursive_checkpoint_merge(self, op)
+    return operation_name
+
+def merge_checkpoint(self, recipe):
+    if len(recipe) == 1 and recipe[0]["operation"] in {"Weighted Sum", "Add Difference"}:
+        result_name = do_disk_checkpoint_merge(self, recipe[0], self.device)
+        self.vae = self.storage.get_vae(result_name, self.device)
+        self.vae_name = self.merge_name + ".safetensors"
+        all_lora = []
+    else:
+        final_result_name = f"_result_{len(recipe)-1}"
+
+        self.set_status("Loading VAE")
+
+        vae_sources = {}
+        for i, op in enumerate(recipe):
+            input_models = [op[k] for k in ["model_a", "model_b", "model_c"] if k in op]
+            output_model = f"_result_{i}"
+            vae_sources[output_model] = input_models[op.get("vae_source", 0)]
+        
+        vae_source = final_result_name
+        while vae_source in vae_sources:
+            vae_source = vae_sources[vae_source]
+        
+        self.vae = self.storage.get_vae(vae_source, self.device)
+        self.vae_name = vae_source
+
+        self.set_status("Loading Sources")
+
+        self.storage.uncap_ram = True
+        
+        op = get_result_history(recipe, final_result_name)
+        result_name = base64_encode(op)
+
+        all = get_required_model_names(self, op, prune=False)
+        required = get_required_model_names(self, op, prune=True)
+
+        all_lora = [r for r in all if "lora"+os.path.sep in r.lower()]
+        required_lora = [r for r in required if "lora"+os.path.sep in r.lower()]
+
+        required = [r for r in required if not r in required]
+
+        for comp in ["UNET", "CLIP"]:
+            useless = []
+            for name in self.storage.loaded[comp]:
+                if name in required or (name in all and not self.minimal_vram):
+                    continue
+                useless += [name]
+
+            for name in useless:
+                self.storage.remove(comp, name)
+
+            for name in required:
+                if not "." in name:
+                    continue
+                self.storage.get_component(name, comp, torch.device("cpu"))
+
+        for name in required_lora:
+            self.storage.get_component(name, "LoRA", torch.device("cpu"))
+
+        self.set_status("Merging")
+
+        do_recursive_checkpoint_merge(self, op)  
 
     self.storage.clear_file_cache()
 

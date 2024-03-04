@@ -2,6 +2,7 @@ import os
 import torch
 import utils
 
+
 from transformers import CLIPTextConfig, CLIPTokenizer
 from clip import CustomCLIP, CustomSDXLCLIP
 from diffusers import AutoencoderKL, UNet2DConditionModel
@@ -9,6 +10,20 @@ from diffusers.models.vae import DiagonalGaussianDistribution
 from diffusers.models.controlnet import ControlNetModel
 from lora import LoRANetwork
 from hypernetwork import Hypernetwork
+
+import accelerate
+import accelerate.utils.modeling
+def load_state_dict_in_place(model, state_dict):
+    model_keys = [k for k, _ in model.named_parameters()]
+
+    for key in model_keys:
+        if not key in state_dict:
+            continue
+        accelerate.utils.modeling.set_module_tensor_to_device(model, key, state_dict[key].device, value=state_dict[key])
+
+    missing_keys = [k for k in model_keys if not k in state_dict]
+    unexpected_keys = [k for k in state_dict if not k in model_keys]
+    return missing_keys, unexpected_keys
 
 class UNET(UNet2DConditionModel):
     def __init__(self, model_type, model_variant, prediction_type, dtype):
@@ -37,20 +52,22 @@ class UNET(UNet2DConditionModel):
         return super().__call__(*args, **kwargs)
         
     @staticmethod
-    def from_model(name, state_dict, dtype=None):
+    def from_model(name, state_dict, dtype=None, device="cpu"):
         if not dtype:
             dtype = state_dict['metadata']['dtype']
         model_type = state_dict['metadata']['model_type']
         prediction_type = state_dict['metadata']['prediction_type']
         model_variant = state_dict['metadata'].get('model_variant', "")
+        del state_dict['metadata']
 
-        utils.cast_state_dict(state_dict, dtype)
-        
-        with utils.DisableInitialization():
+        utils.cast_state_dict(state_dict, dtype, device)
+
+        with accelerate.init_empty_weights():
             unet = UNET(model_type, model_variant, prediction_type, dtype)
-            missing, _ = unet.load_state_dict(state_dict, strict=False)
+
+        missing, _ = load_state_dict_in_place(unet, state_dict)
         if missing:
-            raise ValueError("missing keys in UNET: " + ", ".join(missing))
+            raise ValueError("Missing keys in UNET: " + ", ".join(missing))
         
         unet.additional = AdditionalNetworks(unet)
         return unet
@@ -144,16 +161,18 @@ class VAE(AutoencoderKL):
         return posterior
         
     @staticmethod
-    def from_model(name, state_dict, dtype=None):
+    def from_model(name, state_dict, dtype=None, device="cpu"):
         if not dtype:
             dtype = state_dict['metadata']['dtype']
         model_type = state_dict['metadata']['model_type']
+        del state_dict['metadata']
 
-        utils.cast_state_dict(state_dict, dtype)
-        
-        with utils.DisableInitialization():
+        utils.cast_state_dict(state_dict, dtype, device)
+
+        with accelerate.init_empty_weights():
             vae = VAE(model_type, dtype)
-            missing, _ = vae.load_state_dict(state_dict, strict=False)
+
+        missing, _ = load_state_dict_in_place(vae, state_dict)
         if missing:
             raise ValueError("missing keys in VAE: " + ", ".join(missing))
         return vae
@@ -207,16 +226,18 @@ class CLIP(torch.nn.Module):
         return super().__getattr__(name)
 
     @staticmethod
-    def from_model(name, state_dict, dtype=None):
+    def from_model(name, state_dict, dtype=None, device="cpu"):
         if not dtype:
             dtype = state_dict['metadata']['dtype']
         model_type = state_dict['metadata']['model_type']
+        del state_dict["metadata"]
 
-        utils.cast_state_dict(state_dict, dtype)
-        
-        with utils.DisableInitialization():
+        utils.cast_state_dict(state_dict, dtype, device)
+
+        with accelerate.init_empty_weights():
             clip = CLIP(model_type, dtype)
-            missing, _ = clip.model.load_state_dict(state_dict, strict=False)
+
+        missing, _ = load_state_dict_in_place(clip.model, state_dict)
         if missing:
             raise ValueError("missing keys in CLIP: " + ", ".join(missing))
 
