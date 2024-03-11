@@ -1210,6 +1210,7 @@ class GenerationParameters():
     def upscale(self):
         self.set_status("Loading")
         self.set_device()
+        self.set_precision()
         self.storage.clear_file_cache()
         self.clear_annotators()
 
