@@ -359,6 +359,9 @@ def do_disk_checkpoint_merge(self, operation, device):
         for i, k in iter:
             model = get_key_model(k)
 
+            if not k in b.keys() or (c and not k in c.keys()):
+                continue
+
             if model != last_model:
                 self.set_status("Merging " + model.upper(), reset=False)
                 last_model = model
