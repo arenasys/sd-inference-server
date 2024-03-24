@@ -941,7 +941,9 @@ class GenerationParameters():
         self.attach_tome(HR=True)
 
         if self.cn:
-            self.unet = controlnet.ControlledUNET(self.unet, self.cn)
+            if type(self.unet) != controlnet.ControlledUNET:
+                self.unet = controlnet.ControlledUNET(self.unet, self.cn)
+                denoiser.set_unet(self.unet)
             cn_images = upscalers.upscale(self.cn_image, transforms.InterpolationMode.LANCZOS, width, height)
             cn_cond, cn_outputs = controlnet.preprocess_control(cn_images, cn_annotators, cn_annotator_models, cn_args, cn_scales, cn_guess)
             self.unet.set_controlnet_conditioning(cn_cond, device)
