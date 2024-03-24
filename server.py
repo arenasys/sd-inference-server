@@ -366,7 +366,12 @@ class Server():
     def serve_forever(self):
         self.server.serve_forever()
 
-    def handle_connection(self, connection):
+    def terminate_connection(self, connection):
+        connection.protocol.send_frame = lambda x: None
+        connection.socket.close()
+        raise websockets.exceptions.ConnectionClosedError(None, None)
+
+    def handle_connection(self, connection: websockets.sync.server.ServerConnection):
         new = True
 
         client_id = get_id()
@@ -380,7 +385,7 @@ class Server():
             self.clients[client_id].put((-1, {"type":"owner"}))
 
         lost = False
-        ctr = 0
+        waiting = 0
         try:
             while not self.stopping:
                 if not self.clients[client_id].empty():
@@ -393,14 +398,18 @@ class Server():
                     data = None
                     try:
                         data = connection.recv(timeout=0)
+                        waiting = 0
                     except TimeoutError:
                         pass
                     if not data:
                         time.sleep(0.01)
-                        ctr += 1
-                        if ctr == 200:
-                            connection.ping()
-                            ctr = 0
+                        waiting += 10
+                        if waiting >= 2000:
+                            waiting = 0
+                            pong = connection.ping()
+                            if not pong.wait(10):
+                                self.terminate_connection(connection)
+
                         continue
                     error = None
                     request = None
