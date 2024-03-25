@@ -407,8 +407,8 @@ class Server():
                         if waiting >= 2000:
                             waiting = 0
                             pong = connection.ping()
-                            if not pong.wait(10):
-                                self.terminate_connection(connection)
+                            #if not pong.wait(10):
+                            #    self.terminate_connection(connection)
 
                         continue
                     error = None
