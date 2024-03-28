@@ -344,6 +344,9 @@ def do_disk_checkpoint_merge(self, operation, device):
     model_b = os.path.abspath(os.path.join(self.storage.path, operation["model_b"]))
     model_c = os.path.abspath(os.path.join(self.storage.path, operation["model_c"])) if "model_c" in operation else None
 
+    if not all(m.endswith(".safetensors") for m in [model_a, model_b, model_c]):
+        raise Exception("Only safetensor checkpoints are supported")
+
     op = operation["operation"]
 
     last_model = None
@@ -371,6 +374,12 @@ def do_disk_checkpoint_merge(self, operation, device):
             at = a.get_tensor(k).to(torch.float32)
             bt = b.get_tensor(k).to(torch.float32)
             ct = c.get_tensor(k).to(torch.float32) if c else None
+
+            if at.shape != bt.shape or (ct and at.shape != ct.shape):
+                # for inpainting models
+                if k == "model.diffusion_model.input_blocks.0.0.weight":
+                    state_dict[k] = at.to(device, dtype)
+                    continue
 
             if model == "vae":
                 state_dict[k] = [at,bt,ct][vae_source].to(device, dtype)
