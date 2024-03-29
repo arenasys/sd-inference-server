@@ -344,7 +344,7 @@ def do_disk_checkpoint_merge(self, operation, device):
     model_b = os.path.abspath(os.path.join(self.storage.path, operation["model_b"]))
     model_c = os.path.abspath(os.path.join(self.storage.path, operation["model_c"])) if "model_c" in operation else None
 
-    if not all(m.endswith(".safetensors") for m in [model_a, model_b, model_c]):
+    if not all([not m or m.endswith(".safetensors") for m in [model_a, model_b, model_c]]):
         raise Exception("Only safetensor checkpoints are supported")
 
     op = operation["operation"]
