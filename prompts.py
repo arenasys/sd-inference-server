@@ -17,14 +17,13 @@ scheduled: "[" [prompt ":"] prompt ":" [_WHITESPACE] step_specifier [_WHITESPACE
 step_specifier: NUMBER | HR
 alternate: "[" prompt ("|" prompt)+ "]"
 addnet: "<" [ local ] net_type ":" filename [ ":" [_WHITESPACE] block_weight_specifier [_WHITESPACE] [ ":" [_WHITESPACE] strength_specifier [_WHITESPACE] ]] ">"
-net_type: LORA | HN
+net_type: LORA
 block_weight: [_WHITESPACE] strength_specifier [_WHITESPACE] "," [_WHITESPACE] strength_specifier [_WHITESPACE] ("," [_WHITESPACE] strength_specifier [_WHITESPACE])*
 block_weight_specifier: NUMBER | block_weight | block_weight_schedule
 block_weight_schedule: "[" [block_weight_specifier ":"] block_weight_specifier ":" [_WHITESPACE] step_specifier [_WHITESPACE]"]"
 local: "@"
 HR: "HR"
 LORA: "lora"
-HN: "hypernet"
 WHITESPACE: /\s+/
 _WHITESPACE: /\s+/
 plain: /([^\\\[\]()<>:|]|\\.)+/

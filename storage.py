@@ -3,6 +3,7 @@ import os
 import glob
 import safetensors.torch
 import gc
+import json
 
 import models
 import convert
@@ -16,9 +17,26 @@ MODEL_FOLDERS = {
     "SD": ["SD", "Stable-diffusion", "VAE"],
     "SR": ["SR", "ESRGAN", "RealESRGAN"], 
     "TI": ["TI", "embeddings", os.path.join("..", "embeddings")], 
-    "LoRA": ["LoRA"], 
-    "HN": ["HN", "hypernetworks"],
+    "LoRA": ["LoRA"],
     "CN": ["CN"]
+}
+
+MODEL_TYPE_NAMES = {
+    "unknown": "Unknown",
+    "lora": "LoRA",
+    "locon": "LoCon",
+    "loha": "LoHa",
+    "lokr": "LoKr",
+    "ia3": "IA3",
+    "full": "Full"
+}
+
+MODEL_TYPE_IDENTIFIERS = {
+    "lora": ["lora_up"],
+    "loha": ["hada_w1_a"],
+    "lokr": ["lokr_w1", "lokr_w1_a"],
+    "full": ["diff"],
+    "ia3": ["on_input"]
 }
 
 class ModelStorage():
@@ -29,9 +47,9 @@ class ModelStorage():
         self.path = None
         self.set_folder(path)
 
-        self.classes = {"UNET": models.UNET, "CLIP": models.CLIP, "VAE": models.VAE, "SR": upscalers.SR, "LoRA": models.LoRA, "HN": models.HN, "CN": models.ControlNet, "AN": torch.nn.Module}
+        self.classes = {"UNET": models.UNET, "CLIP": models.CLIP, "VAE": models.VAE, "SR": upscalers.SR, "LoRA": models.LoRA, "CN": models.ControlNet, "AN": torch.nn.Module}
         self.vram_limits = {"UNET": 1, "CLIP": 1, "VAE": 1, "SR": 1}
-        self.ram_limits = {"UNET": cache, "CLIP": cache, "VAE": cache, "SR": cache, "LoRA": cache, "HN": cache, "CN": cache, "AN": cache}
+        self.ram_limits = {"UNET": cache, "CLIP": cache, "VAE": cache, "SR": cache, "LoRA": cache, "CN": cache, "AN": cache}
 
         self.files = {k:{} for k in self.classes}
         self.loaded = {k:{} for k in self.classes}
@@ -42,6 +60,8 @@ class ModelStorage():
 
         self.embeddings_files = {}
         self.embeddings = {}
+
+        self.model_types = {}
 
         self.find_all()
 
@@ -240,6 +260,38 @@ class ModelStorage():
 
     def get_name(self, file):
         return os.path.relpath(file, self.path)
+    
+    def get_lycoris_type(self, file):
+        algo = "unknown"
+        if file.endswith(".safetensors"):
+            with safetensors.safe_open(file, framework="pt", device="cpu") as f:
+                metadata = f.metadata() or {}
+                module = metadata.get("ss_network_module", "")
+                args = json.loads(metadata.get("ss_network_args", "{}"))
+
+                if "algo" in args:
+                    algo = args["algo"]
+                if "conv_dim" in args and (algo == "lora" or "networks.lora" in module):
+                    algo = "locon"
+                if algo == "unknown" and "networks.lora" in module:
+                    algo = "lora"
+
+                if algo == "unknown" or algo == "lora":
+                    keys = f.keys()
+                    suffices = set([f.split(".", 1)[-1].split(".", 1)[0] for f in keys])
+
+                    for a, ids in MODEL_TYPE_IDENTIFIERS.items():
+                        if any([i in suffices for i in ids]):
+                            algo = a
+                            break
+
+                    if algo == "lora":
+                        for k in keys:
+                            if "conv" in k:
+                                algo = "locon"
+                                break
+
+        return MODEL_TYPE_NAMES.get(algo, algo)
 
     def find_all(self):
         self.files = {k:{} for k in self.classes}
@@ -295,10 +347,8 @@ class ModelStorage():
         for file in self.get_models("LoRA", ["*.safetensors", "*.pt"]):
             name = self.get_name(file)
             self.files["LoRA"][name] = file
-
-        for file in self.get_models("HN", ["*.pt"]):
-            name = self.get_name(file)
-            self.files["HN"][name] = file
+            if not name in self.model_types:
+                self.model_types[name] = self.get_lycoris_type(file)
 
         for file in self.get_models("CN", ["*.safetensors", "*.pth"], False):
             name = self.get_name(file)
@@ -337,13 +387,8 @@ class ModelStorage():
 
     def check_attached_networks(self, name, comp, allowed):
         if name in self.loaded[comp]:
-            reset = False
-            attached = self.loaded[comp][name].additional.static 
-            for k in attached:
-                if not k in allowed or attached[k] != allowed[k]:
-                    reset = True
+            reset = self.loaded[comp][name].additional.need_reset(allowed)
             if reset:
-                #print("RESET", comp, name)
                 self.remove(comp, name) 
 
     def get_unet(self, name, device, nets={}):
@@ -376,13 +421,6 @@ class ModelStorage():
                 name = lora
                 break
         return self.get_component(name, "LoRA", device)
-
-    def get_hypernetwork(self, name, device):
-        for hn in self.files["HN"]:
-            if os.path.sep + name + "." in hn:
-                name = hn
-                break
-        return self.get_component(name, "HN", device)
 
     def get_controlnet(self, name, device, callback):
         file, _ = controlnet.get_controlnet(name, os.path.join(self.path, "CN"), callback)

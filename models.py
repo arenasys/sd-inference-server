@@ -2,14 +2,13 @@ import os
 import torch
 import utils
 
+from lora import LycorisNetwork
 
 from transformers import CLIPTextConfig, CLIPTokenizer
 from clip import CustomCLIP, CustomSDXLCLIP
 from diffusers import AutoencoderKL, UNet2DConditionModel
 from diffusers.models.vae import DiagonalGaussianDistribution
 from diffusers.models.controlnet import ControlNetModel
-from lora import LoRANetwork
-from hypernetwork import Hypernetwork
 
 import accelerate
 import accelerate.utils.modeling
@@ -84,8 +83,7 @@ class UNET(UNet2DConditionModel):
                 block_out_channels=(320, 640, 1280, 1280),
                 layers_per_block=2,
                 cross_attention_dim=768,
-                attention_head_dim=8,
-                use_linear_projection=True
+                attention_head_dim=8
             )
         elif model_type == "SDv2":
             config = dict(
@@ -298,7 +296,7 @@ class Tokenizer():
     def __call__(self, texts):
         return self.tokenizer(texts)
 
-class LoRA(LoRANetwork):
+class LoRA(LycorisNetwork):
     @staticmethod
     def from_model(name, state_dict, dtype=None):
         if not dtype:
@@ -312,147 +310,73 @@ class LoRA(LoRANetwork):
         model.to(torch.device("cpu"), dtype)
 
         return model
-
-class HN(Hypernetwork):
-    @staticmethod
-    def from_model(name, state_dict, dtype=None):
-        if not dtype:
-            dtype = state_dict['metadata']['dtype']
-
-        utils.cast_state_dict(state_dict, dtype)
-
-        model = HN("hypernet:"+name, state_dict)
-        model.to(dtype)
-
-        return model
+    
+    def __getattr__(self, name):
+        if name == "device":
+            return self.get_device()
+        return super().__getattr__(name)
 
 class AdditionalNetworks():
-    class AdditionalModule(torch.nn.Module):
-        def __init__(self, parent, name, module: torch.nn.Module):
-            super().__init__()
-            self.parent = parent
-            self.name = name
-            self.original_module = module
-            self.original_forward = module.forward
-            self.dim = module.in_features if hasattr(module, "in_features") else None
-
-            self.hns = []
-            self.loras = []
-
-        def forward(self, x, *args, **kwargs):
-            if self.hns:
-                x = x.clone()
-            for hn in self.hns:
-                v = hn(x)
-                for i in range(len(self.parent.strength)):
-                    strength = self.parent.get_strength(i, hn.net_name, self.name)
-                    if strength:
-                        x[i] += ((v[i] * strength)).clone()
-            out = self.original_forward(x)
-            for lora in self.loras:
-                v = None
-                for i in range(len(self.parent.strength)):
-                    strength = self.parent.get_strength(i, lora.net_name, self.name)
-                    if strength:
-                        if v == None:
-                            if "_proj" in lora.layer_name and type(lora.lora_up) == torch.nn.Conv2d:
-                                v = lora(x.T, self.original_module).T
-                            else:
-                                v = lora(x, self.original_module)
-        
-                        out[i] += v[i] * strength
-            return out
-
-        def attach_lora(self, module, static):
-            if static:
-                weight = module.get_weight(self.original_module.weight.shape)
-                strength = self.parent.get_strength(0, module.net_name, self.name)
-                
-                if "_proj" in module.layer_name and type(module.lora_up) == torch.nn.Conv2d:
-                    weight = weight.squeeze()
-
-                self.original_module.weight += weight.to(self.original_module.weight.device) * strength
-            else:
-                self.loras.append(module)
-        
-        def attach_hn(self, module):
-            self.hns.append(module)
-
-        def clear(self):
-            self.loras.clear()
-            self.hns.clear()
-
     def __init__(self, model):
-        self.modules = {}
+        self.attached_dynamic = {}
+        self.attached_static = {}
+
         self.strength = {}
         self.strength_override = {}
-        self.static = {}
 
-        model_type = str(type(model))
-        if "CLIP" in model_type:
-            self.modules = self.hijack_model(model, 'te', ["CLIPAttention", "CLIPMLP"])
-        elif "UNET" in model_type:
-            self.modules = self.hijack_model(model, 'unet', ["LoRACompatibleLinear", "LoRACompatibleConv", "Transformer2DModel", "Attention", "ResnetBlock2D", "Downsample2D", "Upsample2D"])
-        else:
-            raise ValueError(f"INVALID TARGET {model_type}")
-        self.model_type = model_type
+        self.model_type = "UNET" if type(model) == UNET else "CLIP"
 
     def clear(self):
-        for name in self.modules:
-            self.modules[name].clear()
         self.strength = {}
-    
-    def get_strength(self, index, name, key=None):
-        strength = 0.0
-        if name in self.strength_override:
-            strength = self.strength_override[name]
-        if name in self.strength[index]:
-            strength = self.strength[index][name]
+        self.strength_override = {}
 
-        if type(strength) == float:
-            return strength
-        elif type(strength) == list:
-            if not key:
-                return tuple(strength)
-            mapping = utils.block_mapping_lora(len(strength))
-            index = mapping["lora_"+key]
-            return strength[index]
+        for _, net in self.attached_dynamic.items():
+            net.detach_unet()
+            net.detach_text_encoder()
+        self.attached_dynamic = {}
+
+    def attach(self, net, is_static):
+        strength = self.get_strength(net.net_name)
+        net.set_strength(strength)
+        if is_static:
+            if net.net_name in self.attached_static:
+                return
+            self.attached_static[net.net_name] = net
+            if self.model_type == "UNET":
+                net.merge_unet()
+            elif self.model_type == "CLIP":
+                net.merge_text_encoder()
+        else:
+            if net.net_name in self.attached_dynamic:
+                return
+            self.attached_dynamic[net.net_name] = net
+            if self.model_type == "UNET":
+                net.attach_unet()
+            elif self.model_type == "CLIP":
+                net.attach_text_encoder()
+
+    def get_strength(self, name):
+        strength = self.strength.get(name, 0.0)
+        strength = self.strength_override.get(name, strength)
+        return strength
 
     def set_strength(self, strength):
-        self.strength = strength
+        self.strength = strength[0]
+        for name, net in self.attached_dynamic.items():
+            net.set_strength(self.get_strength(name))
 
     def set_strength_override(self, name, strength):
         self.strength_override[name] = strength
 
-    def get_name(self, model, key):
-        if type(model) == UNET and model.model_type == "SDXL-Base":
-            key = utils.lora_mapping(key)
-        return key.replace(".", "_")
-
-    def hijack_model(self, model, prefix, targets):
-        modules = {}
-        for module_name, module in model.named_modules():
-            if not module.__class__.__name__ in targets:
-                continue
-
-            if "LoRA" in module.__class__.__name__:
-                name = self.get_name(model, prefix + '.' + module_name)
-                if name in modules:
-                    continue
-                modules[name] = AdditionalNetworks.AdditionalModule(self, name, module)
-                module.forward = modules[name].forward
+    def need_reset(self, allowed):
+        attached = {name: self.get_strength(name) for name in self.attached_static}
+        for name in attached:
+            if name in allowed:
+                if allowed[name] != attached[name]:
+                    return True
             else:
-                for child_name, child_module in module.named_modules():
-                    child_class = child_module.__class__.__name__
-                    if not child_name:
-                        continue
-
-                    if child_class == "Linear" or child_class == "Conv2d":
-                        name = self.get_name(model, prefix + '.' + module_name + '.' + child_name)
-                        modules[name] = AdditionalNetworks.AdditionalModule(self, name, child_module)
-                        child_module.forward = modules[name].forward
-
-        return modules
+                return True
+        return False
     
 class ControlNet(ControlNetModel):
     def __init__(self, model_type, dtype):

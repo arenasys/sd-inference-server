@@ -686,14 +686,11 @@ class GenerationParameters():
         static = self.network_mode == "Static"
 
         lora_names = []
-        hn_names = []
 
         for n in active_nets:
             prefix, name = n.split(":",1)
             if prefix == "lora":
                 lora_names += [name]
-            if prefix == "hypernet":
-                hn_names += [name]
 
         allowed_loras = []
         for n in allowed_nets:
@@ -720,24 +717,20 @@ class GenerationParameters():
             self.storage.enforce_network_limit(keep_models, "LoRA")
             self.loras = [self.storage.get_lora(name, device) for name in lora_names]
 
+            # Build networks first (let them grab the original forward)
+            for i, lora in enumerate(self.loras):
+                lora.build_network(self.unet, self.clip.model)
+                lora.to(self.unet.device, self.unet.dtype)
+
+            # Now attach
             for i, lora in enumerate(self.loras):
                 is_static = static and lora_names[i] != merged_name
-                for model in [self.unet.additional, self.clip.additional]:
-                    lora.attach(model, is_static)
+                self.unet.additional.attach(lora, is_static)
+                self.clip.additional.attach(lora, is_static)
                 if is_static:
                     lora.to("cpu", torch.float16)
         else:
             self.storage.enforce_network_limit(keep_models, "LoRA")
-
-        if hn_names:
-            self.set_status("Loading Hypernetworks")
-            self.storage.enforce_network_limit(hn_names, "HN")
-            self.hns = [self.storage.get_hypernetwork(name, device) for name in hn_names]
-
-            for hn in self.hns:
-                hn.attach(self.unet.additional)
-        else:
-            self.storage.enforce_network_limit([], "HN")
 
     def detach_networks(self):
         self.unet.additional.clear()
@@ -1295,6 +1288,8 @@ class GenerationParameters():
         data = {"sampler": list(SAMPLER_CLASSES.keys())}
         for k in self.storage.files:
             data[k] = list(self.storage.files[k].keys())
+
+        data["model_types"] = self.storage.model_types
 
         data["hr_upscaler"] = list(UPSCALERS_LATENT.keys()) + list(UPSCALERS_PIXEL.keys()) + data["SR"]
         data["img2img_upscaler"] = list(UPSCALERS_PIXEL.keys()) + data["SR"]

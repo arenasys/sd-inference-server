@@ -660,7 +660,9 @@ def do_recursive_lora_merge(self, operation):
     return operation_name
 
 def merge_lora(self, recipe):
+    
     self.set_status("Parsing")
+    raise Exception("LoRA merging temporarily unavailable")
 
     needed_until = {}
 

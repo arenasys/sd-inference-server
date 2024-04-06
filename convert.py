@@ -49,11 +49,6 @@ def SDv1_convert(state_dict):
         if ".VAE." in k and k.endswith(".weight") and "mid_block.attentions.0." in k:
             state_dict[k] = state_dict[k].squeeze()
     
-    # 1x1 conv2d to linear
-    for k in state_dict:
-        if k.endswith(".weight") and "proj_" in k:
-            state_dict[k] = state_dict[k].squeeze()
-
     # fix clip
     if "SDv1.CLIP.text_model.embeddings.position_embedding.weight" in state_dict:
         position_ids = torch.Tensor([list(range(77))]).to(torch.int64)
