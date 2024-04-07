@@ -502,18 +502,22 @@ def lora_mapping(key):
             for line in file:
                 dst, src = line.strip().split(" TO ")
                 if src.startswith("SDXL-Base.UNET.") and src.endswith(".weight"):
-                    dst = "unet." + dst[len("model.diffusion_model."):]
-                    src = "unet." + src[len("SDXL-Base.UNET."):]
-                    dst, src = dst.rsplit(".", 1)[0], src.rsplit(".", 1)[0]
-                    mapping[src] = dst
+                    dst = dst[len("model.diffusion_model."):].rsplit(".", 1)[0].replace(".","_")
+                    src = src[len("SDXL-Base.UNET."):].rsplit(".", 1)[0].replace(".","_")
+                    mapping[dst] = src
         MAPPINGS[name] = mapping
     
-    for src, dst in MAPPINGS[name].items():
-        if key == src:
-            return dst
-    print("NOMAP", key)
+    original = key
+    key, suffix = key.split(".",1)
 
-    return key
+    for src, dst in MAPPINGS[name].items():
+        if key == src or key == "lora_unet_" + src:
+            key = key.replace(src, dst)
+            break
+    else:
+        print("NOMAP", key + "." + suffix)
+    
+    return key + "." + suffix
     
 def get_tile_mask(size, radius):
     width, height = size

@@ -218,6 +218,12 @@ class CLIP(torch.nn.Module):
     def state_dict(self):
         return self.model.state_dict()
 
+    def get_lora_model(self):
+        if self.model_type == "SDXL-Base":
+            return [self.model.ldm_clip, self.model.open_clip]
+        else:
+            return self.model
+
     def __getattr__(self, name):
         if name == "device":
             return next(self.parameters()).device

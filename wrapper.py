@@ -719,7 +719,7 @@ class GenerationParameters():
 
             # Build networks first (let them grab the original forward)
             for i, lora in enumerate(self.loras):
-                lora.build_network(self.unet, self.clip.model)
+                lora.build_network(self.unet, self.clip.get_lora_model())
                 lora.to(self.unet.device, self.unet.dtype)
 
             # Now attach

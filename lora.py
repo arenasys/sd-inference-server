@@ -1,5 +1,6 @@
 import torch
 import lycoris
+import utils
 lycoris.logger.disabled = True
 
 # lycoris_lora workarounds
@@ -54,8 +55,12 @@ class LycorisNetwork():
         self.weights = state_dict
 
     def build_network(self, unet, clip):
+        weights = self.weights
+        if unet.model_type == "SDXL-Base":
+            weights = {utils.lora_mapping(k):v for k,v in self.weights.items()}
+
         self.network, _ = lycoris.kohya.create_network_from_weights(
-            1.0, None, None, clip, unet, self.weights
+            1.0, None, None, clip, unet, weights
         )
         self.detach_unet()
         self.detach_text_encoder()
