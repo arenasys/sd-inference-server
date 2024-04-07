@@ -506,16 +506,13 @@ def lora_mapping(key):
                     src = src[len("SDXL-Base.UNET."):].rsplit(".", 1)[0].replace(".","_")
                     mapping[dst] = src
         MAPPINGS[name] = mapping
-    
-    original = key
+        
     key, suffix = key.split(".",1)
 
     for src, dst in MAPPINGS[name].items():
         if key == src or key == "lora_unet_" + src:
             key = key.replace(src, dst)
             break
-    else:
-        print("NOMAP", key + "." + suffix)
     
     return key + "." + suffix
     

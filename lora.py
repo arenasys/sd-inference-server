@@ -108,6 +108,16 @@ class LycorisNetwork():
                 lora.requires_grad = False
         return self
     
+    def reset(self):
+        if self.network:
+            self.detach_text_encoder()
+            self.detach_unet()
+            self.network = None
+    
     def get_device(self):
-        for lora in self.get_loras():
-            return next(lora.parameters()).device
+        if self.network:
+            for lora in self.get_loras():
+                return next(lora.parameters()).device
+        else:
+            for k in self.weights:
+                return self.weights[k].device

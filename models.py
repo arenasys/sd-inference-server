@@ -384,6 +384,11 @@ class AdditionalNetworks():
                 return True
         return False
     
+    def reset(self):
+        for name, net in self.attached_static.items():
+            net.reset()
+        self.attached_static = {}
+
 class ControlNet(ControlNetModel):
     def __init__(self, model_type, dtype):
         self.preprocessor = lambda x: x

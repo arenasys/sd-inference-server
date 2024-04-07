@@ -387,9 +387,12 @@ class ModelStorage():
 
     def check_attached_networks(self, name, comp, allowed):
         if name in self.loaded[comp]:
-            reset = self.loaded[comp][name].additional.need_reset(allowed)
+            additional = self.loaded[comp][name].additional
+            reset = additional.need_reset(allowed)
             if reset:
-                self.remove(comp, name) 
+                additional.reset()
+                self.remove(comp, name)
+                self.do_gc() 
 
     def get_unet(self, name, device, nets={}):
         self.check_attached_networks(name, "UNET", nets)
