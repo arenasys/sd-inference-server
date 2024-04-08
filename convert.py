@@ -66,10 +66,6 @@ def SDv1_revert(state_dict):
         if ".VAE." in k and k.endswith(".weight") and "mid_block.attentions.0." in k and len(state_dict[k].shape) == 2:
             state_dict[k] = state_dict[k].unsqueeze(-1).unsqueeze(-1)
 
-    for k in state_dict:
-        if k.endswith(".weight") and "proj_" in k:
-            state_dict[k] = state_dict[k].unsqueeze(-1).unsqueeze(-1)
-
     for k in list(state_dict.keys()):
         if not k in mapping:
             del state_dict[k]
