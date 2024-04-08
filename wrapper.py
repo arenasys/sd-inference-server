@@ -779,11 +779,11 @@ class GenerationParameters():
 
         self.attach_tome()
 
+        self.need_models(unet=True, vae=False, clip=True)
+
         self.set_status("Configuring")
         batch_size = self.get_batch_size()
         device = self.device
-
-        self.need_models(unet=False, vae=False, clip=False)
 
         if self.cn:
             self.unet = controlnet.ControlledUNET(self.unet, self.cn)
