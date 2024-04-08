@@ -234,7 +234,8 @@ class ModelStorage():
 
     def remove(self, comp, name):
         if name in self.loaded[comp]:
-            #print("REMOVE", comp, name, "TO DISK")
+            if hasattr(self.loaded[comp][name], "additional"):
+                self.loaded[comp][name].additional.reset()
             del self.loaded[comp][name]
             
         self.do_gc()
@@ -387,10 +388,7 @@ class ModelStorage():
 
     def check_attached_networks(self, name, comp, allowed):
         if name in self.loaded[comp]:
-            additional = self.loaded[comp][name].additional
-            reset = additional.need_reset(allowed)
-            if reset:
-                additional.reset()
+            if self.loaded[comp][name].additional.need_reset(allowed):
                 self.remove(comp, name)
                 self.do_gc() 
 
