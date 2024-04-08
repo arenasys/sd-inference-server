@@ -332,6 +332,10 @@ def do_disk_checkpoint_merge(self, operation, device):
 
     if all([operation_name in self.storage.loaded[comp] for comp in comps]):
         return operation_name
+    
+    for comp in comps:
+        for name in list(self.storage.loaded[comp].keys()):
+            self.storage.remove(comp, name)
 
     state_dict = {}
     dtype = torch.float16
