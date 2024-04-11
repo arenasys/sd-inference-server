@@ -268,7 +268,11 @@ class ModelStorage():
             with safetensors.safe_open(file, framework="pt", device="cpu") as f:
                 metadata = f.metadata() or {}
                 module = metadata.get("ss_network_module", "")
-                args = json.loads(metadata.get("ss_network_args", "{}"))
+                args = {}
+                try:
+                    args = json.loads(metadata.get("ss_network_args", "{}"))
+                except:
+                    pass
 
                 if "algo" in args:
                     algo = args["algo"]

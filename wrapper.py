@@ -980,6 +980,8 @@ class GenerationParameters():
         self.load_models(*initial_networks)
 
         self.attach_tome()
+
+        self.need_models(unet=True, vae=False, clip=True)
         
         self.set_status("Preparing")
         batch_size = self.get_batch_size()
@@ -1132,6 +1134,8 @@ class GenerationParameters():
         self.load_models(*initial_networks)
 
         self.attach_tome()
+
+        self.need_models(unet=True, vae=False, clip=True)
         
         self.set_status("Preparing")
         batch_size = self.get_batch_size()
