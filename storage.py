@@ -264,37 +264,40 @@ class ModelStorage():
     
     def get_lycoris_type(self, file):
         algo = "unknown"
-        if file.endswith(".safetensors"):
-            with safetensors.safe_open(file, framework="pt", device="cpu") as f:
-                metadata = f.metadata() or {}
-                module = metadata.get("ss_network_module", "")
-                args = {}
-                try:
-                    args = json.loads(metadata.get("ss_network_args", "{}"))
-                except:
-                    pass
+        try:
+            if file.endswith(".safetensors"):
+                with safetensors.safe_open(file, framework="pt", device="cpu") as f:
+                    metadata = f.metadata() or {}
+                    module = metadata.get("ss_network_module", "")
+                    args = {}
+                    try:
+                        args = json.loads(metadata.get("ss_network_args", "{}"))
+                    except:
+                        pass
 
-                if "algo" in args:
-                    algo = args["algo"]
-                if "conv_dim" in args and (algo == "lora" or "networks.lora" in module):
-                    algo = "locon"
-                if algo == "unknown" and "networks.lora" in module:
-                    algo = "lora"
+                    if "algo" in args:
+                        algo = args["algo"]
+                    if "conv_dim" in args and (algo == "lora" or "networks.lora" in module):
+                        algo = "locon"
+                    if algo == "unknown" and "networks.lora" in module:
+                        algo = "lora"
 
-                if algo == "unknown" or algo == "lora":
-                    keys = f.keys()
-                    suffices = set([f.split(".", 1)[-1].split(".", 1)[0] for f in keys])
+                    if algo == "unknown" or algo == "lora":
+                        keys = f.keys()
+                        suffices = set([f.split(".", 1)[-1].split(".", 1)[0] for f in keys])
 
-                    for a, ids in MODEL_TYPE_IDENTIFIERS.items():
-                        if any([i in suffices for i in ids]):
-                            algo = a
-                            break
-
-                    if algo == "lora":
-                        for k in keys:
-                            if "conv" in k:
-                                algo = "locon"
+                        for a, ids in MODEL_TYPE_IDENTIFIERS.items():
+                            if any([i in suffices for i in ids]):
+                                algo = a
                                 break
+
+                        if algo == "lora":
+                            for k in keys:
+                                if "conv" in k:
+                                    algo = "locon"
+                                    break
+        except:
+            pass
 
         return MODEL_TYPE_NAMES.get(algo, algo)
 
