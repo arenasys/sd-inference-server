@@ -68,6 +68,9 @@ class LycorisNetwork():
         for lora in self.get_loras():
             self.org_forwards[lora.lora_name] = lora.org_forward
 
+        self.detach_unet()
+        self.detach_text_encoder()
+
     def get_loras(self):
         return self.network.unet_loras + self.network.text_encoder_loras
 
