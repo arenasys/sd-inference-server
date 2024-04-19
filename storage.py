@@ -17,7 +17,7 @@ MODEL_FOLDERS = {
     "SD": ["SD", "Stable-diffusion", "VAE"],
     "SR": ["SR", "ESRGAN", "RealESRGAN"], 
     "TI": ["TI", "embeddings", os.path.join("..", "embeddings")], 
-    "LoRA": ["LoRA"],
+    "LoRA": ["LoRA", "LyCORIS"],
     "CN": ["CN"]
 }
 
