@@ -51,8 +51,6 @@ class LycorisNetwork():
         self.weights = None
         self.strength = 1.0
 
-        self.org_forwards = {}
-
     def from_state_dict(self, state_dict):
         self.weights = state_dict
 
@@ -65,11 +63,9 @@ class LycorisNetwork():
             1.0, None, None, clip, unet, weights
         )
 
+        self.network.org_forwards = {}
         for lora in self.get_loras():
-            self.org_forwards[lora.lora_name] = lora.org_forward
-
-        self.detach_unet()
-        self.detach_text_encoder()
+            self.network.org_forwards[lora.lora_name] = lora.org_forward
 
     def get_loras(self):
         return self.network.unet_loras + self.network.text_encoder_loras
@@ -84,12 +80,12 @@ class LycorisNetwork():
 
     def detach_unet(self):
         for lora in self.network.unet_loras:
-            lora.org_forward = self.org_forwards[lora.lora_name]
+            lora.org_forward = self.network.org_forwards[lora.lora_name]
             lora.restore()
 
     def detach_text_encoder(self):
         for lora in self.network.text_encoder_loras:
-            lora.org_forward = self.org_forwards[lora.lora_name]
+            lora.org_forward = self.network.org_forwards[lora.lora_name]
             lora.restore()
 
     def merge_unet(self):
