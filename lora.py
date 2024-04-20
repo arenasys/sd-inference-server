@@ -28,6 +28,9 @@ def new_locon_forward(self, x, *args, **kwargs): return locon_forward(self, x)
 lycoris.LoConModule.forward = new_locon_forward
 
 loha_forward = lycoris.LohaModule.forward
+# workaround for @torch.enable_grad() decorator
+if hasattr(loha_forward, "__wrapped__"):
+    loha_forward = loha_forward.__wrapped__
 def new_loha_forward(self, x, *args, **kwargs): return loha_forward(self, x)
 lycoris.LohaModule.forward = new_loha_forward
 
@@ -65,6 +68,8 @@ class LycorisNetwork():
 
         self.network.org_forwards = {}
         for lora in self.get_loras():
+            lora.net_name = self.net_name
+            lora.bypass_mode = True # workaround for bypass_mode
             self.network.org_forwards[lora.lora_name] = lora.org_forward
 
     def get_loras(self):
@@ -72,10 +77,12 @@ class LycorisNetwork():
 
     def attach_unet(self):
         for lora in self.network.unet_loras:
+            lora.org_forward = lora.org_module[0].forward
             lora.apply_to()
 
     def attach_text_encoder(self):
         for lora in self.network.text_encoder_loras:
+            lora.org_forward = lora.org_module[0].forward
             lora.apply_to()
 
     def detach_unet(self):

@@ -710,6 +710,8 @@ class GenerationParameters():
         if self.merge_lora_sources:
             keep_models += self.merge_lora_sources
 
+        lora_names = sorted(lora_names)
+
         keep_models = list(set(lora_names + keep_models + allowed_loras))
 
         if lora_names:
