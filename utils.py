@@ -225,7 +225,7 @@ def get_extents(originals, masks, padding, width, height):
     if not masks:
         return [(0,0,o.size[0],o.size[1]) for o in originals]
     
-    if not padding:
+    if padding == None:
         padding = 10240
 
     extents = []

@@ -291,6 +291,8 @@ class Inference(threading.Thread):
         global UPLOAD_IDS
         rel_file = os.path.join(type, name)
         file = os.path.join(self.wrapper.storage.path, rel_file)
+        os.makedirs(os.path.dirname(file), exist_ok=True)
+
         tmp = file + ".tmp"
 
         if index == 0:

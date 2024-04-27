@@ -858,6 +858,14 @@ class GenerationParameters():
         if not self.hr_factor:
             self.set_status("Decoding")
             images = utils.decode_images(self.vae, latents)
+
+            if self.detailers:
+                if self.keep_artifacts:
+                    self.on_artifact("Original", images)
+                for detailer_name in self.detailers:
+                    self.set_status("Detailing")
+                    images = self.detailing(detailer_name, images, conditioning, seeds, subseeds, device)
+
             self.on_complete(images, metadata)
             self.need_models(unet=False, vae=False, clip=False)
             return images
@@ -956,9 +964,65 @@ class GenerationParameters():
         self.need_models(unet=False, vae=True, clip=False)
         images = utils.decode_images(self.vae, latents)
 
+        if self.detailers:
+            if self.keep_artifacts:
+                self.on_artifact("Original", images)
+            for detailer_name in self.detailers or []:
+                self.set_status("Detailing")
+                images = self.detailing(detailer_name, images, conditioning, seeds, subseeds, device)
+
         self.on_complete(images, metadata)
 
         self.need_models(unet=False, vae=False, clip=False)
+        return images
+    
+    def detailing(self, detailer_name, images, conditioning, seeds, subseeds, device):
+        res = self.detailer_resolution
+        width, height = res, res
+
+        denoiser = guidance.GuidedDenoiser(self.unet, device, conditioning, self.scale, self.cfg_rescale or 0.0, self.prediction_type)
+        noise = utils.NoiseSchedule(seeds, subseeds, width // 8, height // 8, device, self.unet.dtype)
+        sampler = SAMPLER_CLASSES[self.sampler](denoiser, self.eta)
+
+        detailer = self.storage.get_detailer(detailer_name, device)
+
+        self.detailer_threshold = 0.5
+        self.detailer_mode = "ellipse"
+        
+        detected = detailer.predict_mask(images[0], self.detailer_threshold, self.detailer_mode)
+        if self.keep_artifacts:
+            for i, mask in enumerate(detected):
+                self.on_artifact(f"Detect {i}", [mask])
+
+        for mask in detected:
+            images = [images[0].copy()]
+            masks = [mask]
+
+            extents = utils.get_extents(images, masks, self.padding, width, height)
+
+            original_images = images
+            images = utils.apply_extents(images, extents)
+            masks = self.prepare_images(masks, extents, width, height)
+            masks = [utils.prepare_mask(mask, self.mask_blur, self.mask_expand) for mask in masks]
+
+            upscaled_images = self.upscale_images(images, self.img2img_upscaler, width, height)
+
+            latents = utils.get_latents(self.vae, seeds, upscaled_images)
+            original_latents = latents
+                
+            mask_latents = utils.get_masks(device, masks)
+            denoiser.set_mask(mask_latents, original_latents)
+
+            self.current_step = 0
+            self.total_steps = int(self.steps * self.strength) + 1
+
+            with self.get_autocast_context(self.autocast, device):
+                latents = inference.img2img(latents, denoiser, sampler, noise, self.steps, False, self.strength, self.on_step)
+
+            images = utils.decode_images(self.vae, latents)
+
+            images, masked = utils.apply_inpainting(images, original_images, masks, extents)
+
         return images
 
     @torch.inference_mode()

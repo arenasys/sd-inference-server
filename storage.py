@@ -18,7 +18,8 @@ MODEL_FOLDERS = {
     "SR": ["SR", "ESRGAN", "RealESRGAN"], 
     "TI": ["TI", "embeddings", os.path.join("..", "embeddings")], 
     "LoRA": ["LoRA", "LyCORIS"],
-    "CN": ["CN"]
+    "CN": ["CN"],
+    "Detailer": ["Detailer"],
 }
 
 MODEL_TYPE_NAMES = {
@@ -47,9 +48,9 @@ class ModelStorage():
         self.path = None
         self.set_folder(path)
 
-        self.classes = {"UNET": models.UNET, "CLIP": models.CLIP, "VAE": models.VAE, "SR": upscalers.SR, "LoRA": models.LoRA, "CN": models.ControlNet, "AN": torch.nn.Module}
+        self.classes = {"UNET": models.UNET, "CLIP": models.CLIP, "VAE": models.VAE, "SR": upscalers.SR, "LoRA": models.LoRA, "CN": models.ControlNet, "AN": torch.nn.Module, "Detailer": models.Detailer}
         self.vram_limits = {"UNET": 1, "CLIP": 1, "VAE": 1, "SR": 1}
-        self.ram_limits = {"UNET": cache, "CLIP": cache, "VAE": cache, "SR": cache, "LoRA": cache, "CN": cache, "AN": cache}
+        self.ram_limits = {"UNET": cache, "CLIP": cache, "VAE": cache, "SR": cache, "LoRA": cache, "CN": cache, "AN": cache, "Detailer": cache}
 
         self.files = {k:{} for k in self.classes}
         self.loaded = {k:{} for k in self.classes}
@@ -362,6 +363,10 @@ class ModelStorage():
             name = self.get_name(file)
             self.files["CN"][name] = file
 
+        for file in self.get_models("Detailer", ["*.pt"]):
+            name = self.get_name(file)
+            self.files["Detailer"][name] = file
+
     def get_component(self, name, comp, device):
         if name in self.loaded[comp]:
             return self.move(self.loaded[comp][name], name, comp, device)
@@ -472,6 +477,9 @@ class ModelStorage():
             model = self.loaded["AN"][name]
         return self.move(model, name, "AN", device)
     
+    def get_detailer(self, name, device):
+        return self.get_component(name, "Detailer", device)
+
     def load_file(self, file, comp):
         if not comp == "TI":
             print(f"LOADING {file.rsplit(os.path.sep, 1)[-1]}...")
@@ -479,6 +487,9 @@ class ModelStorage():
         if comp in ["UNET", "CLIP", "VAE", "Checkpoint"]:
             state_dict, metadata = convert.convert(file)
             return self.parse_model(state_dict, metadata)
+        
+        if comp == "Detailer":
+            return {comp: models.Detailer(file)}
         
         if file.endswith(".safetensors"):
             out = {comp: safetensors.torch.load_file(file)}

@@ -3,6 +3,7 @@ import torch
 import utils
 
 from lora import LycorisNetwork
+from detailer import ADetailer
 
 from transformers import CLIPTextConfig, CLIPTokenizer
 from clip import CustomCLIP, CustomSDXLCLIP
@@ -416,3 +417,8 @@ class ControlNet(ControlNetModel):
         else:
             raise ValueError(f"unknown type: {model_type}")
         return config
+    
+class Detailer(ADetailer):
+    def from_model(name, model, dtype=None):
+        model.name = name
+        return model
