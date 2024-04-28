@@ -862,9 +862,9 @@ class GenerationParameters():
             if self.detailers:
                 if self.keep_artifacts:
                     self.on_artifact("Original", images)
-                for detailer_name in self.detailers:
+                for i in range(len(self.detailers)):
                     self.set_status("Detailing")
-                    images = self.detailing(detailer_name, images, conditioning, seeds, subseeds, device)
+                    images = self.detailing(i, images, conditioning, seeds, subseeds, device)
 
             self.on_complete(images, metadata)
             self.need_models(unet=False, vae=False, clip=False)
@@ -967,45 +967,51 @@ class GenerationParameters():
         if self.detailers:
             if self.keep_artifacts:
                 self.on_artifact("Original", images)
-            for detailer_name in self.detailers or []:
+            for i in range(len(self.detailers)):
                 self.set_status("Detailing")
-                images = self.detailing(detailer_name, images, conditioning, seeds, subseeds, device)
+                images = self.detailing(i, images, conditioning, seeds, subseeds, device)
 
         self.on_complete(images, metadata)
 
         self.need_models(unet=False, vae=False, clip=False)
         return images
     
-    def detailing(self, detailer_name, images, conditioning, seeds, subseeds, device):
-        res = self.detailer_resolution
-        width, height = res, res
+    def detailing(self, detailer_index, images, conditioning, seeds, subseeds, device):
+        name = self.detailers[detailer_index]
+        params = self.detailer_parameters[detailer_index]
 
+        resolution = params["resolution"]
+        strength = params["strength"]
+        padding = params["padding"]
+        mask_blur = params["mask_blur"]
+        mask_expand = params["mask_expand"]
+        threshold = params["threshold"]
+        box_mode = params["box_mode"].lower()
+        upscaler = "Lanczos"
+
+        width, height = resolution, resolution
         denoiser = guidance.GuidedDenoiser(self.unet, device, conditioning, self.scale, self.cfg_rescale or 0.0, self.prediction_type)
         noise = utils.NoiseSchedule(seeds, subseeds, width // 8, height // 8, device, self.unet.dtype)
         sampler = SAMPLER_CLASSES[self.sampler](denoiser, self.eta)
 
-        detailer = self.storage.get_detailer(detailer_name, device)
-
-        self.detailer_threshold = 0.5
-        self.detailer_mode = "ellipse"
+        detailer = self.storage.get_detailer(name, device)
         
-        detected = detailer.predict_mask(images[0], self.detailer_threshold, self.detailer_mode)
+        detected, artifact = detailer.predict_masks(images[0], threshold, box_mode)
         if self.keep_artifacts:
-            for i, mask in enumerate(detected):
-                self.on_artifact(f"Detect {i}", [mask])
+            self.on_artifact(f"Detection {detailer_index}", [artifact])
 
-        for mask in detected:
+        for cls, mask in detected:
             images = [images[0].copy()]
             masks = [mask]
 
-            extents = utils.get_extents(images, masks, self.padding, width, height)
+            extents = utils.get_extents(images, masks, padding, width, height)
 
             original_images = images
             images = utils.apply_extents(images, extents)
             masks = self.prepare_images(masks, extents, width, height)
-            masks = [utils.prepare_mask(mask, self.mask_blur, self.mask_expand) for mask in masks]
+            masks = [utils.prepare_mask(mask, mask_blur, mask_expand) for mask in masks]
 
-            upscaled_images = self.upscale_images(images, self.img2img_upscaler, width, height)
+            upscaled_images = self.upscale_images(images, upscaler, width, height)
 
             latents = utils.get_latents(self.vae, seeds, upscaled_images)
             original_latents = latents
@@ -1014,10 +1020,10 @@ class GenerationParameters():
             denoiser.set_mask(mask_latents, original_latents)
 
             self.current_step = 0
-            self.total_steps = int(self.steps * self.strength) + 1
+            self.total_steps = int(self.steps * strength) + 1
 
             with self.get_autocast_context(self.autocast, device):
-                latents = inference.img2img(latents, denoiser, sampler, noise, self.steps, False, self.strength, self.on_step)
+                latents = inference.img2img(latents, denoiser, sampler, noise, self.steps, False, strength, self.on_step)
 
             images = utils.decode_images(self.vae, latents)
 
