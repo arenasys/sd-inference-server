@@ -58,7 +58,7 @@ def upscale_super_resolution(images, model, width, height):
                 if last >= image.size[0] or (image.size[0] >= width and image.size[1] >= height):
                     break
 
-            if last >= image.size[0] and (width != image.size[0] or height != image.size[0]):
+            if last >= image.size[0] and (width != image.size[0] or height != image.size[1]):
                 raise RuntimeError(f"SR model isnt upscaling ({last} to {image.size[0]})")
 
             images[i] = upscale_single(image, transforms.InterpolationMode.LANCZOS, width, height)
