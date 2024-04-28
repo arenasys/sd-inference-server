@@ -50,8 +50,8 @@ class ADetailer(YOLO):
                     mask_draw.ellipse(box, fill=255)
                 masks.append(mask)
         else:
-            n = masks.shape[0]
-            masks = [to_pil_image(masks[i], mode="L").resize(image.size) for i in range(n)]
+            masks = pred[0].masks.data
+            masks = [to_pil_image(masks[i], mode="L").resize(image.size) for i in range(masks.shape[0])]
         
         return masks#, preview
 
