@@ -669,6 +669,9 @@ class GenerationParameters():
             if self.merge_checkpoint_recipe:
                 m["merge_checkpoint_recipe"] = self.merge_checkpoint_recipe
 
+            if self.detailers:
+                m["detailers"] = [model_name(d) for d in self.detailers]
+
             metadata += [m]
 
         return metadata
@@ -1000,6 +1003,8 @@ class GenerationParameters():
         if self.keep_artifacts:
             self.on_artifact(f"Detection {detailer_index}", [artifact])
 
+        self.need_models(unet=True, vae=True, clip=False)
+
         for cls, mask in detected:
             images = [images[0].copy()]
             masks = [mask]
@@ -1017,6 +1022,8 @@ class GenerationParameters():
             original_latents = latents
                 
             mask_latents = utils.get_masks(device, masks)
+
+            denoiser.reset()
             denoiser.set_mask(mask_latents, original_latents)
 
             self.current_step = 0
