@@ -342,6 +342,14 @@ class AdditionalNetworks():
             net.detach_text_encoder()
         self.attached_dynamic = {}
 
+    def has(self, net):
+        if net.net_name in self.attached_dynamic:
+            return True
+        if net.net_name in self.attached_static:
+            if self.get_strength(net.net_name) == net.strength:
+                return True
+        return False
+
     def attach(self, net, is_static):
         strength = self.get_strength(net.net_name)
         net.set_strength(strength)

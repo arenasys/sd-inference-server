@@ -724,6 +724,11 @@ class GenerationParameters():
 
             # Build networks first (let them grab the original forward)
             for i, lora in enumerate(self.loras):
+                is_static = static and lora_names[i] != merged_name
+                is_attached = is_static and self.unet.additional.has(lora) and self.clip.additional.has(lora)
+                if is_attached:
+                    continue
+
                 lora.build_network(self.unet, self.clip.get_lora_model())
                 lora.to(self.unet.device, self.unet.dtype)
 
