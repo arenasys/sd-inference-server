@@ -363,7 +363,7 @@ class ModelStorage():
             name = self.get_name(file)
             self.files["CN"][name] = file
 
-        for file in self.get_models("Detailer", ["*.pt"]):
+        for file in self.get_models("Detailer", ["*.safetensors", "*.pt"]):
             name = self.get_name(file)
             self.files["Detailer"][name] = file
 
