@@ -975,6 +975,7 @@ class GenerationParameters():
         if self.detailers:
             if self.keep_artifacts:
                 self.on_artifact("Original", images)
+            
             for i in range(len(self.detailers)):
                 self.set_status("Detailing")
                 images = self.detailing(i, images, conditioning, seeds, subseeds, device)
@@ -1011,6 +1012,8 @@ class GenerationParameters():
 
         actual_steps = int(self.steps * strength) + 1
         conditioning = prompts.BatchedConditioningSchedules(detailer_prompt, actual_steps, self.clip_skip)
+        
+        self.need_models(unet=True, vae=True, clip=True)
         conditioning.encode(self.clip, [])
         
         denoiser = guidance.GuidedDenoiser(self.unet, device, conditioning, self.scale, self.cfg_rescale or 0.0, self.prediction_type)
@@ -1022,8 +1025,6 @@ class GenerationParameters():
         detected, artifact = detailer.predict_masks(images[0], threshold, box_mode)
         if self.keep_artifacts:
             self.on_artifact(f"Detection {detailer_index}", [artifact])
-
-        self.need_models(unet=True, vae=True, clip=False)
 
         for cls, mask in detected:
             images = [images[0].copy()]
@@ -1051,7 +1052,7 @@ class GenerationParameters():
 
             with self.get_autocast_context(self.autocast, device):
                 latents = inference.img2img(latents, denoiser, sampler, noise, self.steps, False, strength, self.on_step)
-
+            
             images = utils.decode_images(self.vae, latents)
 
             images, masked = utils.apply_inpainting(images, original_images, masks, extents)
