@@ -995,9 +995,24 @@ class GenerationParameters():
         mask_expand = params["mask_expand"]
         threshold = params["threshold"]
         box_mode = params["box_mode"].lower()
+        prompt = params["prompt"]
         upscaler = "Lanczos"
 
+        og_pos, og_neg = "", ""
+        try:
+            og_pos = self.prompt[0][0][0]
+            og_neg = self.prompt[0][1][0]
+        except:
+            pass
+        prompt = prompt.replace("PROMPT", og_pos)
+        detailer_prompt = [([prompt], [og_neg])]
+
         width, height = resolution, resolution
+
+        actual_steps = int(self.steps * strength) + 1
+        conditioning = prompts.BatchedConditioningSchedules(detailer_prompt, actual_steps, self.clip_skip)
+        conditioning.encode(self.clip, [])
+        
         denoiser = guidance.GuidedDenoiser(self.unet, device, conditioning, self.scale, self.cfg_rescale or 0.0, self.prediction_type)
         noise = utils.NoiseSchedule(seeds, subseeds, width // 8, height // 8, device, self.unet.dtype)
         sampler = SAMPLER_CLASSES[self.sampler](denoiser, self.eta)
@@ -1053,7 +1068,9 @@ class GenerationParameters():
         self.clear_annotators()
 
         self.set_status("Parsing")
-        conditioning = prompts.BatchedConditioningSchedules(self.prompt, self.steps, self.clip_skip)
+
+        actual_steps = int(self.steps * self.strength) + 1
+        conditioning = prompts.BatchedConditioningSchedules(self.prompt, actual_steps, self.clip_skip)
         initial_networks = conditioning.get_initial_networks() if self.network_mode == "Static" else ({},{})
         all_networks, allowed_networks = conditioning.get_all_networks()
 
@@ -1201,7 +1218,9 @@ class GenerationParameters():
         self.check_parameters()
         self.clear_annotators()
         self.set_status("Parsing")
-        conditioning = prompts.BatchedConditioningSchedules(self.prompt, self.steps, self.clip_skip)
+        
+        actual_steps = int(self.steps * self.strength) + 1
+        conditioning = prompts.BatchedConditioningSchedules(self.prompt, actual_steps, self.clip_skip)
         initial_networks = conditioning.get_initial_networks() if self.network_mode == "Static" else ({},{})
         all_networks, allowed_networks = conditioning.get_all_networks()
 
