@@ -37,6 +37,32 @@ block_4_keys_xl = {
     "UP3": ["output_blocks.8.", "out."]
 }
 
+block_9_labels = ["IN0","IN1", "IN2", "IN3", "IN4", "IN5", "IN6", "IN7", "IN8",
+                  "M0",
+                  "OUT0","OUT1", "OUT2", "OUT3", "OUT4", "OUT5", "OUT6", "OUT7", "OUT8"]
+
+block_9_keys_xl = {
+    "IN0": ["label_emb.", "time_embed.", "input_blocks.0."],
+    "IN1": ["input_blocks.1."],
+    "IN2": ["input_blocks.2."],
+    "IN3": ["input_blocks.3."],
+    "IN4": ["input_blocks.4."],
+    "IN5": ["input_blocks.5."],
+    "IN6": ["input_blocks.6."],
+    "IN7": ["input_blocks.7."],
+    "IN8": ["input_blocks.8."],
+    "M0": ["middle_block."],
+    "OUT0": ["output_blocks.0."],
+    "OUT1": ["output_blocks.1."], 
+    "OUT2": ["output_blocks.2."],
+    "OUT3": ["output_blocks.3."],
+    "OUT4": ["output_blocks.4."],
+    "OUT5": ["output_blocks.5."],
+    "OUT6": ["output_blocks.6."],
+    "OUT7": ["output_blocks.7."],
+    "OUT8": ["output_blocks.8.", "out."],
+}
+
 block_12_labels = [
     "IN00","IN01","IN02","IN03","IN04","IN05","IN06","IN07","IN08","IN09","IN10","IN11",
     "M00",
@@ -303,7 +329,13 @@ def get_key_model(key):
 def get_key_block_weight(key, weights, is_xl):
     labels = None
     prefix = None
-    if len(weights) == 9:
+    if len(weights) == 19:
+        labels = block_9_labels
+        if is_xl:
+            prefix = block_9_keys_xl
+        else:
+            raise Exception("9 Block weighting is not supported for SDv1")
+    elif len(weights) == 9:
         labels = block_4_labels
         if is_xl:
             prefix = block_4_keys_xl
