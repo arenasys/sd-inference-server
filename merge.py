@@ -86,6 +86,34 @@ block_12_keys = {
     "OUT11": ["output_blocks.11.", "out."],
 }
 
+block_12_keys_xl = {
+    "IN00": ["label_emb.", "time_embed.", "input_blocks.0.", "input_blocks.1.", "input_blocks.2.", "input_blocks.3.", "input_blocks.4.", "input_blocks.5.", "input_blocks.6.", "input_blocks.7.0."],
+    "IN01": ["input_blocks.7.1.norm.", "input_blocks.7.1.proj_in.", "input_blocks.7.1.proj_out.", "input_blocks.7.1.transformer_blocks.0.", "input_blocks.7.1.transformer_blocks.1."],
+    "IN02": ["input_blocks.7.1.transformer_blocks.2.", "input_blocks.7.1.transformer_blocks.3."],
+    "IN03": ["input_blocks.7.1.transformer_blocks.4.", "input_blocks.7.1.transformer_blocks.5."],
+    "IN04": ["input_blocks.7.1.transformer_blocks.6.", "input_blocks.7.1.transformer_blocks.7."],
+    "IN05": ["input_blocks.7.1.transformer_blocks.8.", "input_blocks.7.1.transformer_blocks.9."],
+    "IN06": ["input_blocks.8.0.", "input_blocks.8.1.norm.", "input_blocks.8.1.proj_in.", "input_blocks.8.1.proj_out.", "input_blocks.8.1.transformer_blocks.0."],
+    "IN07": ["input_blocks.8.1.transformer_blocks.1.", "input_blocks.8.1.transformer_blocks.2."],
+    "IN08": ["input_blocks.8.1.transformer_blocks.3.", "input_blocks.8.1.transformer_blocks.4."],
+    "IN09": ["input_blocks.8.1.transformer_blocks.5.", "input_blocks.8.1.transformer_blocks.6."],
+    "IN10": ["input_blocks.8.1.transformer_blocks.7.", "input_blocks.8.1.transformer_blocks.8."],
+    "IN11": ["input_blocks.8.1.transformer_blocks.9.", "middle_block.0."],
+    "M00": ["middle_block.1."],
+    "OUT00": ["middle_block.2.", "output_blocks.0.0."],
+    "OUT01": ["output_blocks.0.1.norm.", "output_blocks.0.1.proj_in.", "output_blocks.0.1.proj_out.", "output_blocks.0.1.transformer_blocks.0.", "output_blocks.0.1.transformer_blocks.1."],
+    "OUT02": ["output_blocks.0.1.transformer_blocks.2.", "output_blocks.0.1.transformer_blocks.3.", "output_blocks.0.1.transformer_blocks.4.", "output_blocks.0.1.transformer_blocks.5."],
+    "OUT03": ["output_blocks.0.1.transformer_blocks.6.", "output_blocks.0.1.transformer_blocks.7.", "output_blocks.0.1.transformer_blocks.8.", "output_blocks.0.1.transformer_blocks.9."],
+    "OUT04": ["output_blocks.1.0.", "output_blocks.1.1.norm.", "output_blocks.1.1.proj_in.", "output_blocks.1.1.proj_out.", "output_blocks.1.1.transformer_blocks.0.", "output_blocks.1.1.transformer_blocks.1."],
+    "OUT05": ["output_blocks.1.1.transformer_blocks.2.", "output_blocks.1.1.transformer_blocks.3.", "output_blocks.1.1.transformer_blocks.4.", "output_blocks.1.1.transformer_blocks.5."],
+    "OUT06": ["output_blocks.1.1.transformer_blocks.6.", "output_blocks.1.1.transformer_blocks.7.", "output_blocks.1.1.transformer_blocks.8.", "output_blocks.1.1.transformer_blocks.9."],
+    "OUT07": ["output_blocks.2.0.", "output_blocks.2.1.norm.", "output_blocks.2.1.proj_in.", "output_blocks.2.1.proj_out.", "output_blocks.2.1.transformer_blocks.0.", "output_blocks.2.1.transformer_blocks.1."],
+    "OUT08": ["output_blocks.2.1.transformer_blocks.2.", "output_blocks.2.1.transformer_blocks.3.", "output_blocks.2.1.transformer_blocks.4."],
+    "OUT09": ["output_blocks.2.1.transformer_blocks.5.", "output_blocks.2.1.transformer_blocks.6.", "output_blocks.2.1.transformer_blocks.7."],
+    "OUT10": ["output_blocks.2.1.transformer_blocks.8.", "output_blocks.2.1.transformer_blocks.9.", "output_blocks.2.2.", "output_blocks.3."],
+    "OUT11": ["output_blocks.4.", "output_blocks.5.", "output_blocks.6.", "output_blocks.7.", "output_blocks.8.", "out."]
+}
+
 def base64_encode(obj):
     return base64.b64encode(str(obj).encode('utf-8')).decode('utf-8')
 
@@ -343,9 +371,10 @@ def get_key_block_weight(key, weights, is_xl):
             prefix = block_4_keys
     else:
         labels = block_12_labels
-        prefix = block_12_keys
         if is_xl:
-            raise Exception("12 Block weighting is not supported for SDXL")
+            prefix = block_12_keys_xl
+        else:
+            prefix = block_12_keys
 
     key = key.replace("model.diffusion_model.", "")
 
