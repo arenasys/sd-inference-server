@@ -800,13 +800,10 @@ class GenerationParameters():
             dtype = self.unet.dtype
 
             cn_annotators = [o["annotator"] for o in self.cn_opts]
-            cn_scales = [o["scale"] for o in self.cn_opts]
-            cn_args = [o["args"] for o in self.cn_opts]
-            cn_guess = [o["guess"] for o in self.cn_opts]
             cn_annotator_models = [self.storage.get_controlnet_annotator(a, device, dtype, self.on_download) for a in cn_annotators]
             cn_images = upscalers.upscale(self.cn_image, transforms.InterpolationMode.LANCZOS, self.width, self.height)
 
-            cn_cond, cn_outputs = controlnet.preprocess_control(cn_images, cn_annotators, cn_annotator_models, cn_args, cn_scales, cn_guess)
+            cn_cond, cn_outputs = controlnet.preprocess_control(cn_images, cn_annotator_models, self.cn_opts)
             if self.keep_artifacts:
                 self.on_artifact("Control", [cn_outputs]*batch_size)
             self.unet.set_controlnet_conditioning(cn_cond, device)
@@ -956,7 +953,7 @@ class GenerationParameters():
                 self.unet = controlnet.ControlledUNET(self.unet, self.cn)
                 denoiser.set_unet(self.unet)
             cn_images = upscalers.upscale(self.cn_image, transforms.InterpolationMode.LANCZOS, width, height)
-            cn_cond, cn_outputs = controlnet.preprocess_control(cn_images, cn_annotators, cn_annotator_models, cn_args, cn_scales, cn_guess)
+            cn_cond, cn_outputs = controlnet.preprocess_control(cn_images, cn_annotator_models, self.cn_opts)
             self.unet.set_controlnet_conditioning(cn_cond, device)
             if self.keep_artifacts:
                 self.on_artifact("Control HR", [cn_outputs]*batch_size)
@@ -1119,13 +1116,10 @@ class GenerationParameters():
             dtype = self.unet.dtype
 
             cn_annotators = [o["annotator"] for o in self.cn_opts]
-            cn_scales = [o["scale"] for o in self.cn_opts]
-            cn_args = [o["args"] for o in self.cn_opts]
-            cn_guess = [o["guess"] for o in self.cn_opts]
             cn_annotator_models = [self.storage.get_controlnet_annotator(a, device, dtype, self.on_download) for a in cn_annotators]
             cn_images = upscalers.upscale(self.cn_image, transforms.InterpolationMode.LANCZOS, width, height)
 
-            cn_cond, cn_outputs = controlnet.preprocess_control(cn_images, cn_annotators, cn_annotator_models, cn_args, cn_scales, cn_guess, masks=masks)
+            cn_cond, cn_outputs = controlnet.preprocess_control(cn_images, cn_annotator_models, self.cn_opts, masks=masks)
 
             if self.keep_artifacts:
                 self.on_artifact("Control", [cn_outputs]*batch_size)
