@@ -26,7 +26,8 @@ CONTROLNET_MODELS = {
     "Normal": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11p_sd15_normalbae.pth",
     "Scribble": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11p_sd15_scribble.pth",
     "Segmentation": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11p_sd15_seg.pth",
-    "QR": "https://huggingface.co/monster-labs/control_v1p_sd15_qrcode_monster/resolve/main/v2/control_v1p_sd15_qrcode_monster_v2.safetensors"
+    "QR": "https://huggingface.co/monster-labs/control_v1p_sd15_qrcode_monster/resolve/main/v2/control_v1p_sd15_qrcode_monster_v2.safetensors",
+    "Anyline": "https://huggingface.co/TheMistoAI/MistoLine/resolve/main/mistoLine_fp16.safetensors"
 }
 
 def cv2_to_pil(img):
@@ -113,10 +114,14 @@ class ControlledUNET:
         self.controlnet_cond = [(s,guess,cond.to(device, self.dtype)) for s,guess,cond in conditioning]
 
     def __call__(self, latents, timestep, encoder_hidden_states, **kwargs):
+        unet_type = self.unet.model_type
         down_samples, mid_sample = None, None
         for i in range(len(self.controlnets)):
-            cn_scale, cn_guess, cn_cond = self.controlnet_cond[i]
+            cn_type = self.controlnets[i].model_type
+            if (unet_type, cn_type) not in [("SDv1", "CN-v1"), ("SDXL-Base", "CN-XL")]:
+                raise RuntimeError(f"{cn_type} is not compatible with {unet_type}")
 
+            cn_scale, cn_guess, cn_cond = self.controlnet_cond[i]
             down, mid = self.controlnets[i](
                 latents, timestep,
                 encoder_hidden_states=encoder_hidden_states,
@@ -124,6 +129,7 @@ class ControlledUNET:
                 conditioning_scale=cn_scale,
                 return_dict=False,
                 guess_mode=cn_guess,
+                added_cond_kwargs = kwargs["added_cond_kwargs"]
             )
             if down_samples == None or mid_sample == None:
                 down_samples, mid_sample = down, mid

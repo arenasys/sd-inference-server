@@ -8,7 +8,7 @@ from detailer import ADetailer
 from transformers import CLIPTextConfig, CLIPTokenizer
 from clip import CustomCLIP, CustomSDXLCLIP
 from diffusers import AutoencoderKL, UNet2DConditionModel
-from diffusers.models.vae import DiagonalGaussianDistribution
+from diffusers.models.autoencoders.vae import DiagonalGaussianDistribution
 from diffusers.models.controlnet import ControlNetModel
 
 import accelerate
@@ -410,7 +410,10 @@ class ControlNet(ControlNetModel):
         utils.cast_state_dict(state_dict, dtype)
         
         with utils.DisableInitialization():
-            cn = ControlNet("CN-v1", dtype)
+            typ = "CN-v1"
+            if name == "Anyline":
+                typ = "CN-XL"
+            cn = ControlNet(typ, dtype)
             missing, _ = cn.load_state_dict(state_dict, strict=False)
         if missing:
             raise ValueError(f"missing keys in ControlNet ({name}): " + ", ".join(missing))
@@ -421,6 +424,24 @@ class ControlNet(ControlNetModel):
         if model_type == "CN-v1":
             config = dict(
                 cross_attention_dim=768
+            )
+        elif model_type == "CN-XL":
+            config = dict(
+                cross_attention_dim=2048,
+                addition_embed_type="text_time",
+                addition_embed_type_num_heads=64,
+                addition_time_embed_dim=256,
+                attention_head_dim=[5,10,20],
+                block_out_channels=[320,640,1280],
+                down_block_types=[
+                    "DownBlock2D",
+                    "CrossAttnDownBlock2D",
+                    "CrossAttnDownBlock2D"
+                ],
+                mid_block_type="UNetMidBlock2DCrossAttn",
+                projection_class_embeddings_input_dim=2816,
+                transformer_layers_per_block=[1,2,10],
+                use_linear_projection=True
             )
         else:
             raise ValueError(f"unknown type: {model_type}")

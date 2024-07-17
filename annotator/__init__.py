@@ -9,6 +9,7 @@ import annotator.midas
 import annotator.openpose
 import annotator.mlsd
 import annotator.normalbae
+import annotator.anyline
 
 annotators = {
     "Softedge": annotator.hed.HEDdetector,
@@ -18,7 +19,8 @@ annotators = {
     "Pose": annotator.openpose.OpenposeDetector,
     "M-LSD": annotator.mlsd.MLSDdetector,
     "Scribble": annotator.hed.HEDdetectorScribble,
-    "Normal": annotator.normalbae.NormalBaeDetector
+    "Normal": annotator.normalbae.NormalBaeDetector,
+    "Anyline": annotator.anyline.AnylineDetector
 }
 
 def make_noise_disk(H, W, C, F):

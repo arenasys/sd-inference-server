@@ -95,8 +95,9 @@ def CN_convert(state_dict):
             if state_dict[kk].dtype in {torch.float32, torch.float64, torch.bfloat16}:
                 state_dict[kk] = state_dict[kk].to(torch.float16)
         else:
-            print(k)
-            del state_dict[k]
+            pass
+            #print(k)
+            #del state_dict[k]
     
     return state_dict
 
