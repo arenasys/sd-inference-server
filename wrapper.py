@@ -1285,7 +1285,7 @@ class GenerationParameters():
                 for j in range(len(tile_latents[i])):
                     if tile_strength:
                         cond, _, _ = controlnet.annotate(tile_images[i][j], None, None, None)
-                        self.unet.set_controlnet_conditioning([(tile_strength,tile_guess,cond)], device)
+                        self.unet.set_controlnet_conditioning([(tile_strength,tile_guess,1.0,cond)], device)
                     tile_latents[i][j] = inference.img2img(tile_latents[i][j], denoiser, sampler, noise, self.steps, False, self.strength, self.on_step)
 
         self.set_status("Decoding")
