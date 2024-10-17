@@ -101,6 +101,10 @@ def preprocess_control(images, models, opts, masks=[]):
     return conditioning, outputs
 
 def get_controlnet(name, folder, callback):
+    for override in [name.lower() + ".safetensors", name.lower() + ".pth"]:
+        if os.path.exists(os.path.join(folder, override)):
+            return override, True
+
     url = CONTROLNET_MODELS[name]
     name = url.rsplit("/",1)[-1]
     file = os.path.join(folder, name)
