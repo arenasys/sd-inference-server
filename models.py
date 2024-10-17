@@ -411,7 +411,7 @@ class ControlNet(ControlNetModel):
         
         with utils.DisableInitialization():
             typ = "CN-v1"
-            if name == "Anyline":
+            if name == "Anyline" or name == "Tile":
                 typ = "CN-XL"
             cn = ControlNet(typ, dtype)
             missing, _ = cn.load_state_dict(state_dict, strict=False)
