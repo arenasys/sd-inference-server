@@ -325,7 +325,7 @@ class ModelStorage():
             for name, file in standalone[comp].items():
                 self.files[comp][name] = file
         
-        for file in self.get_models("SR", ["*.pth"]):
+        for file in self.get_models("SR", ["*.pth", "*.pt", "*.safetensors"]):
             name = self.get_name(file)
             self.files["SR"][name] = file
 
