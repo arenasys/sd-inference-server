@@ -574,6 +574,12 @@ class GenerationParameters():
                 batch_size = max(batch_size, len(i))
         return batch_size
     
+    def get_sampler(self, sampler_name, denoiser, eta, zsnr_mode):
+        sampler = SAMPLER_CLASSES[sampler_name](denoiser, eta)
+        if zsnr_mode == "Enabled" and issubclass(type(sampler), samplers_k.KSampler):
+            sampler.scheduler.rescale_to_znsr()
+        return sampler
+    
     def get_metadata(self, mode, width, height, batch_size, prompts=None, seeds=None, subseeds=None):
         metadata = []
 
@@ -844,7 +850,7 @@ class GenerationParameters():
         self.set_status("Preparing")
         denoiser = guidance.GuidedDenoiser(self.unet, device, conditioning, self.scale, self.cfg_rescale or 0.0, self.prediction_type)
         noise = utils.NoiseSchedule(seeds, subseeds, self.width // 8, self.height // 8, device, self.unet.dtype)
-        sampler = SAMPLER_CLASSES[self.sampler](denoiser, self.eta)
+        sampler = self.get_sampler(self.sampler, denoiser, self.eta, self.zsnr_mode)
 
         if self.unet.inpainting: #SDv1-Inpainting, SDv2-Inpainting
             self.need_models(unet=False, vae=True, clip=False)
@@ -885,7 +891,7 @@ class GenerationParameters():
         width = int(self.width * self.hr_factor)
         height = int(self.height * self.hr_factor)
 
-        sampler = SAMPLER_CLASSES[self.hr_sampler](denoiser, self.hr_eta)
+        sampler = self.get_sampler(self.hr_sampler, denoiser, self.hr_eta, self.hr_zsnr_mode)
         noise = utils.NoiseSchedule(seeds, subseeds, width // 8, height // 8, device, self.unet.dtype)
 
         self.need_models(unet=False, vae=False, clip=True)
@@ -1015,7 +1021,7 @@ class GenerationParameters():
         
         denoiser = guidance.GuidedDenoiser(self.unet, device, conditioning, self.scale, self.cfg_rescale or 0.0, self.prediction_type)
         noise = utils.NoiseSchedule(seeds, subseeds, width // 8, height // 8, device, self.unet.dtype)
-        sampler = SAMPLER_CLASSES[self.sampler](denoiser, self.eta)
+        sampler = self.get_sampler(self.sampler, denoiser, self.eta, self.zsnr_mode)
 
         detailer = self.storage.get_detailer(name, device)
         
@@ -1149,7 +1155,7 @@ class GenerationParameters():
 
         denoiser = guidance.GuidedDenoiser(self.unet, device, conditioning, self.scale, self.cfg_rescale or 0.0, self.prediction_type)
         noise = utils.NoiseSchedule(seeds, subseeds, width // 8, height // 8, device, self.unet.dtype)
-        sampler = SAMPLER_CLASSES[self.sampler](denoiser, self.eta)
+        sampler = self.get_sampler(self.sampler, denoiser, self.eta, self.zsnr_mode)
 
         self.set_status("Upscaling")
         self.need_models(unet=False, vae=True, clip=False)
@@ -1256,7 +1262,7 @@ class GenerationParameters():
         conditioning.encode(self.clip, [])
 
         denoiser = guidance.GuidedDenoiser(self.unet, device, conditioning, self.scale, self.cfg_rescale or 0.0, self.prediction_type)
-        sampler = SAMPLER_CLASSES[self.sampler](denoiser, self.eta)
+        sampler = self.get_sampler(self.sampler, denoiser, self.eta, self.zsnr_mode)
 
         self.set_status("Upscaling")
         self.need_models(unet=False, vae=True, clip=False)

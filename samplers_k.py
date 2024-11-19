@@ -28,6 +28,30 @@ class KScheduler():
         sigmas = ((1 - alphas) / alphas).to(torch.float32) ** 0.5
         log_sigmas = sigmas.log()
         return sigmas, log_sigmas
+    
+    def rescale_to_znsr(self):
+        dtype = self.dtype
+        device = self.sigmas.device
+
+        sigmas, _ = self.get_sigmas()
+
+        alphas_cumprod = 1 / ((sigmas * sigmas) + 1)
+        alphas_bar_sqrt = alphas_cumprod.sqrt()
+
+        alphas_bar_sqrt_0 = alphas_bar_sqrt[0].clone()
+        alphas_bar_sqrt_T = alphas_bar_sqrt[-1].clone()
+
+        alphas_bar_sqrt -= (alphas_bar_sqrt_T)
+
+        alphas_bar_sqrt *= alphas_bar_sqrt_0 / (alphas_bar_sqrt_0 - alphas_bar_sqrt_T)
+
+        alphas_bar = alphas_bar_sqrt**2
+        alphas_bar[-1] = 4.8973451890853435e-08
+        
+        self.sigmas = ((1 - alphas_bar) / alphas_bar) ** 0.5
+        self.log_sigmas = self.sigmas.log()
+
+        self.to(device, dtype)
 
     def to(self, device, dtype):
         self.dtype = dtype
