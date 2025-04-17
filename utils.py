@@ -1,4 +1,8 @@
 import PIL
+import PIL.Image
+import PIL.ImageFilter
+import PIL.ImageChops
+
 import torch
 import torchvision.transforms as transforms
 import requests
@@ -446,7 +450,7 @@ class SafeUnpickler:
 
 def load_pickle(file, map_location="cpu"):
     try:
-        return torch.load(file, map_location=map_location, pickle_module=SafeUnpickler)
+        return torch.load(file, map_location=map_location, pickle_module=SafeUnpickler, weights_only=False)
     except:
         raise RuntimeError(f"Failed to unpickle file, {file}\nIgnored types, {str(SafeUnpickler.ignored)}")
 
