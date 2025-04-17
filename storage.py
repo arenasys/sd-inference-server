@@ -49,7 +49,7 @@ class ModelStorage():
         self.set_folder(path)
 
         self.classes = {"UNET": models.UNET, "CLIP": models.CLIP, "VAE": models.VAE, "SR": upscalers.SR, "LoRA": models.LoRA, "CN": models.ControlNet, "AN": torch.nn.Module, "Detailer": models.Detailer}
-        self.vram_limits = {"UNET": 1, "CLIP": 1, "VAE": 1, "SR": 1}
+        self.vram_limits = {"UNET": 0, "CLIP": 0, "VAE": 0, "SR": 0}
         self.ram_limits = {"UNET": cache, "CLIP": cache, "VAE": cache, "SR": cache, "LoRA": cache, "CN": cache, "AN": cache, "Detailer": cache}
 
         self.files = {k:{} for k in self.classes}
@@ -253,10 +253,10 @@ class ModelStorage():
         if comp in {"VAE"}:
             dtype = self.vae_dtype
 
-        model = model.to(device, dtype)
-
         if comp in self.vram_limits:
             self.enforce_limit(comp, name, device)
+
+        model = model.to(device, dtype)
 
         return model
 
