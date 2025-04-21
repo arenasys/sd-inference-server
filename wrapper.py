@@ -18,6 +18,11 @@ try:
 except:
     pass
 
+try:
+    os.environ["TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD"]="1"
+except:
+    pass
+
 import prompts
 import samplers_k
 import samplers_ddpm
