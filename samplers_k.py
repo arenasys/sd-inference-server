@@ -70,6 +70,12 @@ class KScheduler():
         t = (1 - w) * low_idx + w * high_idx
         return t.view(sigma.shape)
 
+    def timestep_to_sigma(self, t):
+        t = t.float()
+        low_idx, high_idx, w = t.floor().long(), t.ceil().long(), t.frac()
+        log_sigma = (1 - w) * self.log_sigmas[low_idx] + w * self.log_sigmas[high_idx]
+        return log_sigma.exp()
+
 class KSampler():
     def __init__(self, model, scheduler, eta):
         self.model = model
@@ -430,6 +436,17 @@ class SchedulerExponential(KScheduler):
     def get_schedule(self, steps):
         sigmas = get_sigmas_exponential(n=steps, sigma_min=MN, sigma_max=MX, device=self.sigmas.device).to(self.dtype)
         return sigmas
+    
+class SchedulerUniform(KScheduler):
+    def get_schedule(self, steps):
+        start = self.sigma_to_timestep(torch.tensor(MX))
+        end = self.sigma_to_timestep(torch.tensor(MN))
+        sigs = [
+            self.timestep_to_sigma(ts)
+            for ts in torch.linspace(start, end, steps+1)[:-1]
+        ]
+        sigs += [0.0]
+        return torch.FloatTensor(sigs).to(self.sigmas.device, self.dtype)
 
 class Euler_Karras(Euler):
     def __init__(self, model, eta=1, scheduler=None):
@@ -439,6 +456,11 @@ class Euler_Karras(Euler):
 class Euler_Exponential(Euler):
     def __init__(self, model, eta=1, scheduler=None):
         scheduler = scheduler or SchedulerExponential().to(model.device, model.dtype)
+        super().__init__(model, eta, scheduler)
+
+class Euler_Uniform(Euler):
+    def __init__(self, model, eta=1, scheduler=None):
+        scheduler = scheduler or SchedulerUniform().to(model.device, model.dtype)
         super().__init__(model, eta, scheduler)
 
 class Euler_a_Karras(Euler_a):
@@ -451,6 +473,10 @@ class Euler_a_Exponential(Euler_a):
         scheduler = scheduler or SchedulerExponential().to(model.device, model.dtype)
         super().__init__(model, eta, scheduler)
 
+class Euler_a_Uniform(Euler_a):
+    def __init__(self, model, eta=1, scheduler=None):
+        scheduler = scheduler or SchedulerUniform().to(model.device, model.dtype)
+        super().__init__(model, eta, scheduler)
 class DPM_2M_Karras(DPM_2M):
     def __init__(self, model, eta=1, scheduler=None):
         scheduler = scheduler or SchedulerKarras().to(model.device, model.dtype)
@@ -459,6 +485,11 @@ class DPM_2M_Karras(DPM_2M):
 class DPM_2M_Exponential(DPM_2M):
     def __init__(self, model, eta=1, scheduler=None):
         scheduler = scheduler or SchedulerExponential().to(model.device, model.dtype)
+        super().__init__(model, eta, scheduler)
+
+class DPM_2M_Uniform(DPM_2M):
+    def __init__(self, model, eta=1, scheduler=None):
+        scheduler = scheduler or SchedulerUniform().to(model.device, model.dtype)
         super().__init__(model, eta, scheduler)
 
 class DPM_2S_a_Karras(DPM_2S_a):
@@ -471,6 +502,11 @@ class DPM_2S_a_Exponential(DPM_2S_a):
         scheduler = scheduler or SchedulerExponential().to(model.device, model.dtype)
         super().__init__(model, eta, scheduler)
 
+class DPM_2S_a_Uniform(DPM_2M):
+    def __init__(self, model, eta=1, scheduler=None):
+        scheduler = scheduler or SchedulerUniform().to(model.device, model.dtype)
+        super().__init__(model, eta, scheduler)
+
 class DPM_SDE_Karras(DPM_SDE):
     def __init__(self, model, eta=1, scheduler=None):
         scheduler = scheduler or SchedulerKarras().to(model.device, model.dtype)
@@ -481,6 +517,10 @@ class DPM_SDE_Exponential(DPM_SDE):
         scheduler = scheduler or SchedulerExponential().to(model.device, model.dtype)
         super().__init__(model, eta, scheduler)
 
+class DPM_SDE_Uniform(DPM_2M):
+    def __init__(self, model, eta=1, scheduler=None):
+        scheduler = scheduler or SchedulerUniform().to(model.device, model.dtype)
+        super().__init__(model, eta, scheduler)
 class DPM_2M_SDE_Karras(DPM_2M_SDE):
     def __init__(self, model, eta=1, scheduler=None):
         scheduler = scheduler or SchedulerKarras().to(model.device, model.dtype)
@@ -491,6 +531,10 @@ class DPM_2M_SDE_Exponential(DPM_2M_SDE):
         scheduler = scheduler or SchedulerExponential().to(model.device, model.dtype)
         super().__init__(model, eta, scheduler)
 
+class DPM_2M_SDE_Uniform(DPM_2M):
+    def __init__(self, model, eta=1, scheduler=None):
+        scheduler = scheduler or SchedulerUniform().to(model.device, model.dtype)
+        super().__init__(model, eta, scheduler)
 class DPM_3M_SDE_Karras(DPM_3M_SDE):
     def __init__(self, model, eta=1, scheduler=None):
         scheduler = scheduler or SchedulerKarras().to(model.device, model.dtype)
@@ -501,6 +545,11 @@ class DPM_3M_SDE_Exponential(DPM_3M_SDE):
         scheduler = scheduler or SchedulerExponential().to(model.device, model.dtype)
         super().__init__(model, eta, scheduler)
 
+class DPM_3M_SDE_Uniform(DPM_2M):
+    def __init__(self, model, eta=1, scheduler=None):
+        scheduler = scheduler or SchedulerUniform().to(model.device, model.dtype)
+        super().__init__(model, eta, scheduler)
+
 class LCM_Karras(LCM):
     def __init__(self, model, eta=1, scheduler=None):
         scheduler = scheduler or SchedulerKarras().to(model.device, model.dtype)
@@ -509,4 +558,9 @@ class LCM_Karras(LCM):
 class LCM_Exponential(LCM):
     def __init__(self, model, eta=1, scheduler=None):
         scheduler = scheduler or SchedulerExponential().to(model.device, model.dtype)
+        super().__init__(model, eta, scheduler)
+
+class LCM_Uniform(LCM):
+    def __init__(self, model, eta=1, scheduler=None):
+        scheduler = scheduler or SchedulerUniform().to(model.device, model.dtype)
         super().__init__(model, eta, scheduler)

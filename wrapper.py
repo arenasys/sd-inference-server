@@ -80,7 +80,16 @@ SAMPLER_CLASSES = {
     "DPM++ SDE Exponential": samplers_k.DPM_SDE_Exponential,
     "DPM++ 2M SDE Exponential": samplers_k.DPM_2M_SDE_Exponential,
     "DPM++ 3M SDE Exponential": samplers_k.DPM_3M_SDE_Exponential,
-    "LCM Exponential": samplers_k.LCM_Exponential
+    "LCM Exponential": samplers_k.LCM_Exponential,
+
+    "Euler Uniform": samplers_k.Euler_Uniform,
+    "Euler a Uniform": samplers_k.Euler_a_Uniform,
+    "DPM++ 2M Uniform": samplers_k.DPM_2M_Uniform,
+    "DPM++ 2S a Uniform": samplers_k.DPM_2S_a_Uniform,
+    "DPM++ SDE Uniform": samplers_k.DPM_SDE_Uniform,
+    "DPM++ 2M SDE Uniform": samplers_k.DPM_2M_SDE_Uniform,
+    "DPM++ 3M SDE Uniform": samplers_k.DPM_3M_SDE_Uniform,
+    "LCM Uniform": samplers_k.LCM_Uniform
 }
 
 UPSCALERS_LATENT = {
