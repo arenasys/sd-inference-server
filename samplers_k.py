@@ -434,6 +434,8 @@ class Euler_a_CFG_PP(KSampler):
         x = denoised + d * sigma_down
         if sigmas[i + 1] > 0:
             x = x + noise * sigma_up
+        
+        return x
 class LCM(KSampler):
     def __init__(self, model, eta=1.0, scheduler=None):
         super().__init__(model, scheduler, eta)
