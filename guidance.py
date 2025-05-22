@@ -115,12 +115,15 @@ class GuidedDenoiser():
             neg = (neg*neg_weights).sum(dim=0, keepdims=True) / torch.sum(neg_weights)
             pos = pos * masks + (neg * (1 - masks))
 
-            # Apply CFG
-            cfg = neg + ((pos - neg) * (pos_weights * self.scale)).sum(dim=0, keepdims=True)
-            
+            scale = self.scale
+
             # CFG++
             if self.cfg_pp:
                 composed_uncond_pred += [neg]
+                scale /= 10
+
+            # Apply CFG
+            cfg = neg + ((pos - neg) * (pos_weights * scale)).sum(dim=0, keepdims=True)
 
             # Rescale CFG
             if self.cfg_rescale:
