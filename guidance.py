@@ -18,6 +18,9 @@ class GuidedDenoiser():
         self.cfg_rescale = cfg_rescale
         self.override_prediction_type = prediction_type
 
+        self.cfg_pp = False
+        self.uncond_pred = None
+
         self.predictions = None
 
         self.inpainting_input = None
@@ -54,6 +57,9 @@ class GuidedDenoiser():
     
     def set_cfg_rescale(self, cfg_rescale):
         self.cfg_rescale = cfg_rescale
+    
+    def set_cfg_pp(self, cfg_pp):
+        self.cfg_pp = cfg_pp
 
     def set_prediction_type(self, prediction_type):
         self.override_prediction_type = prediction_type
@@ -98,6 +104,7 @@ class GuidedDenoiser():
     
     def compose_predictions(self, pred):
         composed_pred = []
+        composed_uncond_pred = [] if self.cfg_pp else None
         i = 0
         for (masks, pos_weights), neg_weights in self.compositions:
             pos_len, neg_len = len(pos_weights), len(neg_weights)
@@ -110,6 +117,10 @@ class GuidedDenoiser():
 
             # Apply CFG
             cfg = neg + ((pos - neg) * (pos_weights * self.scale)).sum(dim=0, keepdims=True)
+            
+            # CFG++
+            if self.cfg_pp:
+                composed_uncond_pred += [neg]
 
             # Rescale CFG
             if self.cfg_rescale:
@@ -119,6 +130,10 @@ class GuidedDenoiser():
             
             composed_pred += [cfg]
             i += pos_len + neg_len
+        
+        if self.cfg_pp:
+            self.uncond_pred = torch.cat(composed_uncond_pred)
+        
         return torch.cat(composed_pred)
 
     def predict_noise(self, latents, timestep, alpha):

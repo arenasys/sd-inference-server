@@ -417,6 +417,23 @@ class Euler_a(KSampler):
 
         return x
     
+class Euler_a_CFG_PP(KSampler):
+    def __init__(self, model, eta=1.0, scheduler=None):
+        super().__init__(model, scheduler, eta)
+        self.eta = 1.0
+        self.model.set_cfg_pp(True)
+
+    def step(self, x, sigmas, i, noise):
+        """Ancestral sampling with Euler method steps."""
+
+        denoised = self.predict(x, sigmas[i])
+        sigma_down, sigma_up = get_ancestral_step(sigmas[i], sigmas[i + 1], eta=self.eta)
+        d = to_d(x, sigmas[i], self.model.uncond_pred)
+        # Euler method
+        noise = noise()
+        x = denoised + d * sigma_down
+        if sigmas[i + 1] > 0:
+            x = x + noise * sigma_up
 class LCM(KSampler):
     def __init__(self, model, eta=1.0, scheduler=None):
         super().__init__(model, scheduler, eta)
@@ -477,6 +494,22 @@ class Euler_a_Uniform(Euler_a):
     def __init__(self, model, eta=1, scheduler=None):
         scheduler = scheduler or SchedulerUniform().to(model.device, model.dtype)
         super().__init__(model, eta, scheduler)
+
+class Euler_a_CFG_PP_Karras(Euler_a_CFG_PP):
+    def __init__(self, model, eta=1, scheduler=None):
+        scheduler = scheduler or SchedulerKarras().to(model.device, model.dtype)
+        super().__init__(model, eta, scheduler)
+
+class Euler_a_CFG_PP_Exponential(Euler_a_CFG_PP):
+    def __init__(self, model, eta=1, scheduler=None):
+        scheduler = scheduler or SchedulerExponential().to(model.device, model.dtype)
+        super().__init__(model, eta, scheduler)
+
+class Euler_a_CFG_PP_Uniform(Euler_a_CFG_PP):
+    def __init__(self, model, eta=1, scheduler=None):
+        scheduler = scheduler or SchedulerUniform().to(model.device, model.dtype)
+        super().__init__(model, eta, scheduler)
+
 class DPM_2M_Karras(DPM_2M):
     def __init__(self, model, eta=1, scheduler=None):
         scheduler = scheduler or SchedulerKarras().to(model.device, model.dtype)

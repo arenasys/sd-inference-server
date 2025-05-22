@@ -89,7 +89,12 @@ SAMPLER_CLASSES = {
     "DPM++ SDE Uniform": samplers_k.DPM_SDE_Uniform,
     "DPM++ 2M SDE Uniform": samplers_k.DPM_2M_SDE_Uniform,
     "DPM++ 3M SDE Uniform": samplers_k.DPM_3M_SDE_Uniform,
-    "LCM Uniform": samplers_k.LCM_Uniform
+    "LCM Uniform": samplers_k.LCM_Uniform,
+
+    "Euler a CFG++": samplers_k.Euler_a_CFG_PP,
+    "Euler a CFG++ Karras": samplers_k.Euler_a_CFG_PP_Karras,
+    "Euler a CFG++ Exponential": samplers_k.Euler_a_CFG_PP_Exponential,
+    "Euler a CFG++ Uniform": samplers_k.Euler_a_CFG_PP_Uniform,
 }
 
 UPSCALERS_LATENT = {
@@ -589,6 +594,7 @@ class GenerationParameters():
         return batch_size
     
     def get_sampler(self, sampler_name, denoiser, eta, zsnr_mode):
+        denoiser.set_cfg_pp(False)
         sampler = SAMPLER_CLASSES[sampler_name](denoiser, eta)
         if zsnr_mode == "Enabled" and issubclass(type(sampler), samplers_k.KSampler):
             sampler.scheduler.rescale_to_znsr()
