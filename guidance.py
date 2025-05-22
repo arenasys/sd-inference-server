@@ -120,7 +120,6 @@ class GuidedDenoiser():
             # CFG++
             if self.cfg_pp:
                 composed_uncond_pred += [neg]
-                scale /= 10
 
             # Apply CFG
             cfg = neg + ((pos - neg) * (pos_weights * scale)).sum(dim=0, keepdims=True)
