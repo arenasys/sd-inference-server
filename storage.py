@@ -62,7 +62,7 @@ class ModelStorage():
         self.embeddings_files = {}
         self.embeddings = {}
 
-        self.model_types = {}
+        self.model_metadata = {}
 
         self.find_all()
 
@@ -263,44 +263,71 @@ class ModelStorage():
     def get_name(self, file):
         return os.path.relpath(file, self.path)
     
-    def get_lycoris_type(self, file):
+    def get_lycoris_type(self, metadata, keys):
         algo = "unknown"
         try:
-            if file.endswith(".safetensors"):
-                with safetensors.safe_open(file, framework="pt", device="cpu") as f:
-                    metadata = f.metadata() or {}
-                    module = metadata.get("ss_network_module", "")
-                    args = {}
-                    try:
-                        args = json.loads(metadata.get("ss_network_args", "{}"))
-                    except:
-                        pass
+            module = metadata.get("ss_network_module", "")
+            args = {}
+            try:
+                args = json.loads(metadata.get("ss_network_args", "{}"))
+            except:
+                pass
 
-                    if "algo" in args:
-                        algo = args["algo"]
-                    if "conv_dim" in args and (algo == "lora" or "networks.lora" in module):
-                        algo = "locon"
-                    if algo == "unknown" and "networks.lora" in module:
-                        algo = "lora"
+            if "algo" in args:
+                algo = args["algo"]
+            if "conv_dim" in args and (algo == "lora" or "networks.lora" in module):
+                algo = "locon"
+            if algo == "unknown" and "networks.lora" in module:
+                algo = "lora"
 
-                    if algo == "unknown" or algo == "lora":
-                        keys = f.keys()
-                        suffices = set([f.split(".", 1)[-1].split(".", 1)[0] for f in keys])
+            if algo == "unknown" or algo == "lora":
+                suffices = set([f.split(".", 1)[-1].split(".", 1)[0] for f in keys])
 
-                        for a, ids in MODEL_TYPE_IDENTIFIERS.items():
-                            if any([i in suffices for i in ids]):
-                                algo = a
-                                break
+                for a, ids in MODEL_TYPE_IDENTIFIERS.items():
+                    if any([i in suffices for i in ids]):
+                        algo = a
+                        break
 
-                        if algo == "lora":
-                            for k in keys:
-                                if "conv" in k:
-                                    algo = "locon"
-                                    break
+                if algo == "lora":
+                    for k in keys:
+                        if "conv" in k:
+                            algo = "locon"
+                            break
         except:
             pass
+        return MODEL_TYPE_NAMES.get(algo, None)
 
-        return MODEL_TYPE_NAMES.get(algo, algo)
+    def get_lycoris_tags(self, metadata):
+        tags = []
+        try:
+            if "ss_tag_frequency" in metadata:
+                data = json.loads(metadata["ss_tag_frequency"])
+                for dataset in data.values():
+                    for tag in dataset:
+                        tags.append(tag)
+                        break
+        except:
+            pass
+        return tags
+
+    def get_lycoris_metadata(self, file):
+        metadata = {}
+        base_model = None
+        type = None
+        tags = []
+
+        with safetensors.safe_open(file, framework="pt", device="cpu") as f:
+            metadata = f.metadata() or {}
+            type = self.get_lycoris_type(metadata, f.keys())
+            base_model = metadata.get("ss_sd_model_name", None)
+            tags = self.get_lycoris_tags(metadata)
+
+        return {
+            "base_model": base_model or "Unknown",
+            "type": type or "Unknown",
+            "tags": tags,
+            "full": metadata,
+        }
 
     def find_all(self):
         self.files = {k:{} for k in self.classes}
@@ -356,8 +383,8 @@ class ModelStorage():
         for file in self.get_models("LoRA", ["*.safetensors", "*.pt"]):
             name = self.get_name(file)
             self.files["LoRA"][name] = file
-            if not name in self.model_types:
-                self.model_types[name] = self.get_lycoris_type(file)
+            if not name in self.model_metadata:
+                self.model_metadata[name] = self.get_lycoris_metadata(file)
 
         for file in self.get_models("CN", ["*.safetensors", "*.pth"], False):
             name = self.get_name(file)
