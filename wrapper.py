@@ -1417,7 +1417,7 @@ class GenerationParameters():
         for k in self.storage.files:
             data[k] = list(self.storage.files[k].keys())
 
-        data["model_metadata"] = self.storage.model_metadata
+        data["model_types"] = self.storage.model_types
 
         data["hr_upscaler"] = list(UPSCALERS_LATENT.keys()) + list(UPSCALERS_PIXEL.keys()) + data["SR"]
         data["img2img_upscaler"] = list(UPSCALERS_PIXEL.keys()) + data["SR"]
