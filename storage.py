@@ -317,7 +317,7 @@ class ModelStorage():
         except:
             pass
 
-        return json.dumps(metadata, indent=4, ensure_ascii=False)
+        return metadata
 
     def find_all(self):
         self.files = {k:{} for k in self.classes}
