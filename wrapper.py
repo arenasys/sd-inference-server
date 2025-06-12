@@ -1739,3 +1739,13 @@ class GenerationParameters():
         self.dataset += [(self.image[0], self.prompt[0])]
         if not self.callback({"type": "training_upload", "data": {"index": self.index}}):
             raise AbortError("Aborted")
+        
+    def metadata(self):
+        self.set_status("Inspecting")
+
+        model = self.model
+        metadata = self.storage.get_metadata(self.model)
+
+        if self.callback:
+            if not self.callback({"type": "metadata", "data": {"model": model, "metadata": metadata}}):
+                raise AbortError("Aborted")

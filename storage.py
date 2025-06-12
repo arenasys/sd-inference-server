@@ -325,9 +325,27 @@ class ModelStorage():
         return {
             "base_model": base_model or "Unknown",
             "type": type or "Unknown",
-            "tags": tags,
-            "full": metadata,
+            "tags": tags
         }
+    
+    def get_metadata(self, name):
+        file = None
+        for comp in self.files:
+            if name in self.files[comp]:
+                file = self.files[comp][name]
+                break
+        
+        if not file:
+            raise ValueError(f"unknown model: {name}")
+
+        metadata = {}
+        try:
+            with safetensors.safe_open(file, framework="pt", device="cpu") as f:
+                metadata = f.metadata() or {}
+        except:
+            pass
+
+        return metadata
 
     def find_all(self):
         self.files = {k:{} for k in self.classes}
