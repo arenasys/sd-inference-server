@@ -53,7 +53,7 @@ TYPES = {
     float: ["scale", "eta", "hr_factor", "hr_eta", "hr_scale"],
 }
 
-STATIC = ["storage", "device", "device_names", "callback", "last_models_modified", "last_models_config", "dataset", "public", "temporary", "compiled_modules", "compile_runtime"]
+STATIC = ["storage", "device", "device_names", "callback", "last_models_modified", "last_models_config", "dataset", "public", "temporary", "compiled_modules", "compile_runtime", "compile_futures"]
 
 
 class _FallbackCompiledCallable:
@@ -194,6 +194,7 @@ class GenerationParameters():
             "unet": {"requested": False, "active": False, "status": "disabled"},
             "vae_decode": {"requested": False, "active": False, "status": "disabled"},
         }
+        self.compile_futures = {}
 
     def switch_public(self):
         self.public = True
@@ -511,13 +512,24 @@ class GenerationParameters():
         vae_mode = mode in {"all", "unet+vae", "vae"}
         return vae_mode or bool(self.compile_vae_decode)
 
-    def _compile_with_timeout(self, fn, timeout):
-        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-        future = executor.submit(fn)
+    def _compile_with_timeout(self, fn, timeout, key):
+        if key in self.compile_futures:
+            pending = self.compile_futures[key]
+            future = pending["future"]
+            executor = pending["executor"]
+            if not future.done():
+                raise concurrent.futures.TimeoutError()
+        else:
+            executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            future = executor.submit(fn)
+            self.compile_futures[key] = {"future": future, "executor": executor}
+
         try:
             return future.result(timeout=timeout)
         finally:
-            executor.shutdown(wait=False, cancel_futures=True)
+            if future.done():
+                executor.shutdown(wait=False, cancel_futures=True)
+                self.compile_futures.pop(key, None)
 
     def _compile_module(self, module, key, timeout):
         state = {"requested": True, "active": False, "status": "eager"}
@@ -539,7 +551,7 @@ class GenerationParameters():
             return state
 
         try:
-            compiled = self._compile_with_timeout(lambda: torch.compile(module), timeout)
+            compiled = self._compile_with_timeout(lambda: torch.compile(module), timeout, key)
             compiled_forward = compiled.forward if hasattr(compiled, "forward") else compiled
             state["active"] = True
             state["status"] = "compiled"
@@ -577,7 +589,7 @@ class GenerationParameters():
             return state
 
         try:
-            compiled = self._compile_with_timeout(lambda: torch.compile(eager_decode), timeout)
+            compiled = self._compile_with_timeout(lambda: torch.compile(eager_decode), timeout, key)
             state["active"] = True
             state["status"] = "compiled"
             wrapped = _FallbackCompiledCallable(eager_decode, compiled, state)
@@ -604,6 +616,9 @@ class GenerationParameters():
             "unet": {"requested": bool(compile_unet), "active": False, "status": "disabled"},
             "vae_decode": {"requested": bool(compile_vae_decode), "active": False, "status": "disabled"},
         }
+
+        if self.unet and not isinstance(self.unet, str) and hasattr(self.unet, "_eager_forward") and not compile_unet:
+            self.unet.forward = self.unet._eager_forward
 
         if self.vae and not isinstance(self.vae, str) and hasattr(self.vae, "_eager_decode") and not compile_vae_decode:
             self.vae.decode = self.vae._eager_decode
