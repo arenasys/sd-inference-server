@@ -170,12 +170,12 @@ def do_download(request, folder, id, callback):
         thread.start()
         return
     
-    if 'civitai.com' in url:
-        if not "civitai.com/api/download/models" in url:
+    if 'civitai.com' in url or 'civitai.red' in url:
+        if not "/api/download/models" in url:
             error(callback, "Unsupported URL", id)
             return
-        token = request.get("civitai_token", None) 
-    
+        token = request.get("civitai_token", None)
+
     if 'huggingface' in url:
         url = url.replace("/blob/", "/resolve/")
         token = request.get("hf_token", None)
